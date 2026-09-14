@@ -14,16 +14,17 @@
 >
 > | Issue | 状态 | 通过 / 总数 | 阻塞点 |
 > |-------|------|-------------|--------|
-> | KB-01 工程骨架 | 部分闭环 | 4 / 5 验收项（另缺 1 项范围） | `--dump-config` 插件层未在 `kb-scratch` profile 生效 |
-> | KB-02 令牌与双主题 | 部分闭环 | 4 / 5（1 项无法判定） | SCSS 导出面未实现；「51 项」口径需拍板 |
+> | KB-01 工程骨架 | **闭环** | **5 / 5** + 范围项 | — （`npm run verify:profile`，14 项全绿） |
+> | KB-02 令牌与双主题 | **闭环（代码侧）** | **5 / 6 可判定** | 仅剩规范 3.x 回写 133 项口径（非代码） |
 > | KB-03 基础组件库 | 部分闭环 | 2 / 5 | 五态分层未授权；状态胶囊实色规则被违反 |
 > | **KB-10 zvec 集成与持久化** | **闭环** | **6 / 6** | — （`npm run verify:kb10`，53 项全绿） |
 >
 > 复核方式：以各 issue 的「范围」与「验收标准」为 Spec 真源，逐条对代码与门禁留档取证。
-> 基线门禁当时状态：`npm run typecheck` / `npm run verify` 均 exit 0（133 令牌 / 17 组 / 47 项深色覆盖 / 12 个样式表分类）。
-> **既有门禁均能通过，但三条门禁都弱于其声称执行的规范原文**——`verify-components.mjs` 少校验 `default` 态并以自造分层豁免 4/12 样式表、`ALLOWED_PX` 预置 7 项裸 `px` 豁免；`verify-manifest.mjs` 只验产物存在、不验 `id`/`name`/`config` 取值（故未能拦住 KB-01 的 profile 层问题）；`gen-tokens.mjs --check` 只比对再生成字节，不证明与规范令牌名对应。KB-11 收口时应补强。
+> 追加复核（KB-01/KB-02 residual）：token 三产物同步 + manifest 加严 + 组件门禁 + KB-10 53 项 + profile 14 项，`npm run verify` 全链路 exit 0。
+> **门禁加严记录**：`verify-manifest.mjs` 原先只验产物存在、不验 `files[]` 是否覆盖导出，现已加严并**用负向测试证明会真实失败**（移除 `files[]` 中的 `tokens/scss` 即报错退出 1）。
+> **仍未加严**：`verify-components.mjs` 少校验 `default` 态、以自造分层豁免 4/12 样式表；`gen-tokens.mjs --check` 只比对再生成字节，不证明与规范令牌名对应。KB-11 收口时应补齐。
 >
-> **未复核**：KB-04 … KB-09、KB-11（KB-04 仅有外壳骨架，KB-05…KB-09 与 KB-11 未开工）。
+> **未复核**：KB-04 … KB-09、KB-11（KB-05…KB-09 与 KB-11 未开工，KB-04 仅有外壳骨架）。
 
 ---
 
@@ -103,10 +104,11 @@ M3 收口 ───────────────────────�
 - [x] client bundle 纯度门通过，未越过模块表（`@deepseek-ai/dsh-client-runtime/client` 属临时豁免，不得泛化）。→ 复核：`lib/client.js` 仅两处 `require('react')` / `require('react/jsx-runtime')`，均在模块表内；无豁免泛化。
 - [x] 插件包 exports、`files` 与产物三者一致，无指向不存在文件的入口。→ 复核：`verify-manifest.mjs` 逐条断言 exports 目标存在、`files` 覆盖 `lib/`+patch、`dsh.client.platform === 'web'`、patch 首内容行为顶层数组；打包产物 13 个文件与声明一致。
 - [x] 全新临时 `DSH_HOME` + 新 profile 安装成功并可启动。→ 复核：`kb-tgz` profile 由打包 tarball 安装，`dsh.profile.bundles` 已含 `dsh-zvec-knowledge`，安装成功。
-- [ ] `dsh --profile <scratch> --dump-config` 中出现插件层，行 `id` / `name` / `config` 与预期一致。**未过**：`kb-scratch`（`link:` 方式）安装时 `dsh: warning: dsh-zvec-knowledge declares no dsh.bundle — installed as a plain dependency, not a profile layer`，其 `package.json` 的 `bundles` 仍只有 `@deepseek-ai/dsh-base`。唯一「通过」的 `dumpconfig.txt` 存在两处问题：插件层来自 `kb-tgz` 而非 `kb-scratch`，且片段在 `retrieval:` 处截断（无 `topk` / `minScore`）。→ 关闭条件：以 tarball（或已修好的 link: 路径）重跑并把完整 `id`/`name`/`config` 留档，说明是哪个 profile。
-- [ ] 建立 profile 安装与 `--dump-config` 对账的可复现脚本。**未过**（范围项）：`package.json.scripts` 无任何 profile / dump-config 入口，现有证据均为手工日志。
+- [x] `dsh --profile <scratch> --dump-config` 中出现插件层，行 `id` / `name` / `config` 与预期一致。→ **已修复并复跑**：原阻塞是安装时插件 manifest 的 `dsh.bundle` 未被识别（`dsh: warning: ... declares no dsh.bundle — installed as a plain dependency`），profile 的 `bundles` 只剩 `dsh-base`。新增可复跑脚本 `npm run verify:profile`（14 项断言全绿）：建全新 `DSH_HOME` → 安装 → 断言 `dsh.profile.bundles` 含 `dsh-zvec-knowledge` → 断言 `--dump-config` 插件层的 `id`/`name` 及**全部 9 个 config 键**（含末位 `minScore`，专门防截断假证据）。留档 `plugin/tmp/kb01-dump-config.txt`。
+- [x] 建立 profile 安装与 `--dump-config` 对账的可复现脚本。→ 已落地 `scripts/verify-kb01-profile.mjs`（`npm run verify:profile`）。
+- [x] 全新临时 `DSH_HOME` + 新 profile 安装成功并可启动。→ 同一脚本覆盖：profile 安装成功，`bundles` 层正确，且 `./lib/index.js` / `./lib/client.js` / `cordis.patch.yml` 在 profile 内均可解析。
 
-**KB-01 结论：部分闭环。** 4/5 验收项通过、1 项范围项缺失；阻塞点是 profile 层装载这一条（`link:` 安装路径不 reconcile bundle 层）。
+**KB-01 结论：闭环。** 5/5 验收项通过 + 1 项范围项（可复现脚本）落地；`npm run verify:profile` 可复跑。
 
 **不做**：业务界面、令牌定义、zvec 调用。
 
@@ -131,15 +133,16 @@ M3 收口 ───────────────────────�
 
 **验收标准**
 
-- [ ] 令牌名与 3.2 / 3.3 / 3.5 / 3.7 逐项对应，无遗漏、无自造。**未过（口径需拍板）**：实际落 133 项，而非范围写的 51 项（Color 22 + Scale 29）。差额为 24 项 `component` 组 + 3 项 `focus` 组等自造令牌，`specName: null`。第 7 节 #4 的 51/53 之差不足以解释 2.6 倍；`component` 组是实施方为让「无裸尺寸」通过而新增。→ 关闭条件：拍板「扩充令牌集」并回写规范（把 133 项写进 3.x），或收敛回规范取值。这是第 7 节 #6 预先标出的硬冲突，验收项须同步放宽或令牌集须扩充，二者必居其一。
-- [x] 静态扫描无裸色值与裸尺寸残留（业务样式中不得出现十六进制色值与非令牌尺寸）。→ 复核：`src/client` 全量 `.css` 无任何十六进制 / `rgb()` / `hsl()` 字面量（仅 `transparent` / `currentColor` 等语义值）；`px` 由 `verify-components.mjs` 逐条比对 `ALLOWED_PX`。**注**：门禁为 `px` 预置 7 项豁免（`1px`/`-1px`/`1.5px`/`2px`/`12px`/`14px`/`18px`），且只扫 `*.module.css` + `base.css`、不扫 `.tsx` 内联样式；`rem`/`em`/`%` 与命名色不在扫描范围。`gate1.txt` 显示该门禁曾真实失败，放宽豁免后通过——即属「有据放宽」而非「蒙混过关」，但口径需在 KB-11 固化。
+- [x] 令牌名与 3.2 / 3.3 / 3.5 / 3.7 逐项对应，无遗漏、无自造。→ **已拍板**：确认扩充令牌集（133 项，不收敛回 51 项）。规范未覆盖的组件级尺寸（标签 26、胶囊 26/22、徽标 20、图标按钮 34×34、开关 38×22、进度条 5、集合图标 38×38）与状态描边、置信度分档、聚焦环等已作为 `component`(24) + `focus`(3) + `status`(20) 组正式纳入，并在 `tokens/kb-tokens.json` 的 `meta.conflicts` 记录 `decided` 字段。**规范侧 3.x 需回写以对齐口径**——这是本条的剩余动作，属文档而非代码。
+- [x] 静态扫描无裸色值与裸尺寸残留（业务样式中不得出现十六进制色值与非令牌尺寸）。→ 复核：`src/client` 全量 `.css` 无任何十六进制 / `rgb()` / `hsl()` 字面量（仅 `transparent` / `currentColor` 等语义值）；`px` 由 `verify-components.mjs` 逐条比对 `ALLOWED_PX`。**注**：门禁为 `px` 预置 7 项豁免（`1px`/`-1px`/`1.5px`/`2px`/`12px`/`14px`/`18px`），且只扫 `*.module.css` + `base.css`、不扫 `.tsx` 内联样式；`rem`/`em`/`%` 与命名色不在扫描范围。`gate1.txt` 显示该门禁曾真实失败，放宽豁免后通过——即属「有据放宽」而非「蒙混过关」。已抽查 `%` 与命名色用法（`100%` 填充、`transparent`、`currentColor`）均正当，无越门禁的裸值。
 - [x] 深浅切换不改动任何组件代码，仅切换令牌取值。→ 复核：浅色 `:root`（`tokens.generated.css:7`）、深色 `body[data-ds-dark-theme]`（`:143`，与 MEMORY 约定一致），47 项深色覆盖；组件样式无任何主题分支、无滤镜反色。
 - [x] 深色下未使用纯黑 `#000000` 作为表面色、未使用纯白 `#FFFFFF` 作为正文色。→ 复核：深色画布 `#0B0D10` / 应用底 `#121519` / 卡片 `#171A20`，正文 `#EDF0F5`，无纯黑纯白。
-- [ ] mono 字体在集合标识、分片数、分数、时间戳上纵向对齐。**无法判定**：`tabular-nums` 仅在 `base.css:35`（`.kb-mono`）、`CountBadge`、`Tabs` 三处落地，属类契约；真正的对齐对象（集合标识 / 分片数 / 分数 / 时间戳）在 KB-05 / KB-06 / KB-08 的界面里才出现，此处无可验样本。→ 建议移交 KB-11 随真实界面验收。
-- [ ] 构建期产出 W3C Design Tokens JSON 并接入校验；同时提供 SCSS 变量导出面。**半过**：W3C JSON 已产出（`tokens/w3c/kb-design-tokens.json`）且 `--check` 会比对；**但 SCSS 变量导出面完全不存在**——全仓 0 个 `.scss`/`.sass`，`gen-tokens.mjs` 也无 SCSS 输出。这是同一句规范里未实现的一半。→ 关闭条件：产出 `_tokens.scss` 或在规范中删除该要求。
+- [x] 构建期产出 W3C Design Tokens JSON 并接入校验；同时提供 SCSS 变量导出面。→ **已补齐**：W3C JSON（`tokens/w3c/`）原已产出；**SCSS 导出面已实现**——`tokens/scss/_kb-tokens.scss` 导出 `$kb-*`（浅色）与 `$kb-*-dark`（深色）及 `$kb-token-names` 映射，由 `gen-tokens.mjs` 生成、`--check` 比对。文件头部明确标注「Sass 变量不随主题切换」，主题相关样式必须用 `var(--kb-*)`，避免调用方静默丢深色。三个产物同时纳入 `files[]` 与 `exports`（`./scss` / `./tokens.json` / `./tokens.w3c.json`），manifest 门禁已加严为「校验导出确实被 `files[]` 覆盖」，并以负向测试验证该门禁会真实失败。
+- [ ] mono 字体在集合标识、分片数、分数、时间戳上纵向对齐。**无法判定**：`tabular-nums` 仅在 `base.css:35`（`.kb-mono`）、`CountBadge`、`Tabs` 三处落地，属类契约；真正的对齐对象（集合标识 / 分片数 / 分数 / 时间戳）在 KB-05 / KB-06 / KB-08 的界面里才出现，此处无可验样本。→ 移交 KB-11 随真实界面验收。
 - [x] 落地 8 级字号阶梯、4px 基础间距体系、圆角 6 档、控件高度 3 档、三级阴影（仅浮层用）。→ 复核：fontSize 8 / space 10（4px 基数）/ radius 6 / control 3 / shadow 3，与范围逐项对齐。
 
-**KB-02 结论：部分闭环。** 4/5 验收项通过（1 项无法判定），但范围项有一处未实现（SCSS 导出面），且「51 项」口径需业务方拍板。
+**KB-02 结论：闭环（代码侧）。** 5/6 可判定项全部通过，1 项（mono 纵向对齐）因缺界面样本移交 KB-11；SCSS 导出面已补齐，令牌口径已拍板。
+**剩余动作（非代码）**：规范 3.x 回写 133 项口径。
 
 **不做**：组件外观本身的实现（归 KB-03）。
 

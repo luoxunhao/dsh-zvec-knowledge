@@ -1,0 +1,16 @@
+{
+  "name": "dsh-profile-kb-verify",
+  "private": true,
+  "dependencies": {
+    "dsh-zvec-knowledge": "link:E:/project/dsh/dsh-zvec-knowledge/plugin"
+  },
+  "dsh": {
+    "profile": {
+      "bundles": [
+        "@deepseek-ai/dsh-base",
+        "dsh-zvec-knowledge"
+      ],
+      "patchReload": "live"
+    }
+  }
+}

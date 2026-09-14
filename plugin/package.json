@@ -15,10 +15,16 @@
       "default": "./lib/client.js"
     },
     "./cordis.patch.yml": "./cordis.patch.yml",
+    "./scss": "./tokens/scss/_kb-tokens.scss",
+    "./tokens.json": "./tokens/kb-tokens.json",
+    "./tokens.w3c.json": "./tokens/w3c/kb-design-tokens.json",
     "./package.json": "./package.json"
   },
   "files": [
     "lib",
+    "tokens/kb-tokens.json",
+    "tokens/scss",
+    "tokens/w3c",
     "cordis.patch.yml",
     "README.md"
   ],
@@ -44,6 +50,7 @@
     "verify:tokens": "node scripts/gen-tokens.mjs --check",
     "verify:components": "node scripts/verify-components.mjs",
     "verify:kb10": "node scripts/verify-kb10.mjs",
+    "verify:profile": "node scripts/verify-kb01-profile.mjs",
     "smoke:zvec": "node scripts/zvec-smoke.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json --noEmit",
     "build": "node scripts/clean-build.mjs && node scripts/gen-tokens.mjs && tsc -p tsconfig.json && tsc -p tsconfig.client.json && tsdown",

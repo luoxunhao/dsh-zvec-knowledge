@@ -52,6 +52,37 @@ for (const target of ['./lib/index.js', './lib/client.js', './cordis.patch.yml']
   if (!existsSync(join(ROOT, target))) fail(`declared artifact is not built: ${target}`)
 }
 
+// Every `files[]` entry must match something, or the manifest silently publishes
+// less than it claims. This catches a renamed directory that the exports map was
+// updated for but `files` was not.
+for (const entry of listed) {
+  const target = join(ROOT, entry)
+  if (!existsSync(target)) fail(`files[] lists ${entry}, which does not exist in the package`)
+}
+
+// The token artifacts are part of the published surface (a consumer can import
+// them), so they must be listed in `files` and present. Checking them by export
+// key rather than by path keeps this tied to the contract, not to the layout.
+for (const key of ['./scss', './tokens.json', './tokens.w3c.json']) {
+  const target = manifest.exports?.[key]
+  if (target === undefined) {
+    fail(`exports["${key}"] is missing: the token source and its derived surfaces are published API`)
+    continue
+  }
+  if (!existsSync(join(ROOT, target))) {
+    fail(`exports["${key}"] points at a missing file: ${target} (run \`npm run tokens\`)`)
+    continue
+  }
+  // `files` entries are directory-or-file prefixes, so either the exact path or
+  // any ancestor directory listed there counts as covering it.
+  const rel = target.replace(/^\.\//, '')
+  const covered = listed.some(entry => {
+    const normalized = entry.replace(/\/$/, '')
+    return rel === normalized || rel.startsWith(`${normalized}/`)
+  })
+  if (!covered) fail(`exports["${key}"] resolves to ${target} but files[] does not publish it`)
+}
+
 const client = manifest.dsh?.client
 if (client === undefined) fail('dsh.client is required: this plugin ships a web client half')
 else {

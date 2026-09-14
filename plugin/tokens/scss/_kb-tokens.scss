@@ -1,0 +1,329 @@
+// 由 scripts/gen-tokens.mjs 从 tokens/kb-tokens.json 生成，请勿手工编辑。
+// 令牌源：《DSH 知识库插件（基于 zvec）设计规范》v1.1.0 第 3 章（浅色）、第 7 章（深色）
+//
+// 共 133 项令牌。深色变量以 -dark 后缀单独导出。
+//
+// ⚠️ Sass 变量在构建期被替换，**不随主题切换**。凡需要随浅/深主题变化的样式，
+//    必须使用 CSS 自定义属性 `var(--kb-*)`，不要使用本文件中的 $ 变量。
+//    本文件只服务两类场景：构建期数值计算，以及明确要固定取某一主题字面量的样式。
+
+// ---- 浅色（默认）----
+$kb-brand-50: #EEF0FB;
+$kb-brand-100: #E0E3F8;
+$kb-brand-200: #C7CBF3;
+$kb-brand-300: #A6ACE9;
+$kb-brand-400: #7A84E2;
+$kb-brand-500: #4F5BD5;
+$kb-brand-600: #4149BF;
+$kb-brand-700: #343BA0;
+$kb-brand: #4F5BD5;
+$kb-brand-hover: #4149BF;
+$kb-brand-pressed: #343BA0;
+$kb-brand-link: #4F5BD5;
+$kb-brand-tint: #EEF0FB;
+$kb-brand-tint-hover: #E0E3F8;
+$kb-brand-border: #C7CBF3;
+$kb-neutral-0: #FFFFFF;
+$kb-neutral-25: #FAFBFC;
+$kb-neutral-50: #F5F6F9;
+$kb-neutral-100: #EDEFF4;
+$kb-neutral-200: #E1E5EC;
+$kb-neutral-300: #CBD2DE;
+$kb-neutral-400: #9AA3B2;
+$kb-neutral-500: #6B7484;
+$kb-neutral-900: #131619;
+$kb-bg-canvas: #FAFBFC;
+$kb-bg-app: #F5F6F9;
+$kb-bg-surface: #FFFFFF;
+$kb-bg-subtle: #EDEFF4;
+$kb-bg-hover: #F5F6F9;
+$kb-border-subtle: #E1E5EC;
+$kb-border-strong: #CBD2DE;
+$kb-divider-topbar: #E9ECF2;
+$kb-divider-card: #EDEFF4;
+$kb-text-primary: #131619;
+$kb-text-secondary: #6B7484;
+$kb-text-tertiary: #9AA3B2;
+$kb-text-disabled: #B8BFC9;
+$kb-text-inverse: #FFFFFF;
+$kb-text-quiet: #5B6472;
+$kb-status-ready: #1E9E8F;
+$kb-status-ready-bg: #E6F5F2;
+$kb-status-ready-border: #A8DFD7;
+$kb-status-ready-text: #1E6E64;
+$kb-status-building: #D98B1F;
+$kb-status-building-bg: #FDF3E3;
+$kb-status-building-border: #F2D8A8;
+$kb-status-building-text: #8A6A38;
+$kb-status-failed: #DC2E4C;
+$kb-status-failed-bg: #FCEAEE;
+$kb-status-failed-border: #F2B9C6;
+$kb-status-failed-text: #8E4257;
+$kb-status-pending: #8A93A3;
+$kb-status-pending-bg: #F0F2F6;
+$kb-status-pending-border: #D5DAE3;
+$kb-status-pending-text: #5B6472;
+$kb-status-info: #3B7DE0;
+$kb-status-info-bg: #E8F1FD;
+$kb-status-info-border: #AECDF5;
+$kb-status-info-text: #3F5F8A;
+$kb-score-strong: #1E9E8F;
+$kb-score-relevant: #7CA83F;
+$kb-score-fair: #D98B1F;
+$kb-score-low: #DC2E4C;
+$kb-score-track: #EDEFF4;
+$kb-font-sans: 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+$kb-font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+$kb-size-display: 32px;
+$kb-size-h2: 24px;
+$kb-size-h3: 20px;
+$kb-size-title: 16px;
+$kb-size-body: 14px;
+$kb-size-body-sm: 13px;
+$kb-size-caption: 12px;
+$kb-size-mono: 11px;
+$kb-leading-display: 42px;
+$kb-leading-h2: 34px;
+$kb-leading-h3: 30px;
+$kb-leading-title: 24px;
+$kb-leading-body: 22px;
+$kb-leading-body-sm: 20px;
+$kb-leading-caption: 18px;
+$kb-leading-mono: 16px;
+$kb-space-1: 4px;
+$kb-space-2: 8px;
+$kb-space-3: 12px;
+$kb-space-4: 16px;
+$kb-space-5: 20px;
+$kb-space-6: 24px;
+$kb-space-8: 32px;
+$kb-space-10: 40px;
+$kb-space-12: 48px;
+$kb-space-16: 64px;
+$kb-radius-xs: 4px;
+$kb-radius-sm: 6px;
+$kb-radius-md: 8px;
+$kb-radius-lg: 12px;
+$kb-radius-xl: 16px;
+$kb-radius-full: 999px;
+$kb-control-sm: 28px;
+$kb-control-md: 34px;
+$kb-control-lg: 40px;
+$kb-sidebar-width: 240px;
+$kb-topbar-height: 56px;
+$kb-shadow-1: 0 1px 2px 0 rgba(16, 19, 26, 0.06);
+$kb-shadow-2: 0 4px 12px -2px rgba(16, 19, 26, 0.08);
+$kb-shadow-3: 0 12px 32px -8px rgba(16, 19, 26, 0.12);
+$kb-leading-field: 21px;
+$kb-textarea-min-height: 62px;
+$kb-segment-padding: 3px;
+$kb-field-search-inset: 36px;
+$kb-tab-underline: 2px;
+$kb-checkbox-size: 16px;
+$kb-switch-width: 38px;
+$kb-switch-height: 22px;
+$kb-switch-knob: 16px;
+$kb-tag-height: 26px;
+$kb-badge-height: 20px;
+$kb-badge-close-size: 12px;
+$kb-pill-height: 26px;
+$kb-pill-padding: 10px;
+$kb-pill-height-dense: 22px;
+$kb-icon-button-size: 34px;
+$kb-icon-button-compact: 18px;
+$kb-progress-height: 5px;
+$kb-progress-radius: 3px;
+$kb-collection-icon: 38px;
+$kb-collection-icon-radius: 9px;
+$kb-table-row-height: 44px;
+$kb-collection-card-width: 373px;
+$kb-stat-card-height: 88px;
+$kb-focus-ring-color: var(--kb-brand);
+$kb-outline-focus: 2px solid var(--kb-focus-ring-color);
+$kb-shadow-focus: 0 0 0 4px color-mix(in srgb, var(--kb-focus-ring-color) 15%, transparent);
+
+// ---- 深色覆盖（47 项）----
+$kb-brand-dark: #6F7BE8;
+$kb-brand-hover-dark: #5C68DF;
+$kb-brand-pressed-dark: #4A55C8;
+$kb-brand-link-dark: #9AA2F0;
+$kb-brand-tint-dark: #1E2140;
+$kb-brand-tint-hover-dark: #262A52;
+$kb-brand-border-dark: #33396B;
+$kb-bg-canvas-dark: #0B0D10;
+$kb-bg-app-dark: #121519;
+$kb-bg-surface-dark: #171A20;
+$kb-bg-subtle-dark: #1D2128;
+$kb-bg-hover-dark: #242832;
+$kb-border-subtle-dark: #2C313C;
+$kb-border-strong-dark: #3A404D;
+$kb-divider-topbar-dark: #2C313C;
+$kb-divider-card-dark: #2C313C;
+$kb-text-primary-dark: #EDF0F5;
+$kb-text-secondary-dark: #A7B0BF;
+$kb-text-tertiary-dark: #8A93A3;
+$kb-text-disabled-dark: #5A6272;
+$kb-text-inverse-dark: #0B0D10;
+$kb-text-quiet-dark: #A7B0BF;
+$kb-status-ready-dark: #2FB3A4;
+$kb-status-ready-bg-dark: #0F2E2B;
+$kb-status-ready-border-dark: #1D4A45;
+$kb-status-ready-text-dark: #2FB3A4;
+$kb-status-building-dark: #E0A33A;
+$kb-status-building-bg-dark: #33270F;
+$kb-status-building-border-dark: #57421B;
+$kb-status-building-text-dark: #E0A33A;
+$kb-status-failed-dark: #EE5A73;
+$kb-status-failed-bg-dark: #35141B;
+$kb-status-failed-border-dark: #5C2333;
+$kb-status-failed-text-dark: #EE5A73;
+$kb-status-pending-dark: #8A93A3;
+$kb-status-pending-bg-dark: #1E2128;
+$kb-status-pending-border-dark: #2C313C;
+$kb-status-pending-text-dark: #A7B0BF;
+$kb-status-info-dark: #5A97EE;
+$kb-status-info-bg-dark: #122340;
+$kb-status-info-border-dark: #1E3C6B;
+$kb-status-info-text-dark: #5A97EE;
+$kb-score-strong-dark: #2FB3A4;
+$kb-score-relevant-dark: #8BBA4E;
+$kb-score-fair-dark: #E0A33A;
+$kb-score-low-dark: #EE5A73;
+$kb-score-track-dark: #2C313C;
+
+// ---- 令牌名 → 变量 映射 ----
+$kb-token-names: (
+  "--kb-brand-50": $kb-brand-50,
+  "--kb-brand-100": $kb-brand-100,
+  "--kb-brand-200": $kb-brand-200,
+  "--kb-brand-300": $kb-brand-300,
+  "--kb-brand-400": $kb-brand-400,
+  "--kb-brand-500": $kb-brand-500,
+  "--kb-brand-600": $kb-brand-600,
+  "--kb-brand-700": $kb-brand-700,
+  "--kb-brand": $kb-brand,
+  "--kb-brand-hover": $kb-brand-hover,
+  "--kb-brand-pressed": $kb-brand-pressed,
+  "--kb-brand-link": $kb-brand-link,
+  "--kb-brand-tint": $kb-brand-tint,
+  "--kb-brand-tint-hover": $kb-brand-tint-hover,
+  "--kb-brand-border": $kb-brand-border,
+  "--kb-neutral-0": $kb-neutral-0,
+  "--kb-neutral-25": $kb-neutral-25,
+  "--kb-neutral-50": $kb-neutral-50,
+  "--kb-neutral-100": $kb-neutral-100,
+  "--kb-neutral-200": $kb-neutral-200,
+  "--kb-neutral-300": $kb-neutral-300,
+  "--kb-neutral-400": $kb-neutral-400,
+  "--kb-neutral-500": $kb-neutral-500,
+  "--kb-neutral-900": $kb-neutral-900,
+  "--kb-bg-canvas": $kb-bg-canvas,
+  "--kb-bg-app": $kb-bg-app,
+  "--kb-bg-surface": $kb-bg-surface,
+  "--kb-bg-subtle": $kb-bg-subtle,
+  "--kb-bg-hover": $kb-bg-hover,
+  "--kb-border-subtle": $kb-border-subtle,
+  "--kb-border-strong": $kb-border-strong,
+  "--kb-divider-topbar": $kb-divider-topbar,
+  "--kb-divider-card": $kb-divider-card,
+  "--kb-text-primary": $kb-text-primary,
+  "--kb-text-secondary": $kb-text-secondary,
+  "--kb-text-tertiary": $kb-text-tertiary,
+  "--kb-text-disabled": $kb-text-disabled,
+  "--kb-text-inverse": $kb-text-inverse,
+  "--kb-text-quiet": $kb-text-quiet,
+  "--kb-status-ready": $kb-status-ready,
+  "--kb-status-ready-bg": $kb-status-ready-bg,
+  "--kb-status-ready-border": $kb-status-ready-border,
+  "--kb-status-ready-text": $kb-status-ready-text,
+  "--kb-status-building": $kb-status-building,
+  "--kb-status-building-bg": $kb-status-building-bg,
+  "--kb-status-building-border": $kb-status-building-border,
+  "--kb-status-building-text": $kb-status-building-text,
+  "--kb-status-failed": $kb-status-failed,
+  "--kb-status-failed-bg": $kb-status-failed-bg,
+  "--kb-status-failed-border": $kb-status-failed-border,
+  "--kb-status-failed-text": $kb-status-failed-text,
+  "--kb-status-pending": $kb-status-pending,
+  "--kb-status-pending-bg": $kb-status-pending-bg,
+  "--kb-status-pending-border": $kb-status-pending-border,
+  "--kb-status-pending-text": $kb-status-pending-text,
+  "--kb-status-info": $kb-status-info,
+  "--kb-status-info-bg": $kb-status-info-bg,
+  "--kb-status-info-border": $kb-status-info-border,
+  "--kb-status-info-text": $kb-status-info-text,
+  "--kb-score-strong": $kb-score-strong,
+  "--kb-score-relevant": $kb-score-relevant,
+  "--kb-score-fair": $kb-score-fair,
+  "--kb-score-low": $kb-score-low,
+  "--kb-score-track": $kb-score-track,
+  "--kb-font-sans": $kb-font-sans,
+  "--kb-font-mono": $kb-font-mono,
+  "--kb-size-display": $kb-size-display,
+  "--kb-size-h2": $kb-size-h2,
+  "--kb-size-h3": $kb-size-h3,
+  "--kb-size-title": $kb-size-title,
+  "--kb-size-body": $kb-size-body,
+  "--kb-size-body-sm": $kb-size-body-sm,
+  "--kb-size-caption": $kb-size-caption,
+  "--kb-size-mono": $kb-size-mono,
+  "--kb-leading-display": $kb-leading-display,
+  "--kb-leading-h2": $kb-leading-h2,
+  "--kb-leading-h3": $kb-leading-h3,
+  "--kb-leading-title": $kb-leading-title,
+  "--kb-leading-body": $kb-leading-body,
+  "--kb-leading-body-sm": $kb-leading-body-sm,
+  "--kb-leading-caption": $kb-leading-caption,
+  "--kb-leading-mono": $kb-leading-mono,
+  "--kb-space-1": $kb-space-1,
+  "--kb-space-2": $kb-space-2,
+  "--kb-space-3": $kb-space-3,
+  "--kb-space-4": $kb-space-4,
+  "--kb-space-5": $kb-space-5,
+  "--kb-space-6": $kb-space-6,
+  "--kb-space-8": $kb-space-8,
+  "--kb-space-10": $kb-space-10,
+  "--kb-space-12": $kb-space-12,
+  "--kb-space-16": $kb-space-16,
+  "--kb-radius-xs": $kb-radius-xs,
+  "--kb-radius-sm": $kb-radius-sm,
+  "--kb-radius-md": $kb-radius-md,
+  "--kb-radius-lg": $kb-radius-lg,
+  "--kb-radius-xl": $kb-radius-xl,
+  "--kb-radius-full": $kb-radius-full,
+  "--kb-control-sm": $kb-control-sm,
+  "--kb-control-md": $kb-control-md,
+  "--kb-control-lg": $kb-control-lg,
+  "--kb-sidebar-width": $kb-sidebar-width,
+  "--kb-topbar-height": $kb-topbar-height,
+  "--kb-shadow-1": $kb-shadow-1,
+  "--kb-shadow-2": $kb-shadow-2,
+  "--kb-shadow-3": $kb-shadow-3,
+  "--kb-leading-field": $kb-leading-field,
+  "--kb-textarea-min-height": $kb-textarea-min-height,
+  "--kb-segment-padding": $kb-segment-padding,
+  "--kb-field-search-inset": $kb-field-search-inset,
+  "--kb-tab-underline": $kb-tab-underline,
+  "--kb-checkbox-size": $kb-checkbox-size,
+  "--kb-switch-width": $kb-switch-width,
+  "--kb-switch-height": $kb-switch-height,
+  "--kb-switch-knob": $kb-switch-knob,
+  "--kb-tag-height": $kb-tag-height,
+  "--kb-badge-height": $kb-badge-height,
+  "--kb-badge-close-size": $kb-badge-close-size,
+  "--kb-pill-height": $kb-pill-height,
+  "--kb-pill-padding": $kb-pill-padding,
+  "--kb-pill-height-dense": $kb-pill-height-dense,
+  "--kb-icon-button-size": $kb-icon-button-size,
+  "--kb-icon-button-compact": $kb-icon-button-compact,
+  "--kb-progress-height": $kb-progress-height,
+  "--kb-progress-radius": $kb-progress-radius,
+  "--kb-collection-icon": $kb-collection-icon,
+  "--kb-collection-icon-radius": $kb-collection-icon-radius,
+  "--kb-table-row-height": $kb-table-row-height,
+  "--kb-collection-card-width": $kb-collection-card-width,
+  "--kb-stat-card-height": $kb-stat-card-height,
+  "--kb-focus-ring-color": $kb-focus-ring-color,
+  "--kb-outline-focus": $kb-outline-focus,
+  "--kb-shadow-focus": $kb-shadow-focus,
+);
