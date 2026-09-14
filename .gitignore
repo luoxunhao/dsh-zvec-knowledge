@@ -18,5 +18,14 @@ plugin/zvec-smoke-report.json
 # are regenerable from `scripts/render-visual.mjs` and are not sources.
 .dsh-vision-router/
 
-# Pipeline intermediates
-output/
+# Pipeline intermediates. Excluded by CONTENTS rather than by directory, because
+# a directory-level exclusion cannot be re-included by a later rule — git will
+# not descend into an ignored directory to find the negation.
+#
+# The design spec's markdown SOURCE is deliberately kept: it is the authoritative
+# text the `verify:spec` gate reads, so it is a source artifact, not an
+# intermediate. The generated html/docx and the pipeline's working state are not.
+output/*/*
+!output/*/stage1/
+output/*/stage1/*
+!output/*/stage1/final_draft.md
