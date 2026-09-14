@@ -20,6 +20,7 @@
  */
 
 import { readdirSync } from 'node:fs'
+import { isAbsolute } from 'node:path'
 import { resolveStoreRoot } from '../store/paths.ts'
 import {
   createCollection as createSnapshotCollection,
@@ -102,8 +103,15 @@ export interface HitView {
 
 /** Options for {@link KnowledgeOperations}. */
 export interface OperationsOptions {
-  /** Session workspace the store root is resolved against. */
-  workspaceDir: string
+  /**
+   * Session workspace the store root is resolved against.
+   *
+   * A string pins the store to one workspace for the object's whole life. Pass
+   * {@link workspaceFromCall} instead when the operations object outlives a single
+   * call — a registered tool, for instance — because the workspace belongs to the
+   * *calling session* and a tool registration sees no session at registration time.
+   */
+  workspaceDir: string | (() => string)
   /** Configured store directory name. */
   stateDir: string
   /** Embedding provider. Required for a build; omitting it makes builds refuse. */
@@ -161,18 +169,29 @@ export function createHitCounter(now: () => number = Date.now): HitCounter {
 
 /** The host operations the browser half and the retrieval tool both call. */
 export class KnowledgeOperations {
-  private readonly workspaceDir: string
+  private readonly workspace: string | (() => string)
   private readonly stateDir: string
   private readonly embed: EmbedFn | undefined
   private readonly dimension: number
   private readonly hitCounter: HitCounter
   private readonly quota: Quota
+  /**
+   * Operations objects already built for a workspace, when the workspace is
+   * resolved per call rather than pinned.
+   *
+   * Retrieval runs per call, so without this a caller that resolves the workspace
+   * dynamically would construct — and, for a tool, would have to re-register — a
+   * fresh object on every invocation. Keyed by workspace, which is the same key the
+   * caller's own cache uses: the handle registry is process-wide, so two objects for
+   * one workspace would still contend for one engine lock.
+   */
+  private readonly perWorkspace = new Map<string, KnowledgeOperations>()
 
   /**
    * @param options - workspace, state directory, embedding provider and counter.
    */
   constructor(options: OperationsOptions) {
-    this.workspaceDir = options.workspaceDir
+    this.workspace = options.workspaceDir
     this.stateDir = options.stateDir
     this.embed = options.embed
     this.dimension = options.dimension ?? EMBEDDING_DIMENSION
@@ -180,9 +199,50 @@ export class KnowledgeOperations {
     this.quota = options.quota ?? { bytes: null, warnAt: 0.9 }
   }
 
+  /**
+   * The object bound to one concrete workspace for the duration of one operation.
+   *
+   * For a pinned workspace this is the receiver itself. For a call-resolved one it
+   * is the cached object for whichever workspace the resolver names *right now*.
+   *
+   * There is deliberately no memoization on this object: each operation resolves
+   * once and then holds the returned instance in a local, which is what keeps one
+   * operation on one workspace. Caching the resolved identity here instead would
+   * pin the plugin to the first session's workspace for the process's lifetime —
+   * the opposite of the per-session isolation this resolution exists for.
+   * @returns operations bound to the workspace.
+   * @throws {Error} when the resolved workspace is not an absolute path.
+   */
+  private bound(): KnowledgeOperations {
+    const source = this.workspace
+    if (typeof source === 'string') return this
+    const workspace = source()
+    if (!isAbsolute(workspace)) {
+      throw new Error(`workspaceDir must be an absolute path, received ${JSON.stringify(workspace)}`)
+    }
+    const existing = this.perWorkspace.get(workspace)
+    if (existing !== undefined) return existing
+    const created = new KnowledgeOperations({
+      workspaceDir: workspace,
+      stateDir: this.stateDir,
+      ...(this.embed === undefined ? {} : { embed: this.embed }),
+      dimension: this.dimension,
+      hitCounter: this.hitCounter,
+      quota: this.quota,
+    })
+    this.perWorkspace.set(workspace, created)
+    return created
+  }
+
+  /** The workspace this object's store is rooted in, as of this call. */
+  get workspaceDir(): string {
+    const source = this.workspace
+    return typeof source === 'string' ? source : source()
+  }
+
   /** The resolved store root for this workspace. */
   get storeRoot(): string {
-    return resolveStoreRoot(this.workspaceDir, this.stateDir)
+    return resolveStoreRoot(this.bound().workspaceDir, this.stateDir)
   }
 
   /**
@@ -194,7 +254,8 @@ export class KnowledgeOperations {
    * @returns the quota state.
    */
   usage(): QuotaState {
-    return quotaState(this.storeRoot, this.quota)
+    const self = this.bound()
+    return quotaState(self.storeRoot, self.quota)
   }
 
   /**
@@ -215,7 +276,8 @@ export class KnowledgeOperations {
    * @returns collections, newest first.
    */
   async listCollections(): Promise<CollectionView[]> {
-    const root = this.storeRoot
+    const self = this.bound()
+    const root = self.storeRoot
     const ids = listCollectionIds(root, dir => readdirSync(dir))
     const views: CollectionView[] = []
     for (const id of ids) {
@@ -223,7 +285,7 @@ export class KnowledgeOperations {
       if (meta === null) continue
       const records = listDocuments(root, id)
       const summary = summarizeDocuments(records)
-      views.push(toView(meta, summary, this.hitCounter.hits7d(id)))
+      views.push(toView(meta, summary, self.hitCounter.hits7d(id)))
     }
     return views.sort((left, right) => (right.createdAt > left.createdAt ? 1 : -1))
   }
@@ -235,7 +297,7 @@ export class KnowledgeOperations {
    * @throws {Error} when the identifier exists or the fields are invalid.
    */
   async createCollection(values: { name: string, collectionId: string, description: string }): Promise<CollectionView> {
-    const meta = await createSnapshotCollection(this.storeRoot, {
+    const meta = await createSnapshotCollection(this.bound().storeRoot, {
       id: values.collectionId,
       name: values.name,
       description: values.description,
@@ -250,7 +312,7 @@ export class KnowledgeOperations {
    * @param id - collection identifier.
    */
   async deleteCollection(id: string): Promise<void> {
-    deleteSnapshotCollection(this.storeRoot, id)
+    deleteSnapshotCollection(this.bound().storeRoot, id)
   }
 
   /**
@@ -259,7 +321,7 @@ export class KnowledgeOperations {
    * @param name - new display name.
    */
   async renameCollection(id: string, name: string): Promise<void> {
-    await renameSnapshotCollection(this.storeRoot, id, name)
+    await renameSnapshotCollection(this.bound().storeRoot, id, name)
   }
 
   /**
@@ -271,7 +333,8 @@ export class KnowledgeOperations {
     id: string, name: string, bytes: number, ext: string,
     status: 'pending' | 'building' | 'ready' | 'failed', chunks: number | null, error?: string
   }[]> {
-    return listDocuments(this.storeRoot, collectionId)
+    const root = this.storeRoot
+    return listDocuments(root, collectionId)
       .map(record => ({
         id: record.id,
         name: record.name,
@@ -300,7 +363,11 @@ export class KnowledgeOperations {
     collectionId: string,
     values: { name: string, bytes: number, text: string },
   ): Promise<{ id: string, name: string, bytes: number, ext: string, status: 'pending', chunks: null }> {
-    if (readMeta(this.storeRoot, collectionId) === null) {
+    // Bound once: the workspace must not be resolved twice inside one call, or a
+    // session that changed workspace mid-call would read one store and write another.
+    const self = this.bound()
+    const root = self.storeRoot
+    if (readMeta(root, collectionId) === null) {
       throw new Error(`知识库 ${collectionId} 不存在`)
     }
     const reason = validateUpload(values.name, values.bytes)
@@ -311,7 +378,7 @@ export class KnowledgeOperations {
     // Admission is checked against the *stored text* rather than the source file
     // size: the text is what occupies the store, and for a compressed source the
     // two differ substantially in either direction.
-    const admission = admit(this.storeRoot, this.quota, Buffer.byteLength(values.text, 'utf8'), '上传该文档')
+    const admission = admit(root, self.quota, Buffer.byteLength(values.text, 'utf8'), '上传该文档')
     if (!admission.allowed) throw new Error(admission.reason ?? '存储配额不足')
     const record: DocumentRecord = {
       id: documentId(values.name),
@@ -324,7 +391,7 @@ export class KnowledgeOperations {
       uploadedAt: new Date().toISOString(),
       builtAt: null,
     }
-    appendDocument(this.storeRoot, collectionId, record)
+    appendDocument(root, collectionId, record)
     return {
       id: record.id, name: record.name, bytes: record.bytes, ext: record.ext,
       status: 'pending', chunks: null,
@@ -340,8 +407,8 @@ export class KnowledgeOperations {
    * @param id - document id.
    */
   async removeDocument(collectionId: string, id: string): Promise<void> {
-    removeDocument(this.storeRoot, collectionId, id)
     const root = this.storeRoot
+    removeDocument(root, collectionId, id)
     try {
       withServed(root, collectionId, handle => {
         if (handle === null) return
@@ -372,8 +439,9 @@ export class KnowledgeOperations {
    * @returns the estimate.
    */
   async estimateCost(collectionId: string, chunking: ChunkingConfig, index: IndexConfig): Promise<CostEstimate> {
-    const plan = await this.previewChunks(collectionId, chunking)
-    return estimateCost(plan, index, this.dimension)
+    const self = this.bound()
+    const plan = await self.previewChunks(collectionId, chunking)
+    return estimateCost(plan, index, self.dimension)
   }
 
   /**
@@ -406,7 +474,13 @@ export class KnowledgeOperations {
     },
     signal: AbortSignal,
   ): Promise<{ ok: boolean, chunks: number, error?: string }> {
-    if (this.embed === undefined) {
+    // One binding for the whole build. A build spans many awaits and writes a
+    // snapshot, several slot pointers and a document log: resolving the workspace
+    // again midway could publish a snapshot into a different store than the one it
+    // was written into.
+    const self = this.bound()
+    const embed = self.embed
+    if (embed === undefined) {
       return { ok: false, chunks: 0, error: '宿主未提供嵌入模型，无法构建索引' }
     }
     const chunkingReason = validateChunking(strategy.chunking)
@@ -414,7 +488,7 @@ export class KnowledgeOperations {
     const indexReason = validateIndex(strategy.index)
     if (indexReason !== null) return { ok: false, chunks: 0, error: indexReason }
 
-    const root = this.storeRoot
+    const root = self.storeRoot
     const meta = readMeta(root, collectionId)
     if (meta === null) return { ok: false, chunks: 0, error: `知识库 ${collectionId} 不存在` }
 
@@ -426,9 +500,9 @@ export class KnowledgeOperations {
     // an upload had already been refused for — the quota would look unenforced at
     // exactly the moment it matters most.
     const plan = planBuild(records, strategy.chunking)
-    const projectedBytes = estimateCost(plan, strategy.index, this.dimension).vectorBytes
+    const projectedBytes = estimateCost(plan, strategy.index, self.dimension).vectorBytes
       + records.reduce((sum, record) => sum + Buffer.byteLength(record.text, 'utf8'), 0)
-    const admission = admit(root, this.quota, projectedBytes, '重建该知识库的索引')
+    const admission = admit(root, self.quota, projectedBytes, '重建该知识库的索引')
     if (!admission.allowed) return { ok: false, chunks: 0, error: admission.reason ?? '存储配额不足' }
 
     const slot = inactiveSlot(meta)
@@ -439,8 +513,8 @@ export class KnowledgeOperations {
       index: strategy.index,
       documents: records.map(record => ({ docId: record.id, text: record.text })),
       chunking: strategy.chunking,
-      embed: this.embed,
-      dimension: this.dimension,
+      embed,
+      dimension: self.dimension,
       onProgress: handlers.onProgress,
       onLog: handlers.onLog,
     })
@@ -482,7 +556,8 @@ export class KnowledgeOperations {
     topk: number,
     minScore: number,
   ): Promise<{ hits: HitView[], mode: 'hybrid' | 'dense', belowFloor: number }> {
-    const root = this.storeRoot
+    const self = this.bound()
+    const root = self.storeRoot
     if (readMeta(root, collectionId) === null) {
       throw new Error(`知识库 ${collectionId} 不存在`)
     }
@@ -491,7 +566,7 @@ export class KnowledgeOperations {
       if (handle === null) return { hits: [], mode: 'dense' as const, belowFloor: 0 }
       return search(handle, { vector, text: query, topk }, minScore)
     })
-    this.hitCounter.record(collectionId, result.hits.length)
+    self.hitCounter.record(collectionId, result.hits.length)
     return {
       mode: result.mode,
       belowFloor: result.belowFloor,
@@ -519,8 +594,9 @@ export class KnowledgeOperations {
    * @throws {Error} when no provider is configured.
    */
   async embedQuery(text: string): Promise<Float32Array> {
-    if (this.embed === undefined) throw new Error('宿主未提供嵌入模型')
-    const vectors = await this.embed([text])
+    const embed = this.bound().embed
+    if (embed === undefined) throw new Error('宿主未提供嵌入模型')
+    const vectors = await embed([text])
     const first = vectors[0]
     if (first === undefined) throw new Error('嵌入模型未返回向量')
     return first
@@ -532,7 +608,7 @@ export class KnowledgeOperations {
    * @returns hit count.
    */
   hits7d(collectionId: string): number {
-    return this.hitCounter.hits7d(collectionId)
+    return this.bound().hitCounter.hits7d(collectionId)
   }
 
   /**
@@ -569,9 +645,10 @@ export class KnowledgeOperations {
    * @returns absolute path, for diagnostics.
    */
   stagingDir(collectionId: string): string {
-    const meta = readMeta(this.storeRoot, collectionId)
+    const root = this.storeRoot
+    const meta = readMeta(root, collectionId)
     if (meta === null) throw new Error(`知识库 ${collectionId} 不存在`)
-    return slotDir(this.storeRoot, collectionId, inactiveSlot(meta))
+    return slotDir(root, collectionId, inactiveSlot(meta))
   }
 }
 

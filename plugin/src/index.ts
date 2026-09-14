@@ -29,6 +29,9 @@ import { assertValidConfig } from './config.ts'
 import type { Config } from './config.ts'
 import { disposeAll, openHandleCount } from './store/registry.ts'
 import { KnowledgeOperations } from './host/operations.ts'
+import { registerKbBridge, mintBridgeToken, type WebServerLike } from './host/bridge.ts'
+// The web-server declaration shim, for its `declare module` side effect.
+import './host/services.ts'
 import { defineKbSearchTool, KB_SEARCH_TOOL } from './host/search-tool.ts'
 import { createEmbeddingProvider } from './host/embedding.ts'
 import type { EmbedFn } from './store/build.ts'
@@ -70,6 +73,12 @@ export const name = 'zvec-knowledge'
  * session can retrieve from the knowledge base, and that happens through the tool
  * registry. Declaring it keeps the fiber pending until the registry exists rather
  * than registering into nothing.
+ *
+ * `webServer` is deliberately **not** required. The browser half needs a host route
+ * to talk to (see `host/bridge.ts`), but the route is bound lazily through
+ * `ctx.inject`, so a headless profile with no web server still loads this plugin
+ * and keeps `dsh_kb_search` working. Requiring it here would make the tool
+ * unavailable in exactly the deployments that have no UI to serve.
  */
 export const inject: string[] = ['tools']
 
@@ -100,6 +109,26 @@ export function apply(ctx: Context, config: Config): void {
   // the execution context rather than captured once at load.
   ctx.effect(() => ctx.tools.register(defineKbSearchToolFor(ctx, config)), 'zvec-knowledge: dsh_kb_search')
 
+  // The host route the browser half talks to. Bound through `ctx.inject` rather
+  // than declared in `inject` so a headless deployment — which has no web server —
+  // still loads this plugin and keeps the retrieval tool.
+  //
+  // Without this route the panel mounts and every action fails with
+  // 宿主数据通道未接通, which is exactly the state this plugin shipped in: nothing
+  // connected `KnowledgeOperations` to the page.
+  ctx.inject(['webServer'], (webCtx) => {
+    const server = webCtx.get('webServer') as WebServerLike | undefined
+    if (server === undefined) return
+    const operations = operationsFor(ctx, config)
+    // One token per process, minted here rather than stored: it only has to outlive
+    // the boot, and a persisted secret is one a file read could lift.
+    const token = mintBridgeToken()
+    webCtx.effect(
+      () => registerKbBridge(webCtx, server, () => operations, token),
+      'zvec-knowledge: host bridge route',
+    )
+  })
+
   ctx.effect(() => {
     return () => {
       // Close every pooled collection handle. Without this the engine keeps its
@@ -114,14 +143,15 @@ export function apply(ctx: Context, config: Config): void {
 }
 
 /**
- * Build the retrieval tool against a per-session operations instance.
+ * Build the retrieval tool against an operations object that resolves its
+ * workspace per call.
  *
- * The store root is workspace-scoped, and the workspace is a property of the
- * session making the call — so the operations object is created per call rather
- * than held for the plugin's lifetime. Caching by workspace keeps the pooled
- * handle registry (which is process-wide anyway) from being re-created on every
- * retrieval, and the cache is sized by the number of distinct workspaces in play,
- * which is small.
+ * The store root is workspace-scoped and the workspace belongs to the session
+ * making the call, but a tool registration happens once, during `apply()`, before
+ * any session exists. The workspace is therefore resolved inside `execute` — the
+ * object handed to the tool holds a resolver, not a path. Resolving it here would
+ * read the workspace before any session existed and, as the load failure this
+ * plugin shipped with proved, can throw straight out of `apply()`.
  * @param ctx - registrant context, used for the workspace lookup.
  * @param config - resolved configuration.
  * @returns the registry-ready tool definition.
@@ -131,14 +161,15 @@ function defineKbSearchToolFor(ctx: Context, config: Config) {
 }
 
 /**
- * The per-workspace operations cache.
+ * The operations object the registered tool closes over.
  *
- * Module-level because the engine's directory locks are process-wide: two
- * operations objects for one workspace would still contend for the same lock, and
- * the handle registry already serializes them. Keying by workspace keeps the
- * resolution honest without inventing a second lifetime.
+ * Its workspace is resolved on every call through {@link resolveWorkspace}, so one
+ * registration serves every session however many workspaces the host is running.
+ * Cached because the object itself is stateless apart from its per-workspace cache
+ * and the process-wide handle registry, so rebuilding it per call would buy
+ * nothing. `undefined` until the tool is registered.
  */
-const operationsByWorkspace = new Map<string, KnowledgeOperations>()
+let perCallOperations: KnowledgeOperations | undefined
 
 /**
  * The embedding provider, supplied by the deployment.
@@ -184,26 +215,49 @@ export function setEmbeddingProvider(embed: EmbedFn | undefined): void {
 }
 
 /**
- * Resolve the operations object for a call's workspace.
- * @param ctx - registrant context.
+ * The options every operations object is built from, less its workspace.
  * @param config - resolved configuration.
- * @returns the operations object, creating it on first use for this workspace.
+ * @returns the shared construction options.
  */
-function operationsFor(ctx: Context, config: Config): KnowledgeOperations {
-  const workspace = resolveWorkspace(ctx)
-  const existing = operationsByWorkspace.get(workspace)
-  if (existing !== undefined) return existing
+function createOptions(config: Config): {
+  stateDir: string
+  embed?: EmbedFn
+  dimension?: number
+  quota: Config['quota']
+} {
   const provider = embeddingProvider ?? providerFromConfig(config)
-  const created = new KnowledgeOperations({
-    workspaceDir: workspace,
+  return {
     stateDir: config.stateDir,
     ...(provider === undefined ? {} : { embed: provider }),
     // The width must match the model, and a collection's schema is created at it:
     // 2560 for the model deployed here, 1024 by default.
     ...(config.embedding === undefined ? {} : { dimension: config.embedding.dimension }),
     quota: config.quota,
+  }
+}
+
+/**
+ * Resolve the operations object for a call's workspace.
+ *
+ * Two lifetimes are in play, and they are distinguished by whether the caller can
+ * name a workspace at all:
+ *
+ * - a caller that already knows its workspace (a page, a test) passes it, and gets
+ *   one cached object per workspace;
+ * - the registered tool cannot, so it receives a resolver and its object binds per
+ *   call. See {@link perCallOperations}.
+ * @param ctx - registrant context.
+ * @param config - resolved configuration.
+ * @returns the operations object.
+ */
+function operationsFor(ctx: Context, config: Config): KnowledgeOperations {
+  const existing = perCallOperations
+  if (existing !== undefined) return existing
+  const created = new KnowledgeOperations({
+    ...createOptions(config),
+    workspaceDir: () => resolveWorkspace(ctx),
   })
-  operationsByWorkspace.set(workspace, created)
+  perCallOperations = created
   return created
 }
 
@@ -211,17 +265,38 @@ function operationsFor(ctx: Context, config: Config): KnowledgeOperations {
  * Resolve the workspace a call belongs to.
  *
  * The session workspace is the isolation dimension the persistence criterion is
- * about, and `process.cwd()` is deliberately not a fallback: a default cwd would
- * scatter one user's indexes across whatever directory the host happened to be
- * launched from.
+ * about, and `process.cwd()` is deliberately only the last resort: a default cwd
+ * would scatter one user's indexes across whatever directory the host happened to
+ * be launched from.
+ *
+ * **Why the context is not probed for a `workspaceDir` property.** An earlier
+ * revision read `ctx.workspaceDir` defensively, on the assumption that a property
+ * the host does not provide simply reads as `undefined`. It does not: a cordis
+ * context is a proxy whose service resolution is declared by `inject`, and reading
+ * an undeclared property throws `cannot get property "workspaceDir" without
+ * inject`. That read happened while the tool definition was being built, which
+ * happens during `apply()` — so the throw escaped the effect and failed the whole
+ * plugin load, taking the entire profile down with it. Declaring `workspaceDir` in
+ * `inject` is not an option either: no such service exists in the host, so the
+ * fiber would never activate and the tool would silently never register.
+ *
+ * Only `ctx.get(...)` may be used here, and only for services the host really
+ * provides: `get` returns `undefined` for anything else instead of throwing.
  * @param ctx - registrant context.
  * @returns absolute workspace path.
  */
-function resolveWorkspace(ctx: Context): string {
-  // The context exposes the workspace through its own service when the host
-  // provides one; otherwise the process's working directory is used, which is the
-  // host's own launch directory rather than an arbitrary one.
-  const fromContext = (ctx as { workspaceDir?: unknown }).workspaceDir
-  if (typeof fromContext === 'string' && fromContext !== '') return fromContext
+export function resolveWorkspace(ctx: Context): string {
+  const store = ctx.get('sessions')
+  // The tool execution is the authority on its own session, but the operations
+  // object is shared across sessions, so the best available answer here is the
+  // process's live session set: one session is the ordinary interactive case, and
+  // with several the launch directory is a less surprising guess than an arbitrary
+  // sibling's workspace. This is resolved per call, so a single-session host — the
+  // normal deployment — is exact.
+  const sessions = store?.list() ?? []
+  for (const session of sessions) {
+    const cwd = session.header.cwd
+    if (cwd !== undefined && cwd !== '') return cwd
+  }
   return process.cwd()
 }

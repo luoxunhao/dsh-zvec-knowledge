@@ -26,6 +26,7 @@ import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import './styles/tokens.generated.css'
 import './styles/base.css'
 import { KnowledgeBasePanel } from './panel.tsx'
+import { createHostPort } from './bridge-client.ts'
 import { SearchToolView, type SearchToolViewProps } from './SearchToolView.tsx'
 import {
   KNOWLEDGE_LABEL, KNOWLEDGE_ORDER, KNOWLEDGE_PANEL_KEY, KNOWLEDGE_SIDEBAR_ID,
@@ -158,9 +159,17 @@ function createPanelState(): PanelState {
  */
 export function apply(ctx: ClientContext): void {
   ctx.effect(() => {
+    // The host's data channel, built once and shared by every registration: it is
+    // stateless apart from `fetch`, and a second instance would only mean a second
+    // copy of the same route string.
+    //
+    // Without this the panel mounts with no `port`, renders its shell, and fails
+    // every action with 宿主数据通道未接通 — which is precisely the bug this fixes.
+    const port = createHostPort()
+
     const disposePanel = ctx.slots.inject('main', () => ctx.slots.register(
       { name: 'main', key: KNOWLEDGE_PANEL_KEY },
-      () => <KnowledgeBasePanel state={panelState} />,
+      () => <KnowledgeBasePanel state={panelState} port={port} />,
     ))
 
     const disposeRow = ctx.slots.inject('sidebar.panellist', () => ctx.slots.register(

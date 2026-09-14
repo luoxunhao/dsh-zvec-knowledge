@@ -191,6 +191,44 @@ if (existsSync(installed)) {
   check('install: the tool bundle carries the spec field names', /match_score/.test(toolBundle) && /below_floor/.test(toolBundle), 'match_score and below_floor present')
   check('install: the host declares the tools injection', /inject\s*=\s*\[['"]tools['"]\]/.test(hostBundle), "inject = ['tools']")
 
+  // A host bundle can be present, complete, and still fail to load. The shipped
+  // bug was `apply()` reading `ctx.workspaceDir` — an undeclared context property,
+  // which throws on any fiber that declares `inject` — while building the tool
+  // definition. The whole profile then refused to boot. Nothing above would catch
+  // it: the package installs, every entry resolves, and the bundle is intact. So
+  // the last mile is asserted directly: load the *installed* entry against a
+  // context carrying the services the manifest declares and no others, and require
+  // that it registers its tool.
+  try {
+    const cordis = await import('@deepseek-ai/cordis')
+    const registered = []
+    const probeRoot = new cordis.Context()
+    probeRoot.provide('tools', {
+      register: definition => {
+        registered.push(definition)
+        return () => {}
+      },
+    })
+    probeRoot.provide('sessions', { list: () => [] })
+    const entry = new URL(`file:///${join(installed, 'lib', 'index.js').replace(/\\/g, '/')}`).href
+    const { apply } = await import(entry)
+    probeRoot.plugin({ name: 'kb01-load-probe', inject: ['tools'], apply }, {
+      stateDir: '.dsh-kb-zvec',
+      chunking: { mode: 'heading', chunkTokens: 1024, overlapTokens: 128, minChunkTokens: 64 },
+      retrieval: { topk: 8, minScore: 0.55 },
+      quota: { bytes: null, warnAt: 0.9 },
+    })
+    // The tool registers from an effect, which the fiber runs on activation.
+    await new Promise(resolve => setTimeout(resolve, 50))
+    check(
+      'install: the installed host bundle loads and registers its tool',
+      registered.length > 0,
+      registered.length > 0 ? `${registered.map(d => d.name).join(', ')} registered` : 'loaded, but registered nothing',
+    )
+  } catch (error) {
+    check('install: the installed host bundle loads and registers its tool', false, `threw: ${String(error.message)}`)
+  }
+
   const clientBundle = readFileSync(join(installed, 'lib', 'client.js'), 'utf8')
   for (const seam of ['sidebar.panellist', 'tool.call.toolview', 'dsh_kb_search']) {
     check(`install: the client bundle contributes ${seam}`, clientBundle.includes(seam), seam)
