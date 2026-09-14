@@ -1,0 +1,84 @@
+/* Tabs — design spec §4.6. Tabs switch a deeper region than a segmented control
+ * does; the selected state is text plus a 2px underline rather than a raised
+ * surface, which is what distinguishes the two in the spec. */
+
+.list {
+  display: flex;
+  align-items: stretch;
+  gap: var(--kb-space-6);
+  border-bottom: 1px solid var(--kb-border-subtle);
+}
+
+.tab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--kb-space-2);
+  height: var(--kb-control-lg);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--kb-text-quiet);
+  font-family: var(--kb-font-sans);
+  font-size: var(--kb-size-body);
+  cursor: pointer;
+  transition: color 0.12s ease;
+}
+
+.tab:hover:not(:disabled) {
+  color: var(--kb-text-primary);
+}
+
+.tab:focus-visible {
+  outline: var(--kb-outline-focus);
+  outline-offset: 1px;
+  border-radius: var(--kb-radius-xs);
+}
+
+.tab:disabled {
+  color: var(--kb-text-disabled);
+  cursor: not-allowed;
+}
+
+.selected {
+  color: var(--kb-brand);
+  font-weight: 500;
+}
+
+/* The underline is drawn on the tab, not on the list, so each selected tab
+ * carries its own marker and the list border stays a single hairline. */
+.selected::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: var(--kb-tab-underline);
+  background: var(--kb-brand);
+  border-radius: var(--kb-radius-xs);
+}
+
+/* Busy keeps the tab visible and blocks switching, so a tab change mid-commit
+ * cannot race the write it would invalidate. */
+.loading {
+  cursor: progress;
+}
+
+.loading .tab {
+  pointer-events: none;
+}
+
+.count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--kb-badge-height);
+  height: var(--kb-badge-height);
+  padding: 0 var(--kb-space-1);
+  border-radius: var(--kb-radius-full);
+  background: var(--kb-bg-subtle);
+  color: var(--kb-text-secondary);
+  font-family: var(--kb-font-mono);
+  font-size: var(--kb-size-mono);
+  font-variant-numeric: tabular-nums;
+}

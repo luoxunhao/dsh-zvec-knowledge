@@ -1,0 +1,81 @@
+/* SegmentedControl — design spec §4.3. Native radios carry selection so arrow-key
+ * navigation and screen-reader grouping come for free.
+ *
+ * The visual surface is the `.text` span rather than the label wrapper, so the
+ * selected state is reachable with a sibling selector (`.input:checked ~ .text`)
+ * instead of `:has()`. That keeps the control working on engines without
+ * `:has()` support, which a plugin cannot assume of the host's browser floor. */
+
+.group {
+  display: inline-flex;
+  gap: var(--kb-segment-padding);
+  padding: var(--kb-segment-padding);
+  border-radius: var(--kb-radius-md);
+  background: var(--kb-bg-subtle);
+}
+
+.segment {
+  position: relative;
+  display: inline-flex;
+}
+
+.input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.text {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: var(--kb-control-md);
+  padding: 0 var(--kb-space-4);
+  border-radius: var(--kb-radius-sm);
+  font-size: var(--kb-size-body-sm);
+  color: var(--kb-text-secondary);
+  white-space: nowrap;
+  transition: background-color 0.12s ease, color 0.12s ease;
+  pointer-events: none;
+}
+
+/* The selected segment is a raised surface, expressed with the level-1 shadow —
+ * one of the three places the spec allows a shadow outside a floating layer. */
+.input:checked ~ .text {
+  background: var(--kb-bg-surface);
+  box-shadow: var(--kb-shadow-1);
+  color: var(--kb-text-primary);
+  font-weight: 500;
+}
+
+.input:hover:not(:disabled) ~ .text {
+  color: var(--kb-text-primary);
+}
+
+.input:focus-visible ~ .text {
+  outline: var(--kb-outline-focus);
+  outline-offset: 1px;
+}
+
+.input:disabled ~ .text {
+  color: var(--kb-text-disabled);
+}
+
+.input:disabled {
+  cursor: not-allowed;
+}
+
+/* Busy freezes the whole group: a strategy switch mid-save must not accept a
+ * second choice the caller never sees. */
+.loading {
+  opacity: 0.7;
+}
+
+.loading .input {
+  cursor: progress;
+  pointer-events: none;
+}

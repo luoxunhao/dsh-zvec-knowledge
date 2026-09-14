@@ -1,0 +1,31 @@
+/* CountBadge — design spec §4.4. Numbers are monospaced and capped at two
+ * digits, because a badge that grows to four columns breaks the list baseline it
+ * was supposed to annotate. */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--kb-badge-height);
+  height: var(--kb-badge-height);
+  padding: 0 var(--kb-space-1);
+  border-radius: var(--kb-radius-full);
+  background: var(--kb-bg-subtle);
+  color: var(--kb-text-secondary);
+  font-family: var(--kb-font-mono);
+  font-size: var(--kb-size-mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* The accent variant is reserved for the one count that is the reason the user
+ * is looking at the list, e.g. a failure count next to a build. */
+.accent {
+  background: var(--kb-status-failed-bg);
+  color: var(--kb-status-failed-text);
+}
+
+.disabled {
+  background: var(--kb-bg-subtle);
+  color: var(--kb-text-disabled);
+}

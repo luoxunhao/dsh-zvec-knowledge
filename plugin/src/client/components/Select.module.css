@@ -1,0 +1,74 @@
+/* Select — design spec §4.3. Native element with a plugin-drawn chevron so the
+ * control matches the text field exactly and keeps keyboard behaviour for free. */
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kb-space-1);
+}
+
+.label {
+  font-size: var(--kb-size-body-sm);
+  line-height: var(--kb-leading-body-sm);
+  color: var(--kb-text-primary);
+}
+
+.wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.control {
+  width: 100%;
+  height: var(--kb-control-md);
+  padding: 0 var(--kb-field-search-inset) 0 var(--kb-space-3);
+  border: 1px solid var(--kb-border-strong);
+  border-radius: var(--kb-radius-sm);
+  background: var(--kb-bg-surface);
+  color: var(--kb-text-primary);
+  font-family: var(--kb-font-sans);
+  font-size: var(--kb-size-body-sm);
+  /* A long value truncates instead of stretching the control; the full value is
+   * carried by the title attribute. */
+  text-overflow: ellipsis;
+  appearance: none;
+  transition: border-color 0.12s ease, background-color 0.12s ease;
+}
+
+.control:hover:not(:disabled) {
+  border-color: var(--kb-neutral-400);
+}
+
+.control:focus-visible {
+  border-color: var(--kb-brand);
+  outline: var(--kb-outline-focus);
+  outline-offset: 1px;
+  box-shadow: var(--kb-shadow-focus);
+}
+
+.control:disabled {
+  background: var(--kb-bg-subtle);
+  border-color: var(--kb-border-subtle);
+  color: var(--kb-text-disabled);
+  cursor: not-allowed;
+}
+
+.chevron {
+  position: absolute;
+  right: var(--kb-space-3);
+  display: flex;
+  color: var(--kb-text-tertiary);
+  pointer-events: none;
+}
+
+.trailing {
+  position: absolute;
+  right: var(--kb-field-search-inset);
+  display: flex;
+  color: var(--kb-text-tertiary);
+}
+
+.loading .control {
+  color: var(--kb-text-secondary);
+}

@@ -1,0 +1,36 @@
+# dsh-zvec-knowledge bundle patch — mounts the knowledge-base plugin into the
+# host composition of a dsh profile. The plugin owns one zvec-backed store of
+# knowledge collections and registers the `dsh_kb_search` retrieval tool into
+# the shared `tools` registry, so a session can drive it through natural
+# language.
+#
+# Install: `dsh plugin --profile <name> add <this package>` (npm or a local
+# path). That command pnpm-installs the package into the profile and reconciles
+# it into the profile's `dsh.profile.bundles` layer list.
+#
+# Every value below is a deployment-varying choice, so it lives here rather
+# than as a constant in the plugin source (harness convention: no hardcoded
+# tunables in plugins).
+- insert:
+    - id: zvec-knowledge
+      # Node-resolvable package name — must stay in sync with package.json
+      # `name`. Quoted because `@`/`:` are reserved indicators in YAML plain
+      # scalars.
+      name: 'dsh-zvec-knowledge'
+      config:
+        # Storage root, resolved against the session workspace so two
+        # workspaces never share an index. Relative paths are the norm;
+        # an absolute path opts out of workspace isolation deliberately.
+        stateDir: .dsh-kb-zvec
+        # Default chunking strategy (design spec §5.5, §10.1).
+        chunking:
+          mode: heading
+          chunkTokens: 1024
+          overlapTokens: 128
+          minChunkTokens: 64
+        # Default retrieval knobs (design spec §5.6, §9.2, §10.1).
+        retrieval:
+          topk: 8
+          # Below this normalized score a hit never reaches RAG generation
+          # (design spec §6.4 兜底文案).
+          minScore: 0.55

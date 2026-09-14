@@ -1,0 +1,113 @@
+/* Checkbox and Radio — design spec §4.3. Both are a 16px native input visually
+ * replaced by a plugin-drawn box, for the same reason as the switch. */
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--kb-space-2);
+}
+
+.control {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+}
+
+.input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.box {
+  width: var(--kb-checkbox-size);
+  height: var(--kb-checkbox-size);
+  border: 1px solid var(--kb-border-strong);
+  border-radius: var(--kb-radius-xs);
+  background: var(--kb-bg-surface);
+  color: var(--kb-text-inverse);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.12s ease, border-color 0.12s ease;
+  pointer-events: none;
+}
+
+/* The radio shares the box geometry and differs only in radius and in what
+ * selected looks like: a filled dot instead of a check mark. */
+.radio .box {
+  border-radius: var(--kb-radius-full);
+}
+
+.input:hover:not(:disabled) + .box {
+  border-color: var(--kb-brand);
+}
+
+.input:focus-visible + .box {
+  outline: var(--kb-outline-focus);
+  outline-offset: 1px;
+  box-shadow: var(--kb-shadow-focus);
+}
+
+.input:checked + .box {
+  background: var(--kb-brand);
+  border-color: var(--kb-brand);
+}
+
+.radio .input:checked + .box {
+  background: var(--kb-bg-surface);
+  border-color: var(--kb-brand);
+}
+
+.dot {
+  width: calc(var(--kb-checkbox-size) / 2);
+  height: calc(var(--kb-checkbox-size) / 2);
+  border-radius: var(--kb-radius-full);
+  background: var(--kb-brand);
+}
+
+.input:disabled + .box {
+  background: var(--kb-bg-subtle);
+  border-color: var(--kb-border-subtle);
+  color: var(--kb-text-disabled);
+  cursor: not-allowed;
+}
+
+.input:disabled:checked + .box {
+  background: var(--kb-brand-100);
+  border-color: var(--kb-brand-200);
+}
+
+.radio .input:disabled:checked + .box {
+  background: var(--kb-bg-subtle);
+}
+
+.radio .input:disabled ~ .dot {
+  background: var(--kb-text-disabled);
+}
+
+/* Busy blocks the pointer and dims the box so a control mid-commit cannot be
+ * flipped into a state the caller never received. */
+.loading .input {
+  cursor: progress;
+  pointer-events: none;
+}
+
+.loading .box {
+  opacity: 0.6;
+}
+
+.label {
+  font-size: var(--kb-size-body-sm);
+  line-height: var(--kb-leading-body-sm);
+  color: var(--kb-text-primary);
+}
+
+.dense .box,
+.dense .label {
+  font-size: var(--kb-size-caption);
+}

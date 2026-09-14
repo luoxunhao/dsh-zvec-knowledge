@@ -1,0 +1,35 @@
+/* Tag — design spec §4.4.
+ *
+ * A tag classifies; it does not act. Removal is an IconButton rendered inside the
+ * tag, which is why this module declares no interactive state and the component
+ * gate keeps it that way: an affordance here would belong to the button, and
+ * duplicating it here is how one of the two ends up without a focus ring. */
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--kb-space-2);
+  height: var(--kb-tag-height);
+  padding: 0 var(--kb-space-3);
+  border: 1px solid transparent;
+  border-radius: var(--kb-radius-sm);
+  font-family: var(--kb-font-sans);
+  font-size: var(--kb-size-caption);
+  white-space: nowrap;
+}
+
+/* Removing a tag compresses the right padding: the close button carries its own
+ * hit area, so the text-to-icon gap already supplies the visual breathing room. */
+.removable {
+  padding-right: var(--kb-space-2);
+}
+
+.neutral {
+  background: var(--kb-bg-subtle);
+  color: var(--kb-text-secondary);
+}
+
+.brand {
+  background: var(--kb-brand-tint);
+  color: var(--kb-brand);
+}

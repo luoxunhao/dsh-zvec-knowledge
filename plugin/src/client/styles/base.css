@@ -1,0 +1,97 @@
+/**
+ * Baseline plugin stylesheet: the scope root and the few primitives that are
+ * genuinely cross-cutting.
+ *
+ * Global (not CSS Modules) because it defines the plugin's own scope root;
+ * every class carries the `kb-` prefix so it cannot collide with host classes
+ * in the same document. Values come only from generated tokens — the design
+ * spec forbids hardcoded colours and sizes here.
+ *
+ * Component appearance does NOT live here. Anything that is one component's
+ * look belongs in that component's CSS module, where the hashed class name
+ * keeps it from leaking and the five-state gate can find it; this file keeps
+ * only what several components address by the same name.
+ */
+
+.kb-root {
+  font-family: var(--kb-font-sans);
+  font-size: var(--kb-size-body);
+  line-height: var(--kb-leading-body);
+  color: var(--kb-text-primary);
+  background: var(--kb-bg-app);
+  -webkit-font-smoothing: antialiased;
+}
+
+/**
+ * Technical values (collection ids, chunk counts, scores, timestamps) stay
+ * monospaced with tabular figures so list columns align vertically. This is the
+ * design spec's "技术值一律等宽" rule, and it is a class rather than a property
+ * on the root because the surrounding UI text must NOT be monospaced.
+ */
+.kb-mono {
+  font-family: var(--kb-font-mono);
+  font-size: var(--kb-size-mono);
+  line-height: var(--kb-leading-mono);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+}
+
+/**
+ * Focus is expressed with a brand outline plus a soft ring, never with a shadow
+ * and never by removing the outline. Removing it is the single most common
+ * accessibility regression in plugin UI, so the rule is stated once here for
+ * every element rather than repeated per component.
+ *
+ * Both halves come from tokens: the design spec writes "2px 主色" and
+ * "外发光 4px 15%" inline at every control, which is exactly the kind of
+ * repeated literal that drifts once one control is adjusted.
+ */
+.kb-root :focus-visible,
+.kb-focusable:focus-visible {
+  outline: var(--kb-outline-focus);
+  outline-offset: 1px;
+  box-shadow: var(--kb-shadow-focus);
+}
+
+.kb-root :focus:not(:focus-visible) {
+  outline: none;
+}
+
+/** Visually hidden but reachable by assistive technology (icon-button labels). */
+.kb-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/**
+ * Progress and score tracks share one token pair so a theme cannot desync the
+ * two. Kept global because the progress bar and the score bar are separate
+ * components that must stay visually identical.
+ */
+.kb-track {
+  background: var(--kb-score-track);
+  border-radius: var(--kb-radius-xs);
+  overflow: hidden;
+}
+
+.kb-track__fill {
+  height: 100%;
+  border-radius: inherit;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kb-root *,
+  .kb-root *::before,
+  .kb-root *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}

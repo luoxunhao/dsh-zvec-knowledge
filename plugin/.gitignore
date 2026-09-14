@@ -1,0 +1,4 @@
+node_modules/
+lib/
+tmp/
+zvec-smoke-report.json

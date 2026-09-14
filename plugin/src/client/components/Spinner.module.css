@@ -1,0 +1,39 @@
+.spinner {
+  display: inline-block;
+  flex: none;
+  border-radius: var(--kb-radius-full);
+  border-style: solid;
+  border-color: currentColor;
+  border-top-color: transparent;
+  animation: kb-spin 0.7s linear infinite;
+}
+
+.sm {
+  width: 12px;
+  height: 12px;
+  border-width: 1.5px;
+}
+
+.md {
+  width: 14px;
+  height: 14px;
+  border-width: 1.5px;
+}
+
+.lg {
+  width: 18px;
+  height: 18px;
+  border-width: 2px;
+}
+
+@keyframes kb-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation-duration: 1.6s;
+  }
+}

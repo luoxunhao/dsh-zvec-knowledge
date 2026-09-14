@@ -1,0 +1,142 @@
+/* Button — design spec §4.1.
+ * Four variants, three sizes, five states. Only tokens, no literal values. */
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--kb-space-2);
+  border: 1px solid transparent;
+  border-radius: var(--kb-radius-sm);
+  font-family: var(--kb-font-sans);
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+
+/* Sizes: the design spec fixes height, horizontal padding and font size
+ * together, so the same form never mixes control heights (§3.7). */
+.sm {
+  height: var(--kb-control-sm);
+  padding: 0 var(--kb-space-3);
+  font-size: var(--kb-size-caption);
+}
+
+.md {
+  height: var(--kb-control-md);
+  padding: 0 var(--kb-space-4);
+  font-size: var(--kb-size-body-sm);
+}
+
+.lg {
+  height: var(--kb-control-lg);
+  padding: 0 var(--kb-space-5);
+  font-size: var(--kb-size-body);
+}
+
+.primary {
+  background: var(--kb-brand);
+  color: var(--kb-text-inverse);
+}
+
+.primary:hover:not(:disabled) {
+  background: var(--kb-brand-hover);
+}
+
+.primary:active:not(:disabled) {
+  background: var(--kb-brand-pressed);
+}
+
+.secondary {
+  background: var(--kb-bg-surface);
+  border-color: var(--kb-border-strong);
+  color: var(--kb-neutral-500);
+}
+
+.secondary:hover:not(:disabled) {
+  background: var(--kb-bg-hover);
+  border-color: var(--kb-brand-border);
+  color: var(--kb-text-primary);
+}
+
+.secondary:active:not(:disabled) {
+  background: var(--kb-bg-subtle);
+}
+
+.ghost {
+  background: transparent;
+  color: var(--kb-brand);
+}
+
+.ghost:hover:not(:disabled) {
+  background: var(--kb-brand-tint);
+}
+
+.ghost:active:not(:disabled) {
+  background: var(--kb-brand-tint-hover);
+}
+
+.danger {
+  background: var(--kb-status-failed);
+  color: var(--kb-text-inverse);
+}
+
+.danger:hover:not(:disabled) {
+  filter: brightness(0.93);
+}
+
+.danger:active:not(:disabled) {
+  filter: brightness(0.86);
+}
+
+/* Focus stays visible and is never removed; both halves come from tokens so
+ * every control in the plugin shares one focus treatment. */
+.button:focus-visible {
+  outline: var(--kb-outline-focus);
+  outline-offset: 1px;
+  box-shadow: var(--kb-shadow-focus);
+}
+
+/* Disabled keeps its size and stays readable: the spec's reduced-contrast pair
+ * for the primary variant, applied per variant so no state looks clickable. */
+.button:disabled {
+  cursor: not-allowed;
+}
+
+.primary:disabled {
+  background: var(--kb-brand-100);
+  color: var(--kb-brand-300);
+}
+
+.secondary:disabled {
+  background: var(--kb-bg-subtle);
+  border-color: var(--kb-border-subtle);
+  color: var(--kb-text-disabled);
+}
+
+.ghost:disabled {
+  background: transparent;
+  color: var(--kb-text-disabled);
+}
+
+.danger:disabled {
+  background: var(--kb-status-failed-bg);
+  color: var(--kb-status-failed-border);
+}
+
+/* Loading holds the variant's own fill and only swaps the leading indicator and
+ * the label, so the button never changes width or height while busy. */
+.loading {
+  cursor: progress;
+}
+
+.label {
+  display: inline-flex;
+  align-items: center;
+}
+
+.icon {
+  display: inline-flex;
+  align-items: center;
+}

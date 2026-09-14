@@ -1,0 +1,119 @@
+/* TextField — design spec §4.2. Covers the text input, the search input and the
+ * textarea, which the spec defines as one family differing only in adornment and
+ * height behaviour. */
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kb-space-1);
+}
+
+/* The label sits above the control and the hint below it; the spec fixes that
+ * order so a form never mixes label placement between fields. */
+.label {
+  font-size: var(--kb-size-body-sm);
+  line-height: var(--kb-leading-body-sm);
+  color: var(--kb-text-primary);
+}
+
+.hint {
+  font-size: var(--kb-size-caption);
+  line-height: var(--kb-leading-caption);
+  color: var(--kb-text-secondary);
+}
+
+.wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.control {
+  width: 100%;
+  height: var(--kb-control-md);
+  padding: 0 var(--kb-space-3);
+  border: 1px solid var(--kb-border-strong);
+  border-radius: var(--kb-radius-sm);
+  background: var(--kb-bg-surface);
+  color: var(--kb-text-primary);
+  font-family: var(--kb-font-sans);
+  font-size: var(--kb-size-body-sm);
+  transition: border-color 0.12s ease, background-color 0.12s ease;
+}
+
+.control::placeholder {
+  color: var(--kb-text-tertiary);
+}
+
+.control:hover:not(:disabled) {
+  border-color: var(--kb-neutral-400);
+}
+
+/* Focus replaces the border colour and adds the ring from the token pair; the
+ * spec forbids expressing focus with a shadow. */
+.control:focus-visible {
+  border-color: var(--kb-brand);
+  outline: var(--kb-outline-focus);
+  outline-offset: 1px;
+  box-shadow: var(--kb-shadow-focus);
+}
+
+.control:disabled {
+  background: var(--kb-bg-subtle);
+  border-color: var(--kb-border-subtle);
+  color: var(--kb-text-disabled);
+  cursor: not-allowed;
+}
+
+.textarea {
+  height: auto;
+  min-height: var(--kb-textarea-min-height);
+  padding: var(--kb-space-3);
+  line-height: var(--kb-leading-field);
+  resize: vertical;
+}
+
+.search {
+  padding-left: var(--kb-field-search-inset);
+}
+
+.searchIcon {
+  position: absolute;
+  left: var(--kb-space-3);
+  display: flex;
+  color: var(--kb-text-tertiary);
+  pointer-events: none;
+}
+
+.trailing {
+  position: absolute;
+  right: var(--kb-space-3);
+  display: flex;
+  color: var(--kb-text-tertiary);
+}
+
+/* Busy keeps the control's own box and reserves the trailing slot, so a field
+ * never jumps when a value is being checked. */
+.loading .control {
+  padding-right: var(--kb-field-search-inset);
+}
+
+/* Negative validation uses the danger semantic colour and always carries a
+ * reason; the spec forbids a bare "invalid input" message.
+ *
+ * The focus ring is not restated here: overriding the one ring-colour token
+ * makes both the outline and the glow follow, which is the whole reason the ring
+ * was parameterised. */
+.invalid {
+  --kb-focus-ring-color: var(--kb-status-failed);
+}
+
+.invalid .control {
+  border-color: var(--kb-status-failed);
+}
+
+.invalid .error {
+  font-size: var(--kb-size-caption);
+  line-height: var(--kb-leading-caption);
+  color: var(--kb-status-failed-text);
+}

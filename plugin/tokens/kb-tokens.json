@@ -1,0 +1,1170 @@
+{
+  "meta": {
+    "name": "DSH 知识库插件设计令牌",
+    "version": "1.0.0",
+    "spec": "《DSH 知识库插件（基于 zvec）设计规范》v1.1.0 第 3 章（浅色）、第 7 章（深色）",
+    "prefix": "--kb-",
+    "themeSelectors": {
+      "light": ":root",
+      "dark": "body[data-ds-dark-theme]"
+    },
+    "namespaceNote": "所有令牌以 --kb- 前缀命名，避免与宿主 --dsw-* 令牌在同一份全局样式表作用域内碰撞。'specName' 记录设计规范中的原始令牌名，映射关系保持一一对应。",
+    "conflicts": [
+      {
+        "token": "--kb-control-md",
+        "issue": "设计规范 3.7 尺度令牌定义 controlMd = 32，但 4.1 按钮 md 尺寸、4.2 文本框高度、4.3 下拉与分段控件高度均为 34。",
+        "resolution": "取 34。4.1/4.2/4.3 是组件的规范性定义且三处一致，3.7 为单处数值，按多数与组件基线对齐原则取值。",
+        "action": "回写设计规范 v1.1.1 时需同步修正 3.7 或统一各控件高度。"
+      },
+      {
+        "token": "--kb-border-subtle（顶栏分割线）",
+        "issue": "设计规范 3.2 规定「分割线只使用 neutral-200 (#E1E5EC)」，但 6.1 顶栏使用 #E9ECF2（不在令牌表内），5.1 卡片内分隔线使用中性 100 (#EDEFF4)。",
+        "resolution": "新增 --kb-divider-topbar (#E9ECF2) 与 --kb-divider-card (#EDEFF4) 两个具名令牌承载这两处实测值，不再视为裸色值。",
+        "action": "回写设计规范 v1.1.1 时需二选一：把它们纳入令牌表，或把两处改回 neutral-200。"
+      },
+      {
+        "token": "状态色描边（浅色）",
+        "issue": "设计规范 3.3 只给出「实色 / 底纹 / 文字色」三列，缺浅色描边；而 2.3 设计原则 3 与 4.5 状态胶囊要求「文字 + 实色 + 描边」三件套，缺一违规。深色 7.4 提供了描边列。",
+        "resolution": "浅色描边为派生值，取底纹与文字色之间的中间调，标记 derived = true。",
+        "action": "待设计侧确认浅色五态描边取值后替换。"
+      },
+      {
+        "token": "组件级尺寸未令牌化",
+        "issue": "设计规范 3.7 的 Scale 令牌集（29 项）只覆盖间距、圆角、字号、控件高度与布局尺寸；标签高 26、胶囊 26/22、徽标 20、图标按钮 34×34、开关 38×22、进度条高 5、集合图标 38×38 等组件级尺寸均不在其中。",
+        "resolution": "新增 component 令牌组承载这些尺寸，使「业务样式无裸尺寸」这条验收项可以达成，而不是被迫放宽。",
+        "action": "回写设计规范 v1.1.1 时把 component 组纳入 Scale 令牌集，并同步画布变量面板。"
+      },
+      {
+        "token": "--kb-text-quiet",
+        "issue": "设计规范 4.6 指定选项卡未选态文字为 #5B6472，该值不在中性色阶内，且与「待构建」状态文字色相同，容易被当成状态色误用。",
+        "resolution": "单列 --kb-text-quiet 令牌承载这一取值，与状态语义色区分开。",
+        "action": "回写设计规范时二选一：纳入中性色阶，或改用 neutral-500（#6B7484）并接受轻微色差。"
+      }
+    ]
+  },
+  "tokens": [
+    {
+      "var": "--kb-brand-50",
+      "specName": "brand-50",
+      "group": "brand",
+      "kind": "color",
+      "light": "#EEF0FB",
+      "note": "最浅底纹、悬浮行"
+    },
+    {
+      "var": "--kb-brand-100",
+      "specName": "brand-100",
+      "group": "brand",
+      "kind": "color",
+      "light": "#E0E3F8",
+      "note": "选中底、禁用态填充"
+    },
+    {
+      "var": "--kb-brand-200",
+      "specName": "brand-200",
+      "group": "brand",
+      "kind": "color",
+      "light": "#C7CBF3",
+      "note": "弱描边"
+    },
+    {
+      "var": "--kb-brand-300",
+      "specName": "brand-300",
+      "group": "brand",
+      "kind": "color",
+      "light": "#A6ACE9",
+      "note": "上传区描边、次级图形"
+    },
+    {
+      "var": "--kb-brand-400",
+      "specName": "brand-400",
+      "group": "brand",
+      "kind": "color",
+      "light": "#7A84E2",
+      "note": "选中卡片描边"
+    },
+    {
+      "var": "--kb-brand-500",
+      "specName": "brand-500",
+      "group": "brand",
+      "kind": "color",
+      "light": "#4F5BD5",
+      "note": "主按钮、选中文字、焦点态"
+    },
+    {
+      "var": "--kb-brand-600",
+      "specName": "brand-600",
+      "group": "brand",
+      "kind": "color",
+      "light": "#4149BF",
+      "note": "主按钮悬停"
+    },
+    {
+      "var": "--kb-brand-700",
+      "specName": "brand-700",
+      "group": "brand",
+      "kind": "color",
+      "light": "#343BA0",
+      "note": "主按钮按下"
+    },
+    {
+      "var": "--kb-brand",
+      "specName": "brandPrimary",
+      "group": "brand",
+      "kind": "color",
+      "light": "#4F5BD5",
+      "dark": "#6F7BE8",
+      "note": "语义化别名，等同 brand-500"
+    },
+    {
+      "var": "--kb-brand-hover",
+      "specName": "brandHover",
+      "group": "brand",
+      "kind": "color",
+      "light": "#4149BF",
+      "dark": "#5C68DF",
+      "note": "语义化别名，等同 brand-600"
+    },
+    {
+      "var": "--kb-brand-pressed",
+      "specName": "brandPressed",
+      "group": "brand",
+      "kind": "color",
+      "light": "#343BA0",
+      "dark": "#4A55C8",
+      "note": "语义化别名，等同 brand-700"
+    },
+    {
+      "var": "--kb-brand-link",
+      "specName": "brandLink",
+      "group": "brand",
+      "kind": "color",
+      "light": "#4F5BD5",
+      "dark": "#9AA2F0",
+      "note": "链接文字；深色下提亮以维持对比度"
+    },
+    {
+      "var": "--kb-brand-tint",
+      "specName": "brandTint",
+      "group": "brand",
+      "kind": "color",
+      "light": "#EEF0FB",
+      "dark": "#1E2140",
+      "note": "选中背景与信息底纹"
+    },
+    {
+      "var": "--kb-brand-tint-hover",
+      "specName": "brandTintHover",
+      "group": "brand",
+      "kind": "color",
+      "light": "#E0E3F8",
+      "dark": "#262A52",
+      "note": "品牌底纹悬停态"
+    },
+    {
+      "var": "--kb-brand-border",
+      "specName": "brandBorder",
+      "group": "brand",
+      "kind": "color",
+      "light": "#C7CBF3",
+      "dark": "#33396B",
+      "note": "品牌色系的弱描边"
+    },
+
+    {
+      "var": "--kb-neutral-0",
+      "specName": "neutral-0",
+      "group": "neutral",
+      "kind": "color",
+      "light": "#FFFFFF",
+      "note": "卡片与浮层承载面"
+    },
+    {
+      "var": "--kb-neutral-25",
+      "specName": "neutral-25",
+      "group": "neutral",
+      "kind": "color",
+      "light": "#FAFBFC",
+      "note": "极浅分区底"
+    },
+    {
+      "var": "--kb-neutral-50",
+      "specName": "neutral-50",
+      "group": "neutral",
+      "kind": "color",
+      "light": "#F5F6F9",
+      "note": "应用底色、预览底板"
+    },
+    {
+      "var": "--kb-neutral-100",
+      "specName": "neutral-100",
+      "group": "neutral",
+      "kind": "color",
+      "light": "#EDEFF4",
+      "note": "悬浮态填充、分段控件底"
+    },
+    {
+      "var": "--kb-neutral-200",
+      "specName": "neutral-200",
+      "group": "neutral",
+      "kind": "color",
+      "light": "#E1E5EC",
+      "note": "分割线、卡片描边"
+    },
+    {
+      "var": "--kb-neutral-300",
+      "specName": "neutral-300",
+      "group": "neutral",
+      "kind": "color",
+      "light": "#CBD2DE",
+      "note": "控件描边、禁用描边"
+    },
+    {
+      "var": "--kb-neutral-400",
+      "specName": "neutral-400",
+      "group": "neutral",
+      "kind": "color",
+      "light": "#9AA3B2",
+      "note": "三级文字、占位符"
+    },
+    {
+      "var": "--kb-neutral-500",
+      "specName": "neutral-500",
+      "group": "neutral",
+      "kind": "color",
+      "light": "#6B7484",
+      "note": "二级文字、说明文案"
+    },
+    {
+      "var": "--kb-neutral-900",
+      "specName": "neutral-900",
+      "group": "neutral",
+      "kind": "color",
+      "light": "#131619",
+      "note": "一级文字、标题"
+    },
+
+    {
+      "var": "--kb-bg-canvas",
+      "specName": "bgCanvas",
+      "group": "surface",
+      "kind": "color",
+      "light": "#FAFBFC",
+      "dark": "#0B0D10",
+      "note": "画布底"
+    },
+    {
+      "var": "--kb-bg-app",
+      "specName": "bgApp",
+      "group": "surface",
+      "kind": "color",
+      "light": "#F5F6F9",
+      "dark": "#121519",
+      "note": "应用底色"
+    },
+    {
+      "var": "--kb-bg-surface",
+      "specName": "bgSurface",
+      "group": "surface",
+      "kind": "color",
+      "light": "#FFFFFF",
+      "dark": "#171A20",
+      "note": "承载面（卡片、面板）"
+    },
+    {
+      "var": "--kb-bg-subtle",
+      "specName": "bgSubtle",
+      "group": "surface",
+      "kind": "color",
+      "light": "#EDEFF4",
+      "dark": "#1D2128",
+      "note": "弱填充、输入框"
+    },
+    {
+      "var": "--kb-bg-hover",
+      "specName": "bgHover",
+      "group": "surface",
+      "kind": "color",
+      "light": "#F5F6F9",
+      "dark": "#242832",
+      "note": "悬停态填充"
+    },
+    {
+      "var": "--kb-border-subtle",
+      "specName": "borderSubtle",
+      "group": "border",
+      "kind": "color",
+      "light": "#E1E5EC",
+      "dark": "#2C313C",
+      "note": "弱描边"
+    },
+    {
+      "var": "--kb-border-strong",
+      "specName": "borderStrong",
+      "group": "border",
+      "kind": "color",
+      "light": "#CBD2DE",
+      "dark": "#3A404D",
+      "note": "控件描边"
+    },
+    {
+      "var": "--kb-divider-topbar",
+      "specName": null,
+      "group": "border",
+      "kind": "color",
+      "light": "#E9ECF2",
+      "dark": "#2C313C",
+      "note": "顶栏底部 1px 分隔（6.1 实测值，非令牌表内色值，见 conflicts）"
+    },
+    {
+      "var": "--kb-divider-card",
+      "specName": null,
+      "group": "border",
+      "kind": "color",
+      "light": "#EDEFF4",
+      "dark": "#2C313C",
+      "note": "卡片内 1px 分隔（5.1 实测值，见 conflicts）"
+    },
+    {
+      "var": "--kb-text-primary",
+      "specName": "textPrimary",
+      "group": "text",
+      "kind": "color",
+      "light": "#131619",
+      "dark": "#EDF0F5",
+      "note": "一级文字。深色下禁止使用纯白"
+    },
+    {
+      "var": "--kb-text-secondary",
+      "specName": "textSecondary",
+      "group": "text",
+      "kind": "color",
+      "light": "#6B7484",
+      "dark": "#A7B0BF",
+      "note": "二级文字"
+    },
+    {
+      "var": "--kb-text-tertiary",
+      "specName": "textTertiary",
+      "group": "text",
+      "kind": "color",
+      "light": "#9AA3B2",
+      "dark": "#8A93A3",
+      "note": "三级文字"
+    },
+    {
+      "var": "--kb-text-disabled",
+      "specName": "textDisabled",
+      "group": "text",
+      "kind": "color",
+      "light": "#B8BFC9",
+      "dark": "#5A6272",
+      "note": "禁用文字"
+    },
+    {
+      "var": "--kb-text-inverse",
+      "specName": "textInverse",
+      "group": "text",
+      "kind": "color",
+      "light": "#FFFFFF",
+      "dark": "#0B0D10",
+      "note": "深底之上的文字。深色主按钮文字用墨色而非白色（7.5）"
+    },
+    {
+      "var": "--kb-text-quiet",
+      "specName": null,
+      "group": "text",
+      "kind": "color",
+      "light": "#5B6472",
+      "dark": "#A7B0BF",
+      "note": "安静的未选态文字（规范 4.6 选项卡未选态）。该值不在中性色阶内，且与「待构建」状态文字同值；单列令牌以免它被当成状态色使用"
+    },
+
+    {
+      "var": "--kb-status-ready",
+      "specName": "successReady",
+      "group": "status",
+      "kind": "color",
+      "light": "#1E9E8F",
+      "dark": "#2FB3A4",
+      "note": "就绪 / 索引构建完成"
+    },
+    {
+      "var": "--kb-status-ready-bg",
+      "specName": null,
+      "group": "status",
+      "kind": "color",
+      "light": "#E6F5F2",
+      "dark": "#0F2E2B",
+      "note": "就绪底纹"
+    },
+    {
+      "var": "--kb-status-ready-border",
+      "specName": null,
+      "group": "status",
+      "kind": "color",
+      "light": "#A8DFD7",
+      "dark": "#1D4A45",
+      "derived": true,
+      "note": "就绪描边。浅色为派生值，见 conflicts"
+    },
+    {
+      "var": "--kb-status-ready-text",
+      "specName": null,
+      "group": "status",
+      "kind": "color",
+      "light": "#1E6E64",
+      "dark": "#2FB3A4",
+      "note": "就绪文字"
+    },
+    {
+      "var": "--kb-status-building",
+      "specName": "warningBuilding",
+      "group": "status",
+      "kind": "color",
+      "light": "#D98B1F",
+      "dark": "#E0A33A",
+      "note": "构建中"
+    },
+    {
+      "var": "--kb-status-building-bg",
+      "specName": null,
+      "group": "status",
+      "kind": "color",
+      "light": "#FDF3E3",
+      "dark": "#33270F",
+      "note": "构建中底纹"
+    },
+    {
+      "var": "--kb-status-building-border",
+      "specName": null,
+      "group": "status",
+      "kind": "color",
+      "light": "#F2D8A8",
+      "dark": "#57421B",
+      "derived": true,
+      "note": "构建中描边。浅色为派生值，见 conflicts"
+    },
+    {
+      "var": "--kb-status-building-text",
+      "specName": null,
+      "group": "status",
+      "kind": "color",
+      "light": "#8A6A38",
+      "dark": "#E0A33A",
+      "note": "构建中文字"
+    },
+    {
+      "var": "--kb-status-failed",
+      "specName": "dangerFailed",
+      "group": "status",
+      "kind": "color",
+      "light": "#DC2E4C",
+      "dark": "#EE5A73",
+      "note": "失败"
+    },
+    {
+      "var": "--kb-status-failed-bg",
+      "specName": null,
+      "group": "status",
+      "kind": "color",
+      "light": "#FCEAEE",
+      "dark": "#35141B",
+      "note": "失败底纹"
+    },
+    {
+      "var": "--kb-status-failed-border",
+      "specName": null,
+      "group": "status",
+      "kind": "color",
+      "light": "#F2B9C6",
+      "dark": "#5C2333",
+      "derived": true,
+      "note": "失败描边。浅色为派生值，见 conflicts"
+    },
+    {
+      "var": "--kb-status-failed-text",
+      "specName": null,
+      "group": "status",
+      "kind": "color",
+      "light": "#8E4257",
+      "dark": "#EE5A73",
+      "note": "失败文字"
+    },
+    {
+      "var": "--kb-status-pending",
+      "specName": null,
+      "group": "status",
+      "kind": "color",
+      "light": "#8A93A3",
+      "dark": "#8A93A3",
+      "note": "待构建（中性灰）"
+    },
+    {
+      "var": "--kb-status-pending-bg",
+      "specName": null,
+      "group": "status",
+      "kind": "color",
+      "light": "#F0F2F6",
+      "dark": "#1E2128",
+      "note": "待构建底纹"
+    },
+    {
+      "var": "--kb-status-pending-border",
+      "specName": null,
+      "group": "status",
+      "kind": "color",
+      "light": "#D5DAE3",
+      "dark": "#2C313C",
+      "derived": true,
+      "note": "待构建描边。浅色为派生值，见 conflicts"
+    },
+    {
+      "var": "--kb-status-pending-text",
+      "specName": null,
+      "group": "status",
+      "kind": "color",
+      "light": "#5B6472",
+      "dark": "#A7B0BF",
+      "note": "待构建文字"
+    },
+    {
+      "var": "--kb-status-info",
+      "specName": "infoNeutral",
+      "group": "status",
+      "kind": "color",
+      "light": "#3B7DE0",
+      "dark": "#5A97EE",
+      "note": "信息"
+    },
+    {
+      "var": "--kb-status-info-bg",
+      "specName": null,
+      "group": "status",
+      "kind": "color",
+      "light": "#E8F1FD",
+      "dark": "#122340",
+      "note": "信息底纹"
+    },
+    {
+      "var": "--kb-status-info-border",
+      "specName": null,
+      "group": "status",
+      "kind": "color",
+      "light": "#AECDF5",
+      "dark": "#1E3C6B",
+      "derived": true,
+      "note": "信息描边。浅色为派生值，见 conflicts"
+    },
+    {
+      "var": "--kb-status-info-text",
+      "specName": null,
+      "group": "status",
+      "kind": "color",
+      "light": "#3F5F8A",
+      "dark": "#5A97EE",
+      "note": "信息文字"
+    },
+
+    {
+      "var": "--kb-score-strong",
+      "specName": null,
+      "group": "score",
+      "kind": "color",
+      "light": "#1E9E8F",
+      "dark": "#2FB3A4",
+      "note": "强相关，match_score ≥ 0.85"
+    },
+    {
+      "var": "--kb-score-relevant",
+      "specName": null,
+      "group": "score",
+      "kind": "color",
+      "light": "#7CA83F",
+      "dark": "#8BBA4E",
+      "note": "相关，0.70 ≤ match_score < 0.85"
+    },
+    {
+      "var": "--kb-score-fair",
+      "specName": null,
+      "group": "score",
+      "kind": "color",
+      "light": "#D98B1F",
+      "dark": "#E0A33A",
+      "note": "一般，0.55 ≤ match_score < 0.70"
+    },
+    {
+      "var": "--kb-score-low",
+      "specName": null,
+      "group": "score",
+      "kind": "color",
+      "light": "#DC2E4C",
+      "dark": "#EE5A73",
+      "note": "低相关，match_score < 0.55，默认不参与 RAG 生成"
+    },
+    {
+      "var": "--kb-score-track",
+      "specName": null,
+      "group": "score",
+      "kind": "color",
+      "light": "#EDEFF4",
+      "dark": "#2C313C",
+      "note": "分数条与进度条槽色。深色下禁止沿用浅色槽色（7.5）"
+    },
+
+    {
+      "var": "--kb-font-sans",
+      "specName": null,
+      "group": "font",
+      "kind": "fontFamily",
+      "light": "'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+      "note": "界面字体，承担中文与界面文案"
+    },
+    {
+      "var": "--kb-font-mono",
+      "specName": null,
+      "group": "font",
+      "kind": "fontFamily",
+      "light": "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace",
+      "note": "技术字体，承担集合标识、分片数、分数、时间戳"
+    },
+
+    {
+      "var": "--kb-size-display",
+      "specName": "display",
+      "group": "fontSize",
+      "kind": "dimension",
+      "light": "32px",
+      "note": "页面主标题 Bold / 行高 42"
+    },
+    {
+      "var": "--kb-size-h2",
+      "specName": "h2",
+      "group": "fontSize",
+      "kind": "dimension",
+      "light": "24px",
+      "note": "区块标题 Bold / 行高 34"
+    },
+    {
+      "var": "--kb-size-h3",
+      "specName": "h3",
+      "group": "fontSize",
+      "kind": "dimension",
+      "light": "20px",
+      "note": "卡片与面板标题 SemiBold / 行高 30"
+    },
+    {
+      "var": "--kb-size-title",
+      "specName": "title",
+      "group": "fontSize",
+      "kind": "dimension",
+      "light": "16px",
+      "note": "列表项标题 SemiBold / 行高 24"
+    },
+    {
+      "var": "--kb-size-body",
+      "specName": "body",
+      "group": "fontSize",
+      "kind": "dimension",
+      "light": "14px",
+      "note": "正文与表单内容 Regular / 行高 22"
+    },
+    {
+      "var": "--kb-size-body-sm",
+      "specName": "body-sm",
+      "group": "fontSize",
+      "kind": "dimension",
+      "light": "13px",
+      "note": "辅助说明、次要按钮文字 / 行高 20"
+    },
+    {
+      "var": "--kb-size-caption",
+      "specName": "caption",
+      "group": "fontSize",
+      "kind": "dimension",
+      "light": "12px",
+      "note": "标签与元信息 / 行高 18"
+    },
+    {
+      "var": "--kb-size-mono",
+      "specName": "mono",
+      "group": "fontSize",
+      "kind": "dimension",
+      "light": "11px",
+      "note": "令牌、标识与技术数值 JetBrains Mono Medium / 行高 16"
+    },
+
+    {
+      "var": "--kb-leading-display",
+      "specName": null,
+      "group": "lineHeight",
+      "kind": "dimension",
+      "light": "42px",
+      "note": "display 行高"
+    },
+    {
+      "var": "--kb-leading-h2",
+      "specName": null,
+      "group": "lineHeight",
+      "kind": "dimension",
+      "light": "34px",
+      "note": "h2 行高"
+    },
+    {
+      "var": "--kb-leading-h3",
+      "specName": null,
+      "group": "lineHeight",
+      "kind": "dimension",
+      "light": "30px",
+      "note": "h3 行高"
+    },
+    {
+      "var": "--kb-leading-title",
+      "specName": null,
+      "group": "lineHeight",
+      "kind": "dimension",
+      "light": "24px",
+      "note": "title 行高"
+    },
+    {
+      "var": "--kb-leading-body",
+      "specName": null,
+      "group": "lineHeight",
+      "kind": "dimension",
+      "light": "22px",
+      "note": "body 行高"
+    },
+    {
+      "var": "--kb-leading-body-sm",
+      "specName": null,
+      "group": "lineHeight",
+      "kind": "dimension",
+      "light": "20px",
+      "note": "body-sm 行高"
+    },
+    {
+      "var": "--kb-leading-caption",
+      "specName": null,
+      "group": "lineHeight",
+      "kind": "dimension",
+      "light": "18px",
+      "note": "caption 行高"
+    },
+    {
+      "var": "--kb-leading-mono",
+      "specName": null,
+      "group": "lineHeight",
+      "kind": "dimension",
+      "light": "16px",
+      "note": "mono 行高"
+    },
+
+    {
+      "var": "--kb-space-1",
+      "specName": "space1",
+      "group": "space",
+      "kind": "dimension",
+      "light": "4px",
+      "note": "基础单位"
+    },
+    {
+      "var": "--kb-space-2",
+      "specName": "space2",
+      "group": "space",
+      "kind": "dimension",
+      "light": "8px"
+    },
+    {
+      "var": "--kb-space-3",
+      "specName": "space3",
+      "group": "space",
+      "kind": "dimension",
+      "light": "12px"
+    },
+    {
+      "var": "--kb-space-4",
+      "specName": "space4",
+      "group": "space",
+      "kind": "dimension",
+      "light": "16px"
+    },
+    {
+      "var": "--kb-space-5",
+      "specName": "space5",
+      "group": "space",
+      "kind": "dimension",
+      "light": "20px"
+    },
+    {
+      "var": "--kb-space-6",
+      "specName": "space6",
+      "group": "space",
+      "kind": "dimension",
+      "light": "24px"
+    },
+    {
+      "var": "--kb-space-8",
+      "specName": "space8",
+      "group": "space",
+      "kind": "dimension",
+      "light": "32px"
+    },
+    {
+      "var": "--kb-space-10",
+      "specName": "space10",
+      "group": "space",
+      "kind": "dimension",
+      "light": "40px"
+    },
+    {
+      "var": "--kb-space-12",
+      "specName": "space12",
+      "group": "space",
+      "kind": "dimension",
+      "light": "48px"
+    },
+    {
+      "var": "--kb-space-16",
+      "specName": "space16",
+      "group": "space",
+      "kind": "dimension",
+      "light": "64px"
+    },
+
+    {
+      "var": "--kb-radius-xs",
+      "specName": "radiusXs",
+      "group": "radius",
+      "kind": "dimension",
+      "light": "4px",
+      "note": "控件与标签"
+    },
+    {
+      "var": "--kb-radius-sm",
+      "specName": "radiusSm",
+      "group": "radius",
+      "kind": "dimension",
+      "light": "6px",
+      "note": "控件与标签；文本框与下拉"
+    },
+    {
+      "var": "--kb-radius-md",
+      "specName": "radiusMd",
+      "group": "radius",
+      "kind": "dimension",
+      "light": "8px",
+      "note": "卡片与输入框、分段控件"
+    },
+    {
+      "var": "--kb-radius-lg",
+      "specName": "radiusLg",
+      "group": "radius",
+      "kind": "dimension",
+      "light": "12px",
+      "note": "弹窗与抽屉"
+    },
+    {
+      "var": "--kb-radius-xl",
+      "specName": "radiusXl",
+      "group": "radius",
+      "kind": "dimension",
+      "light": "16px",
+      "note": "容器与上传区"
+    },
+    {
+      "var": "--kb-radius-full",
+      "specName": "radiusFull",
+      "group": "radius",
+      "kind": "dimension",
+      "light": "999px",
+      "note": "胶囊与头像"
+    },
+
+    {
+      "var": "--kb-control-sm",
+      "specName": "controlSm",
+      "group": "control",
+      "kind": "dimension",
+      "light": "28px",
+      "note": "表格内操作"
+    },
+    {
+      "var": "--kb-control-md",
+      "specName": "controlMd",
+      "group": "control",
+      "kind": "dimension",
+      "light": "34px",
+      "note": "页面与表单默认。规范 3.7 记 32，此处按 4.1/4.2/4.3 的 34 取值，见 conflicts",
+      "derived": true
+    },
+    {
+      "var": "--kb-control-lg",
+      "specName": "controlLg",
+      "group": "control",
+      "kind": "dimension",
+      "light": "40px",
+      "note": "空状态与表单提交"
+    },
+
+    {
+      "var": "--kb-sidebar-width",
+      "specName": "sidebarWidth",
+      "group": "layout",
+      "kind": "dimension",
+      "light": "240px",
+      "note": "应用外壳侧栏宽度"
+    },
+    {
+      "var": "--kb-topbar-height",
+      "specName": "topbarHeight",
+      "group": "layout",
+      "kind": "dimension",
+      "light": "56px",
+      "note": "应用外壳顶栏高度"
+    },
+
+    {
+      "var": "--kb-shadow-1",
+      "specName": "level-1",
+      "group": "shadow",
+      "kind": "shadow",
+      "light": "0 1px 2px 0 rgba(16, 19, 26, 0.06)",
+      "note": "内嵌卡片、输入框、分段控件选中项"
+    },
+    {
+      "var": "--kb-shadow-2",
+      "specName": "level-2",
+      "group": "shadow",
+      "kind": "shadow",
+      "light": "0 4px 12px -2px rgba(16, 19, 26, 0.08)",
+      "note": "悬浮卡片、下拉菜单"
+    },
+    {
+      "var": "--kb-shadow-3",
+      "specName": "level-3",
+      "group": "shadow",
+      "kind": "shadow",
+      "light": "0 12px 32px -8px rgba(16, 19, 26, 0.12)",
+      "note": "弹窗与抽屉"
+    },
+
+    {
+      "var": "--kb-leading-field",
+      "specName": null,
+      "group": "component",
+      "kind": "dimension",
+      "light": "21px",
+      "note": "文本域行高（规范 4.2 明确写 21，不在 8 级字号阶梯内，故单列）"
+    },
+    {
+      "var": "--kb-textarea-min-height",
+      "specName": null,
+      "group": "component",
+      "kind": "dimension",
+      "light": "62px",
+      "note": "文本域最小高度（规范 4.2）"
+    },
+    {
+      "var": "--kb-segment-padding",
+      "specName": null,
+      "group": "component",
+      "kind": "dimension",
+      "light": "3px",
+      "note": "分段控件槽内距（规范 4.3）"
+    },
+    {
+      "var": "--kb-field-search-inset",
+      "specName": null,
+      "group": "component",
+      "kind": "dimension",
+      "light": "36px",
+      "note": "搜索框内嵌放大镜后文字的左内距＝左内距 12 + 图标 16 + 间距 8（规范 4.2）"
+    },
+    {
+      "var": "--kb-tab-underline",
+      "specName": null,
+      "group": "component",
+      "kind": "dimension",
+      "light": "2px",
+      "note": "选项卡选中态下划线厚度（规范 4.6）"
+    },
+    {
+      "var": "--kb-checkbox-size",
+      "specName": null,
+      "group": "component",
+      "kind": "dimension",
+      "light": "16px",
+      "note": "复选框与单选边长（规范 4.3）"
+    },
+    {
+      "var": "--kb-switch-width",
+      "specName": null,
+      "group": "component",
+      "kind": "dimension",
+      "light": "38px",
+      "note": "开关宽度（规范 4.3）"
+    },
+    {
+      "var": "--kb-switch-height",
+      "specName": null,
+      "group": "component",
+      "kind": "dimension",
+      "light": "22px",
+      "note": "开关高度（规范 4.3）"
+    },
+    {
+      "var": "--kb-switch-knob",
+      "specName": null,
+      "group": "component",
+      "kind": "dimension",
+      "light": "16px",
+      "note": "开关滑块直径（规范 4.3）"
+    },
+    {
+      "var": "--kb-tag-height",
+      "specName": null,
+      "group": "component",
+      "kind": "dimension",
+      "light": "26px",
+      "note": "标签高度（规范 4.4）"
+    },
+    {
+      "var": "--kb-badge-height",
+      "specName": null,
+      "group": "component",
+      "kind": "dimension",
+      "light": "20px",
+      "note": "计数徽标高度（规范 4.4）"
+    },
+    {
+      "var": "--kb-badge-close-size",
+      "specName": null,
+      "group": "component",
+      "kind": "dimension",
+      "light": "12px",
+      "note": "可移除标签的关闭图标边长（规范 4.4）"
+    },
+    {
+      "var": "--kb-pill-height",
+      "specName": null,
+      "group": "component",
+      "kind": "dimension",
+      "light": "26px",
+      "note": "状态胶囊高度（规范 4.5）"
+    },
+    {
+      "var": "--kb-pill-padding",
+      "specName": null,
+      "group": "component",
+      "kind": "dimension",
+      "light": "10px",
+      "note": "状态胶囊左右内距（规范 4.5）。10 不在 4px 间距阶梯内，故单列而非就近取 space2/space3"
+    },
+    {
+      "var": "--kb-pill-height-dense",
+      "specName": null,
+      "group": "component",
+      "kind": "dimension",
+      "light": "22px",
+      "note": "表格单元格内的密集胶囊高度（规范 4.5）"
+    },
+    {
+      "var": "--kb-icon-button-size",
+      "specName": null,
+      "group": "component",
+      "kind": "dimension",
+      "light": "34px",
+      "note": "图标按钮边长（规范 4.6）"
+    },
+    {
+      "var": "--kb-icon-button-compact",
+      "specName": null,
+      "group": "component",
+      "kind": "dimension",
+      "light": "18px",
+      "note": "内嵌场景的紧凑图标按钮边长（标签内移除按钮）。规范 4.6 只给出 34，18 为按标签高度 26 推导的派生值",
+      "derived": true
+    },
+    {
+      "var": "--kb-progress-height",
+      "specName": null,
+      "group": "component",
+      "kind": "dimension",
+      "light": "5px",
+      "note": "行内进度条高度（规范 5.2）"
+    },
+    {
+      "var": "--kb-progress-radius",
+      "specName": null,
+      "group": "component",
+      "kind": "dimension",
+      "light": "3px",
+      "note": "行内进度条圆角（规范 5.2）"
+    },
+    {
+      "var": "--kb-collection-icon",
+      "specName": null,
+      "group": "component",
+      "kind": "dimension",
+      "light": "38px",
+      "note": "知识库卡片集合图标边长（规范 5.1）"
+    },
+    {
+      "var": "--kb-collection-icon-radius",
+      "specName": null,
+      "group": "component",
+      "kind": "dimension",
+      "light": "9px",
+      "note": "知识库卡片集合图标圆角（规范 5.1）"
+    },
+    {
+      "var": "--kb-table-row-height",
+      "specName": null,
+      "group": "component",
+      "kind": "dimension",
+      "light": "44px",
+      "note": "构建记录表行高（规范 6.2）"
+    },
+    {
+      "var": "--kb-collection-card-width",
+      "specName": null,
+      "group": "component",
+      "kind": "dimension",
+      "light": "373px",
+      "note": "知识库卡片宽度（规范 6.2）。与 1440 栅格是否自洽需在 KB-05 落地时核对"
+    },
+    {
+      "var": "--kb-stat-card-height",
+      "specName": null,
+      "group": "component",
+      "kind": "dimension",
+      "light": "88px",
+      "note": "总览页统计卡高度（规范 6.2 未给数值，按内容与 h2 字号推导，标记为推导值）",
+      "derived": true
+    },
+    {
+      "var": "--kb-focus-ring-color",
+      "specName": null,
+      "group": "focus",
+      "kind": "color",
+      "light": "var(--kb-brand)",
+      "note": "焦点环取色。控件的负向校验态只需覆盖这一个变量，轮廓与外发光会同时跟随，避免两处环样式漂移"
+    },
+    {
+      "var": "--kb-outline-focus",
+      "specName": null,
+      "group": "focus",
+      "kind": "other",
+      "light": "2px solid var(--kb-focus-ring-color)",
+      "note": "聚焦轮廓。规范 4.2 把「描边 2px 主色」逐处写在各个控件里；抽成令牌后「无裸值」可被机械校验"
+    },
+    {
+      "var": "--kb-shadow-focus",
+      "specName": null,
+      "group": "focus",
+      "kind": "other",
+      "light": "0 0 0 4px color-mix(in srgb, var(--kb-focus-ring-color) 15%, transparent)",
+      "note": "聚焦外发光。规范 4.2 的「外发光 4px 15% 主色」；聚焦用发光而非投影表达"
+    }
+  ]
+}

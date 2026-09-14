@@ -1,0 +1,71 @@
+/* IconButton — design spec §4.6.
+ *
+ * Two sizes: the 34px page control, and an 18px compact form for embedding
+ * inside a 26px tag, where the page size would overflow its container. The
+ * compact form keeps a 12px glyph and the full state set so an embedded control
+ * is still a real control. */
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  border: 1px solid transparent;
+  border-radius: var(--kb-radius-sm);
+  background: transparent;
+  color: var(--kb-text-secondary);
+  cursor: pointer;
+  transition: background-color 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+
+.md {
+  width: var(--kb-icon-button-size);
+  height: var(--kb-icon-button-size);
+}
+
+.compact {
+  width: var(--kb-icon-button-compact);
+  height: var(--kb-icon-button-compact);
+  border-radius: var(--kb-radius-xs);
+}
+
+.button:hover:not(:disabled) {
+  background: var(--kb-bg-subtle);
+  color: var(--kb-text-primary);
+}
+
+.button:focus-visible {
+  outline: var(--kb-outline-focus);
+  outline-offset: 1px;
+  box-shadow: var(--kb-shadow-focus);
+}
+
+.button:disabled {
+  color: var(--kb-text-disabled);
+  cursor: not-allowed;
+}
+
+/* The primary icon button is the spec's reserved treatment for high-frequency
+ * critical actions such as rebuilding an index; it is the only variant that
+ * carries a brand tint at rest. */
+.primary {
+  color: var(--kb-brand);
+}
+
+.primary:hover:not(:disabled) {
+  background: var(--kb-brand-tint);
+  color: var(--kb-brand);
+}
+
+.primary:disabled {
+  color: var(--kb-brand-300);
+}
+
+/* Loading holds the box size so a row of controls does not reflow while one of
+ * them is busy. `.button.loading` rather than `.loading` so the cursor beats the
+ * `:disabled` rule above it, which sets `not-allowed` and would misreport a busy
+ * control as a merely unavailable one. */
+.button.loading {
+  cursor: progress;
+  color: var(--kb-text-tertiary);
+}

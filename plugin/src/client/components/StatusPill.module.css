@@ -1,0 +1,69 @@
+/* StatusPill — design spec §4.5.
+ *
+ * The three-piece rule is a marker's whole contract: text, solid fill and border
+ * together. Every modifier therefore sets all three; a modifier that set only
+ * the fill would be a regression against §4.5 and against the colour-alone ban
+ * in §7.3, because colour alone is unreadable under colour-vision deficiency and
+ * in grayscale printing.
+ *
+ * This module declares no interactive state, and the component gate enforces
+ * that. A pill reports lifecycle; it does not act. If a pill ever needs to be
+ * clickable, it should be classified as a control and grow the full state set. */
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--kb-space-1);
+  flex: none;
+  height: var(--kb-pill-height);
+  padding: 0 var(--kb-pill-padding);
+  border: 1px solid transparent;
+  border-radius: var(--kb-radius-full);
+  font-family: var(--kb-font-sans);
+  font-size: var(--kb-size-caption);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+/* Dense form for table cells: the spec drops the dot but keeps text and border. */
+.dense {
+  height: var(--kb-pill-height-dense);
+}
+
+.dot {
+  width: var(--kb-space-1);
+  height: var(--kb-space-1);
+  border-radius: var(--kb-radius-full);
+  background: currentColor;
+  flex: none;
+}
+
+.ready {
+  background: var(--kb-status-ready-bg);
+  border-color: var(--kb-status-ready-border);
+  color: var(--kb-status-ready-text);
+}
+
+.building {
+  background: var(--kb-status-building-bg);
+  border-color: var(--kb-status-building-border);
+  color: var(--kb-status-building-text);
+}
+
+.failed {
+  background: var(--kb-status-failed-bg);
+  border-color: var(--kb-status-failed-border);
+  color: var(--kb-status-failed-text);
+}
+
+.pending {
+  background: var(--kb-status-pending-bg);
+  border-color: var(--kb-status-pending-border);
+  color: var(--kb-status-pending-text);
+}
+
+.info {
+  background: var(--kb-status-info-bg);
+  border-color: var(--kb-status-info-border);
+  color: var(--kb-status-info-text);
+}

@@ -1,0 +1,1229 @@
+{
+  "$description": "DSH 知识库插件设计令牌",
+  "$extensions": {
+    "com.dsh.zvec-knowledge": {
+      "spec": "《DSH 知识库插件（基于 zvec）设计规范》v1.1.0 第 3 章（浅色）、第 7 章（深色）",
+      "prefix": "--kb-",
+      "themeSelectors": {
+        "light": ":root",
+        "dark": "body[data-ds-dark-theme]"
+      },
+      "conflicts": [
+        {
+          "token": "--kb-control-md",
+          "issue": "设计规范 3.7 尺度令牌定义 controlMd = 32，但 4.1 按钮 md 尺寸、4.2 文本框高度、4.3 下拉与分段控件高度均为 34。",
+          "resolution": "取 34。4.1/4.2/4.3 是组件的规范性定义且三处一致，3.7 为单处数值，按多数与组件基线对齐原则取值。",
+          "action": "回写设计规范 v1.1.1 时需同步修正 3.7 或统一各控件高度。"
+        },
+        {
+          "token": "--kb-border-subtle（顶栏分割线）",
+          "issue": "设计规范 3.2 规定「分割线只使用 neutral-200 (#E1E5EC)」，但 6.1 顶栏使用 #E9ECF2（不在令牌表内），5.1 卡片内分隔线使用中性 100 (#EDEFF4)。",
+          "resolution": "新增 --kb-divider-topbar (#E9ECF2) 与 --kb-divider-card (#EDEFF4) 两个具名令牌承载这两处实测值，不再视为裸色值。",
+          "action": "回写设计规范 v1.1.1 时需二选一：把它们纳入令牌表，或把两处改回 neutral-200。"
+        },
+        {
+          "token": "状态色描边（浅色）",
+          "issue": "设计规范 3.3 只给出「实色 / 底纹 / 文字色」三列，缺浅色描边；而 2.3 设计原则 3 与 4.5 状态胶囊要求「文字 + 实色 + 描边」三件套，缺一违规。深色 7.4 提供了描边列。",
+          "resolution": "浅色描边为派生值，取底纹与文字色之间的中间调，标记 derived = true。",
+          "action": "待设计侧确认浅色五态描边取值后替换。"
+        },
+        {
+          "token": "组件级尺寸未令牌化",
+          "issue": "设计规范 3.7 的 Scale 令牌集（29 项）只覆盖间距、圆角、字号、控件高度与布局尺寸；标签高 26、胶囊 26/22、徽标 20、图标按钮 34×34、开关 38×22、进度条高 5、集合图标 38×38 等组件级尺寸均不在其中。",
+          "resolution": "新增 component 令牌组承载这些尺寸，使「业务样式无裸尺寸」这条验收项可以达成，而不是被迫放宽。",
+          "action": "回写设计规范 v1.1.1 时把 component 组纳入 Scale 令牌集，并同步画布变量面板。"
+        },
+        {
+          "token": "--kb-text-quiet",
+          "issue": "设计规范 4.6 指定选项卡未选态文字为 #5B6472，该值不在中性色阶内，且与「待构建」状态文字色相同，容易被当成状态色误用。",
+          "resolution": "单列 --kb-text-quiet 令牌承载这一取值，与状态语义色区分开。",
+          "action": "回写设计规范时二选一：纳入中性色阶，或改用 neutral-500（#6B7484）并接受轻微色差。"
+        }
+      ]
+    }
+  },
+  "brand": {
+    "$type": "color",
+    "$value": "#4F5BD5",
+    "$description": "语义化别名，等同 brand-500",
+    "$extensions": {
+      "com.dsh.zvec-knowledge": {
+        "specName": "brandPrimary",
+        "dark": "#6F7BE8"
+      }
+    },
+    "hover": {
+      "$type": "color",
+      "$value": "#4149BF",
+      "$description": "语义化别名，等同 brand-600",
+      "$extensions": {
+        "com.dsh.zvec-knowledge": {
+          "specName": "brandHover",
+          "dark": "#5C68DF"
+        }
+      }
+    },
+    "pressed": {
+      "$type": "color",
+      "$value": "#343BA0",
+      "$description": "语义化别名，等同 brand-700",
+      "$extensions": {
+        "com.dsh.zvec-knowledge": {
+          "specName": "brandPressed",
+          "dark": "#4A55C8"
+        }
+      }
+    },
+    "link": {
+      "$type": "color",
+      "$value": "#4F5BD5",
+      "$description": "链接文字；深色下提亮以维持对比度",
+      "$extensions": {
+        "com.dsh.zvec-knowledge": {
+          "specName": "brandLink",
+          "dark": "#9AA2F0"
+        }
+      }
+    },
+    "tint": {
+      "$type": "color",
+      "$value": "#EEF0FB",
+      "$description": "选中背景与信息底纹",
+      "$extensions": {
+        "com.dsh.zvec-knowledge": {
+          "specName": "brandTint",
+          "dark": "#1E2140"
+        }
+      },
+      "hover": {
+        "$type": "color",
+        "$value": "#E0E3F8",
+        "$description": "品牌底纹悬停态",
+        "$extensions": {
+          "com.dsh.zvec-knowledge": {
+            "specName": "brandTintHover",
+            "dark": "#262A52"
+          }
+        }
+      }
+    },
+    "border": {
+      "$type": "color",
+      "$value": "#C7CBF3",
+      "$description": "品牌色系的弱描边",
+      "$extensions": {
+        "com.dsh.zvec-knowledge": {
+          "specName": "brandBorder",
+          "dark": "#33396B"
+        }
+      }
+    }
+  },
+  "neutral": {
+    "0": {
+      "$type": "color",
+      "$value": "#FFFFFF",
+      "$description": "卡片与浮层承载面",
+      "$extensions": {
+        "com.dsh.zvec-knowledge": {
+          "specName": "neutral-0"
+        }
+      }
+    },
+    "25": {
+      "$type": "color",
+      "$value": "#FAFBFC",
+      "$description": "极浅分区底",
+      "$extensions": {
+        "com.dsh.zvec-knowledge": {
+          "specName": "neutral-25"
+        }
+      }
+    },
+    "50": {
+      "$type": "color",
+      "$value": "#F5F6F9",
+      "$description": "应用底色、预览底板",
+      "$extensions": {
+        "com.dsh.zvec-knowledge": {
+          "specName": "neutral-50"
+        }
+      }
+    },
+    "100": {
+      "$type": "color",
+      "$value": "#EDEFF4",
+      "$description": "悬浮态填充、分段控件底",
+      "$extensions": {
+        "com.dsh.zvec-knowledge": {
+          "specName": "neutral-100"
+        }
+      }
+    },
+    "200": {
+      "$type": "color",
+      "$value": "#E1E5EC",
+      "$description": "分割线、卡片描边",
+      "$extensions": {
+        "com.dsh.zvec-knowledge": {
+          "specName": "neutral-200"
+        }
+      }
+    },
+    "300": {
+      "$type": "color",
+      "$value": "#CBD2DE",
+      "$description": "控件描边、禁用描边",
+      "$extensions": {
+        "com.dsh.zvec-knowledge": {
+          "specName": "neutral-300"
+        }
+      }
+    },
+    "400": {
+      "$type": "color",
+      "$value": "#9AA3B2",
+      "$description": "三级文字、占位符",
+      "$extensions": {
+        "com.dsh.zvec-knowledge": {
+          "specName": "neutral-400"
+        }
+      }
+    },
+    "500": {
+      "$type": "color",
+      "$value": "#6B7484",
+      "$description": "二级文字、说明文案",
+      "$extensions": {
+        "com.dsh.zvec-knowledge": {
+          "specName": "neutral-500"
+        }
+      }
+    },
+    "900": {
+      "$type": "color",
+      "$value": "#131619",
+      "$description": "一级文字、标题",
+      "$extensions": {
+        "com.dsh.zvec-knowledge": {
+          "specName": "neutral-900"
+        }
+      }
+    }
+  },
+  "bg": {
+    "canvas": {
+      "$type": "color",
+      "$value": "#FAFBFC",
+      "$description": "画布底",
+      "$extensions": {
+        "com.dsh.zvec-knowledge": {
+          "specName": "bgCanvas",
+          "dark": "#0B0D10"
+        }
+      }
+    },
+    "app": {
+      "$type": "color",
+      "$value": "#F5F6F9",
+      "$description": "应用底色",
+      "$extensions": {
+        "com.dsh.zvec-knowledge": {
+          "specName": "bgApp",
+          "dark": "#121519"
+        }
+      }
+    },
+    "surface": {
+      "$type": "color",
+      "$value": "#FFFFFF",
+      "$description": "承载面（卡片、面板）",
+      "$extensions": {
+        "com.dsh.zvec-knowledge": {
+          "specName": "bgSurface",
+          "dark": "#171A20"
+        }
+      }
+    },
+    "subtle": {
+      "$type": "color",
+      "$value": "#EDEFF4",
+      "$description": "弱填充、输入框",
+      "$extensions": {
+        "com.dsh.zvec-knowledge": {
+          "specName": "bgSubtle",
+          "dark": "#1D2128"
+        }
+      }
+    },
+    "hover": {
+      "$type": "color",
+      "$value": "#F5F6F9",
+      "$description": "悬停态填充",
+      "$extensions": {
+        "com.dsh.zvec-knowledge": {
+          "specName": "bgHover",
+          "dark": "#242832"
+        }
+      }
+    }
+  },
+  "border": {
+    "subtle": {
+      "$type": "color",
+      "$value": "#E1E5EC",
+      "$description": "弱描边",
+      "$extensions": {
+        "com.dsh.zvec-knowledge": {
+          "specName": "borderSubtle",
+          "dark": "#2C313C"
+        }
+      }
+    },
+    "strong": {
+      "$type": "color",
+      "$value": "#CBD2DE",
+      "$description": "控件描边",
+      "$extensions": {
+        "com.dsh.zvec-knowledge": {
+          "specName": "borderStrong",
+          "dark": "#3A404D"
+        }
+      }
+    }
+  },
+  "divider": {
+    "topbar": {
+      "$type": "color",
+      "$value": "#E9ECF2",
+      "$description": "顶栏底部 1px 分隔（6.1 实测值，非令牌表内色值，见 conflicts）",
+      "$extensions": {
+        "com.dsh.zvec-knowledge": {
+          "dark": "#2C313C"
+        }
+      }
+    },
+    "card": {
+      "$type": "color",
+      "$value": "#EDEFF4",
+      "$description": "卡片内 1px 分隔（5.1 实测值，见 conflicts）",
+      "$extensions": {
+        "com.dsh.zvec-knowledge": {
+          "dark": "#2C313C"
+        }
+      }
+    }
+  },
+  "text": {
+    "primary": {
+      "$type": "color",
+      "$value": "#131619",
+      "$description": "一级文字。深色下禁止使用纯白",
+      "$extensions": {
+        "com.dsh.zvec-knowledge": {
+          "specName": "textPrimary",
+          "dark": "#EDF0F5"
+        }
+      }
+    },
+    "secondary": {
+      "$type": "color",
+      "$value": "#6B7484",
+      "$description": "二级文字",
+      "$extensions": {
+        "com.dsh.zvec-knowledge": {
+          "specName": "textSecondary",
+          "dark": "#A7B0BF"
+        }
+      }
+    },
+    "tertiary": {
+      "$type": "color",
+      "$value": "#9AA3B2",
+      "$description": "三级文字",
+      "$extensions": {
+        "com.dsh.zvec-knowledge": {
+          "specName": "textTertiary",
+          "dark": "#8A93A3"
+        }
+      }
+    },
+    "disabled": {
+      "$type": "color",
+      "$value": "#B8BFC9",
+      "$description": "禁用文字",
+      "$extensions": {
+        "com.dsh.zvec-knowledge": {
+          "specName": "textDisabled",
+          "dark": "#5A6272"
+        }
+      }
+    },
+    "inverse": {
+      "$type": "color",
+      "$value": "#FFFFFF",
+      "$description": "深底之上的文字。深色主按钮文字用墨色而非白色（7.5）",
+      "$extensions": {
+        "com.dsh.zvec-knowledge": {
+          "specName": "textInverse",
+          "dark": "#0B0D10"
+        }
+      }
+    },
+    "quiet": {
+      "$type": "color",
+      "$value": "#5B6472",
+      "$description": "安静的未选态文字（规范 4.6 选项卡未选态）。该值不在中性色阶内，且与「待构建」状态文字同值；单列令牌以免它被当成状态色使用",
+      "$extensions": {
+        "com.dsh.zvec-knowledge": {
+          "dark": "#A7B0BF"
+        }
+      }
+    }
+  },
+  "status": {
+    "ready": {
+      "$type": "color",
+      "$value": "#1E9E8F",
+      "$description": "就绪 / 索引构建完成",
+      "$extensions": {
+        "com.dsh.zvec-knowledge": {
+          "specName": "successReady",
+          "dark": "#2FB3A4"
+        }
+      },
+      "bg": {
+        "$type": "color",
+        "$value": "#E6F5F2",
+        "$description": "就绪底纹",
+        "$extensions": {
+          "com.dsh.zvec-knowledge": {
+            "dark": "#0F2E2B"
+          }
+        }
+      },
+      "border": {
+        "$type": "color",
+        "$value": "#A8DFD7",
+        "$description": "就绪描边。浅色为派生值，见 conflicts",
+        "$extensions": {
+          "com.dsh.zvec-knowledge": {
+            "dark": "#1D4A45",
+            "derived": true
+          }
+        }
+      },
+      "text": {
+        "$type": "color",
+        "$value": "#1E6E64",
+        "$description": "就绪文字",
+        "$extensions": {
+          "com.dsh.zvec-knowledge": {
+            "dark": "#2FB3A4"
+          }
+        }
+      }
+    },
+    "building": {
+      "$type": "color",
+      "$value": "#D98B1F",
+      "$description": "构建中",
+      "$extensions": {
+        "com.dsh.zvec-knowledge": {
+          "specName": "warningBuilding",
+          "dark": "#E0A33A"
+        }
+      },
+      "bg": {
+        "$type": "color",
+        "$value": "#FDF3E3",
+        "$description": "构建中底纹",
+        "$extensions": {
+          "com.dsh.zvec-knowledge": {
+            "dark": "#33270F"
+          }
+        }
+      },
+      "border": {
+        "$type": "color",
+        "$value": "#F2D8A8",
+        "$description": "构建中描边。浅色为派生值，见 conflicts",
+        "$extensions": {
+          "com.dsh.zvec-knowledge": {
+            "dark": "#57421B",
+            "derived": true
+          }
+        }
+      },
+      "text": {
+        "$type": "color",
+        "$value": "#8A6A38",
+        "$description": "构建中文字",
+        "$extensions": {
+          "com.dsh.zvec-knowledge": {
+            "dark": "#E0A33A"
+          }
+        }
+      }
+    },
+    "failed": {
+      "$type": "color",
+      "$value": "#DC2E4C",
+      "$description": "失败",
+      "$extensions": {
+        "com.dsh.zvec-knowledge": {
+          "specName": "dangerFailed",
+          "dark": "#EE5A73"
+        }
+      },
+      "bg": {
+        "$type": "color",
+        "$value": "#FCEAEE",
+        "$description": "失败底纹",
+        "$extensions": {
+          "com.dsh.zvec-knowledge": {
+            "dark": "#35141B"
+          }
+        }
+      },
+      "border": {
+        "$type": "color",
+        "$value": "#F2B9C6",
+        "$description": "失败描边。浅色为派生值，见 conflicts",
+        "$extensions": {
+          "com.dsh.zvec-knowledge": {
+            "dark": "#5C2333",
+            "derived": true
+          }
+        }
+      },
+      "text": {
+        "$type": "color",
+        "$value": "#8E4257",
+        "$description": "失败文字",
+        "$extensions": {
+          "com.dsh.zvec-knowledge": {
+            "dark": "#EE5A73"
+          }
+        }
+      }
+    },
+    "pending": {
+      "$type": "color",
+      "$value": "#8A93A3",
+      "$description": "待构建（中性灰）",
+      "$extensions": {
+        "com.dsh.zvec-knowledge": {
+          "dark": "#8A93A3"
+        }
+      },
+      "bg": {
+        "$type": "color",
+        "$value": "#F0F2F6",
+        "$description": "待构建底纹",
+        "$extensions": {
+          "com.dsh.zvec-knowledge": {
+            "dark": "#1E2128"
+          }
+        }
+      },
+      "border": {
+        "$type": "color",
+        "$value": "#D5DAE3",
+        "$description": "待构建描边。浅色为派生值，见 conflicts",
+        "$extensions": {
+          "com.dsh.zvec-knowledge": {
+            "dark": "#2C313C",
+            "derived": true
+          }
+        }
+      },
+      "text": {
+        "$type": "color",
+        "$value": "#5B6472",
+        "$description": "待构建文字",
+        "$extensions": {
+          "com.dsh.zvec-knowledge": {
+            "dark": "#A7B0BF"
+          }
+        }
+      }
+    },
+    "info": {
+      "$type": "color",
+      "$value": "#3B7DE0",
+      "$description": "信息",
+      "$extensions": {
+        "com.dsh.zvec-knowledge": {
+          "specName": "infoNeutral",
+          "dark": "#5A97EE"
+        }
+      },
+      "bg": {
+        "$type": "color",
+        "$value": "#E8F1FD",
+        "$description": "信息底纹",
+        "$extensions": {
+          "com.dsh.zvec-knowledge": {
+            "dark": "#122340"
+          }
+        }
+      },
+      "border": {
+        "$type": "color",
+        "$value": "#AECDF5",
+        "$description": "信息描边。浅色为派生值，见 conflicts",
+        "$extensions": {
+          "com.dsh.zvec-knowledge": {
+            "dark": "#1E3C6B",
+            "derived": true
+          }
+        }
+      },
+      "text": {
+        "$type": "color",
+        "$value": "#3F5F8A",
+        "$description": "信息文字",
+        "$extensions": {
+          "com.dsh.zvec-knowledge": {
+            "dark": "#5A97EE"
+          }
+        }
+      }
+    }
+  },
+  "score": {
+    "strong": {
+      "$type": "color",
+      "$value": "#1E9E8F",
+      "$description": "强相关，match_score ≥ 0.85",
+      "$extensions": {
+        "com.dsh.zvec-knowledge": {
+          "dark": "#2FB3A4"
+        }
+      }
+    },
+    "relevant": {
+      "$type": "color",
+      "$value": "#7CA83F",
+      "$description": "相关，0.70 ≤ match_score < 0.85",
+      "$extensions": {
+        "com.dsh.zvec-knowledge": {
+          "dark": "#8BBA4E"
+        }
+      }
+    },
+    "fair": {
+      "$type": "color",
+      "$value": "#D98B1F",
+      "$description": "一般，0.55 ≤ match_score < 0.70",
+      "$extensions": {
+        "com.dsh.zvec-knowledge": {
+          "dark": "#E0A33A"
+        }
+      }
+    },
+    "low": {
+      "$type": "color",
+      "$value": "#DC2E4C",
+      "$description": "低相关，match_score < 0.55，默认不参与 RAG 生成",
+      "$extensions": {
+        "com.dsh.zvec-knowledge": {
+          "dark": "#EE5A73"
+        }
+      }
+    },
+    "track": {
+      "$type": "color",
+      "$value": "#EDEFF4",
+      "$description": "分数条与进度条槽色。深色下禁止沿用浅色槽色（7.5）",
+      "$extensions": {
+        "com.dsh.zvec-knowledge": {
+          "dark": "#2C313C"
+        }
+      }
+    }
+  },
+  "font": {
+    "sans": {
+      "$type": "fontFamily",
+      "$value": "'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+      "$description": "界面字体，承担中文与界面文案"
+    },
+    "mono": {
+      "$type": "fontFamily",
+      "$value": "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace",
+      "$description": "技术字体，承担集合标识、分片数、分数、时间戳"
+    }
+  },
+  "size": {
+    "display": {
+      "$type": "dimension",
+      "$value": "32px",
+      "$description": "页面主标题 Bold / 行高 42",
+      "$extensions": {
+        "com.dsh.zvec-knowledge": {
+          "specName": "display"
+        }
+      }
+    },
+    "h2": {
+      "$type": "dimension",
+      "$value": "24px",
+      "$description": "区块标题 Bold / 行高 34",
+      "$extensions": {
+        "com.dsh.zvec-knowledge": {
+          "specName": "h2"
+        }
+      }
+    },
+    "h3": {
+      "$type": "dimension",
+      "$value": "20px",
+      "$description": "卡片与面板标题 SemiBold / 行高 30",
+      "$extensions": {
+        "com.dsh.zvec-knowledge": {
+          "specName": "h3"
+        }
+      }
+    },
+    "title": {
+      "$type": "dimension",
+      "$value": "16px",
+      "$description": "列表项标题 SemiBold / 行高 24",
+      "$extensions": {
+        "com.dsh.zvec-knowledge": {
+          "specName": "title"
+        }
+      }
+    },
+    "body": {
+      "$type": "dimension",
+      "$value": "14px",
+      "$description": "正文与表单内容 Regular / 行高 22",
+      "$extensions": {
+        "com.dsh.zvec-knowledge": {
+          "specName": "body"
+        }
+      },
+      "sm": {
+        "$type": "dimension",
+        "$value": "13px",
+        "$description": "辅助说明、次要按钮文字 / 行高 20",
+        "$extensions": {
+          "com.dsh.zvec-knowledge": {
+            "specName": "body-sm"
+          }
+        }
+      }
+    },
+    "caption": {
+      "$type": "dimension",
+      "$value": "12px",
+      "$description": "标签与元信息 / 行高 18",
+      "$extensions": {
+        "com.dsh.zvec-knowledge": {
+          "specName": "caption"
+        }
+      }
+    },
+    "mono": {
+      "$type": "dimension",
+      "$value": "11px",
+      "$description": "令牌、标识与技术数值 JetBrains Mono Medium / 行高 16",
+      "$extensions": {
+        "com.dsh.zvec-knowledge": {
+          "specName": "mono"
+        }
+      }
+    }
+  },
+  "leading": {
+    "display": {
+      "$type": "dimension",
+      "$value": "42px",
+      "$description": "display 行高"
+    },
+    "h2": {
+      "$type": "dimension",
+      "$value": "34px",
+      "$description": "h2 行高"
+    },
+    "h3": {
+      "$type": "dimension",
+      "$value": "30px",
+      "$description": "h3 行高"
+    },
+    "title": {
+      "$type": "dimension",
+      "$value": "24px",
+      "$description": "title 行高"
+    },
+    "body": {
+      "$type": "dimension",
+      "$value": "22px",
+      "$description": "body 行高",
+      "sm": {
+        "$type": "dimension",
+        "$value": "20px",
+        "$description": "body-sm 行高"
+      }
+    },
+    "caption": {
+      "$type": "dimension",
+      "$value": "18px",
+      "$description": "caption 行高"
+    },
+    "mono": {
+      "$type": "dimension",
+      "$value": "16px",
+      "$description": "mono 行高"
+    },
+    "field": {
+      "$type": "dimension",
+      "$value": "21px",
+      "$description": "文本域行高（规范 4.2 明确写 21，不在 8 级字号阶梯内，故单列）"
+    }
+  },
+  "space": {
+    "1": {
+      "$type": "dimension",
+      "$value": "4px",
+      "$description": "基础单位",
+      "$extensions": {
+        "com.dsh.zvec-knowledge": {
+          "specName": "space1"
+        }
+      }
+    },
+    "2": {
+      "$type": "dimension",
+      "$value": "8px",
+      "$description": "",
+      "$extensions": {
+        "com.dsh.zvec-knowledge": {
+          "specName": "space2"
+        }
+      }
+    },
+    "3": {
+      "$type": "dimension",
+      "$value": "12px",
+      "$description": "",
+      "$extensions": {
+        "com.dsh.zvec-knowledge": {
+          "specName": "space3"
+        }
+      }
+    },
+    "4": {
+      "$type": "dimension",
+      "$value": "16px",
+      "$description": "",
+      "$extensions": {
+        "com.dsh.zvec-knowledge": {
+          "specName": "space4"
+        }
+      }
+    },
+    "5": {
+      "$type": "dimension",
+      "$value": "20px",
+      "$description": "",
+      "$extensions": {
+        "com.dsh.zvec-knowledge": {
+          "specName": "space5"
+        }
+      }
+    },
+    "6": {
+      "$type": "dimension",
+      "$value": "24px",
+      "$description": "",
+      "$extensions": {
+        "com.dsh.zvec-knowledge": {
+          "specName": "space6"
+        }
+      }
+    },
+    "8": {
+      "$type": "dimension",
+      "$value": "32px",
+      "$description": "",
+      "$extensions": {
+        "com.dsh.zvec-knowledge": {
+          "specName": "space8"
+        }
+      }
+    },
+    "10": {
+      "$type": "dimension",
+      "$value": "40px",
+      "$description": "",
+      "$extensions": {
+        "com.dsh.zvec-knowledge": {
+          "specName": "space10"
+        }
+      }
+    },
+    "12": {
+      "$type": "dimension",
+      "$value": "48px",
+      "$description": "",
+      "$extensions": {
+        "com.dsh.zvec-knowledge": {
+          "specName": "space12"
+        }
+      }
+    },
+    "16": {
+      "$type": "dimension",
+      "$value": "64px",
+      "$description": "",
+      "$extensions": {
+        "com.dsh.zvec-knowledge": {
+          "specName": "space16"
+        }
+      }
+    }
+  },
+  "radius": {
+    "xs": {
+      "$type": "dimension",
+      "$value": "4px",
+      "$description": "控件与标签",
+      "$extensions": {
+        "com.dsh.zvec-knowledge": {
+          "specName": "radiusXs"
+        }
+      }
+    },
+    "sm": {
+      "$type": "dimension",
+      "$value": "6px",
+      "$description": "控件与标签；文本框与下拉",
+      "$extensions": {
+        "com.dsh.zvec-knowledge": {
+          "specName": "radiusSm"
+        }
+      }
+    },
+    "md": {
+      "$type": "dimension",
+      "$value": "8px",
+      "$description": "卡片与输入框、分段控件",
+      "$extensions": {
+        "com.dsh.zvec-knowledge": {
+          "specName": "radiusMd"
+        }
+      }
+    },
+    "lg": {
+      "$type": "dimension",
+      "$value": "12px",
+      "$description": "弹窗与抽屉",
+      "$extensions": {
+        "com.dsh.zvec-knowledge": {
+          "specName": "radiusLg"
+        }
+      }
+    },
+    "xl": {
+      "$type": "dimension",
+      "$value": "16px",
+      "$description": "容器与上传区",
+      "$extensions": {
+        "com.dsh.zvec-knowledge": {
+          "specName": "radiusXl"
+        }
+      }
+    },
+    "full": {
+      "$type": "dimension",
+      "$value": "999px",
+      "$description": "胶囊与头像",
+      "$extensions": {
+        "com.dsh.zvec-knowledge": {
+          "specName": "radiusFull"
+        }
+      }
+    }
+  },
+  "control": {
+    "sm": {
+      "$type": "dimension",
+      "$value": "28px",
+      "$description": "表格内操作",
+      "$extensions": {
+        "com.dsh.zvec-knowledge": {
+          "specName": "controlSm"
+        }
+      }
+    },
+    "md": {
+      "$type": "dimension",
+      "$value": "34px",
+      "$description": "页面与表单默认。规范 3.7 记 32，此处按 4.1/4.2/4.3 的 34 取值，见 conflicts",
+      "$extensions": {
+        "com.dsh.zvec-knowledge": {
+          "specName": "controlMd",
+          "derived": true
+        }
+      }
+    },
+    "lg": {
+      "$type": "dimension",
+      "$value": "40px",
+      "$description": "空状态与表单提交",
+      "$extensions": {
+        "com.dsh.zvec-knowledge": {
+          "specName": "controlLg"
+        }
+      }
+    }
+  },
+  "sidebar": {
+    "width": {
+      "$type": "dimension",
+      "$value": "240px",
+      "$description": "应用外壳侧栏宽度",
+      "$extensions": {
+        "com.dsh.zvec-knowledge": {
+          "specName": "sidebarWidth"
+        }
+      }
+    }
+  },
+  "topbar": {
+    "height": {
+      "$type": "dimension",
+      "$value": "56px",
+      "$description": "应用外壳顶栏高度",
+      "$extensions": {
+        "com.dsh.zvec-knowledge": {
+          "specName": "topbarHeight"
+        }
+      }
+    }
+  },
+  "shadow": {
+    "1": {
+      "$type": "shadow",
+      "$value": "0 1px 2px 0 rgba(16, 19, 26, 0.06)",
+      "$description": "内嵌卡片、输入框、分段控件选中项",
+      "$extensions": {
+        "com.dsh.zvec-knowledge": {
+          "specName": "level-1"
+        }
+      }
+    },
+    "2": {
+      "$type": "shadow",
+      "$value": "0 4px 12px -2px rgba(16, 19, 26, 0.08)",
+      "$description": "悬浮卡片、下拉菜单",
+      "$extensions": {
+        "com.dsh.zvec-knowledge": {
+          "specName": "level-2"
+        }
+      }
+    },
+    "3": {
+      "$type": "shadow",
+      "$value": "0 12px 32px -8px rgba(16, 19, 26, 0.12)",
+      "$description": "弹窗与抽屉",
+      "$extensions": {
+        "com.dsh.zvec-knowledge": {
+          "specName": "level-3"
+        }
+      }
+    },
+    "focus": {
+      "$type": "other",
+      "$value": "0 0 0 4px color-mix(in srgb, var(--kb-focus-ring-color) 15%, transparent)",
+      "$description": "聚焦外发光。规范 4.2 的「外发光 4px 15% 主色」；聚焦用发光而非投影表达"
+    }
+  },
+  "textarea": {
+    "min": {
+      "height": {
+        "$type": "dimension",
+        "$value": "62px",
+        "$description": "文本域最小高度（规范 4.2）"
+      }
+    }
+  },
+  "segment": {
+    "padding": {
+      "$type": "dimension",
+      "$value": "3px",
+      "$description": "分段控件槽内距（规范 4.3）"
+    }
+  },
+  "field": {
+    "search": {
+      "inset": {
+        "$type": "dimension",
+        "$value": "36px",
+        "$description": "搜索框内嵌放大镜后文字的左内距＝左内距 12 + 图标 16 + 间距 8（规范 4.2）"
+      }
+    }
+  },
+  "tab": {
+    "underline": {
+      "$type": "dimension",
+      "$value": "2px",
+      "$description": "选项卡选中态下划线厚度（规范 4.6）"
+    }
+  },
+  "checkbox": {
+    "size": {
+      "$type": "dimension",
+      "$value": "16px",
+      "$description": "复选框与单选边长（规范 4.3）"
+    }
+  },
+  "switch": {
+    "width": {
+      "$type": "dimension",
+      "$value": "38px",
+      "$description": "开关宽度（规范 4.3）"
+    },
+    "height": {
+      "$type": "dimension",
+      "$value": "22px",
+      "$description": "开关高度（规范 4.3）"
+    },
+    "knob": {
+      "$type": "dimension",
+      "$value": "16px",
+      "$description": "开关滑块直径（规范 4.3）"
+    }
+  },
+  "tag": {
+    "height": {
+      "$type": "dimension",
+      "$value": "26px",
+      "$description": "标签高度（规范 4.4）"
+    }
+  },
+  "badge": {
+    "height": {
+      "$type": "dimension",
+      "$value": "20px",
+      "$description": "计数徽标高度（规范 4.4）"
+    },
+    "close": {
+      "size": {
+        "$type": "dimension",
+        "$value": "12px",
+        "$description": "可移除标签的关闭图标边长（规范 4.4）"
+      }
+    }
+  },
+  "pill": {
+    "height": {
+      "$type": "dimension",
+      "$value": "26px",
+      "$description": "状态胶囊高度（规范 4.5）",
+      "dense": {
+        "$type": "dimension",
+        "$value": "22px",
+        "$description": "表格单元格内的密集胶囊高度（规范 4.5）"
+      }
+    },
+    "padding": {
+      "$type": "dimension",
+      "$value": "10px",
+      "$description": "状态胶囊左右内距（规范 4.5）。10 不在 4px 间距阶梯内，故单列而非就近取 space2/space3"
+    }
+  },
+  "icon": {
+    "button": {
+      "size": {
+        "$type": "dimension",
+        "$value": "34px",
+        "$description": "图标按钮边长（规范 4.6）"
+      },
+      "compact": {
+        "$type": "dimension",
+        "$value": "18px",
+        "$description": "内嵌场景的紧凑图标按钮边长（标签内移除按钮）。规范 4.6 只给出 34，18 为按标签高度 26 推导的派生值",
+        "$extensions": {
+          "com.dsh.zvec-knowledge": {
+            "derived": true
+          }
+        }
+      }
+    }
+  },
+  "progress": {
+    "height": {
+      "$type": "dimension",
+      "$value": "5px",
+      "$description": "行内进度条高度（规范 5.2）"
+    },
+    "radius": {
+      "$type": "dimension",
+      "$value": "3px",
+      "$description": "行内进度条圆角（规范 5.2）"
+    }
+  },
+  "collection": {
+    "icon": {
+      "$type": "dimension",
+      "$value": "38px",
+      "$description": "知识库卡片集合图标边长（规范 5.1）",
+      "radius": {
+        "$type": "dimension",
+        "$value": "9px",
+        "$description": "知识库卡片集合图标圆角（规范 5.1）"
+      }
+    },
+    "card": {
+      "width": {
+        "$type": "dimension",
+        "$value": "373px",
+        "$description": "知识库卡片宽度（规范 6.2）。与 1440 栅格是否自洽需在 KB-05 落地时核对"
+      }
+    }
+  },
+  "table": {
+    "row": {
+      "height": {
+        "$type": "dimension",
+        "$value": "44px",
+        "$description": "构建记录表行高（规范 6.2）"
+      }
+    }
+  },
+  "stat": {
+    "card": {
+      "height": {
+        "$type": "dimension",
+        "$value": "88px",
+        "$description": "总览页统计卡高度（规范 6.2 未给数值，按内容与 h2 字号推导，标记为推导值）",
+        "$extensions": {
+          "com.dsh.zvec-knowledge": {
+            "derived": true
+          }
+        }
+      }
+    }
+  },
+  "focus": {
+    "ring": {
+      "color": {
+        "$type": "color",
+        "$value": "var(--kb-brand)",
+        "$description": "焦点环取色。控件的负向校验态只需覆盖这一个变量，轮廓与外发光会同时跟随，避免两处环样式漂移"
+      }
+    }
+  },
+  "outline": {
+    "focus": {
+      "$type": "other",
+      "$value": "2px solid var(--kb-focus-ring-color)",
+      "$description": "聚焦轮廓。规范 4.2 把「描边 2px 主色」逐处写在各个控件里；抽成令牌后「无裸值」可被机械校验"
+    }
+  }
+}
