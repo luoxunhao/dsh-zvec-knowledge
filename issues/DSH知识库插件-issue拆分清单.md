@@ -16,7 +16,7 @@
 > |-------|------|-------------|--------|
 > | KB-01 工程骨架 | **闭环** | **5 / 5** + 范围项 | — （`npm run verify:profile`，14 项全绿） |
 > | KB-02 令牌与双主题 | **闭环（代码侧）** | **5 / 6 可判定** | 仅剩规范 3.x 回写 133 项口径（非代码） |
-> | KB-03 基础组件库 | 部分闭环 | 2 / 5 | 五态分层未授权；状态胶囊实色规则被违反 |
+> | KB-03 基础组件库 | 部分闭环 | 3 / 5 | 五态分层需规范授权；primary 唯一性为 warn 级 |
 > | **KB-10 zvec 集成与持久化** | **闭环** | **6 / 6** | — （`npm run verify:kb10`，53 项全绿） |
 >
 > 复核方式：以各 issue 的「范围」与「验收标准」为 Spec 真源，逐条对代码与门禁留档取证。
@@ -169,18 +169,18 @@ M3 收口 ───────────────────────�
 
 **验收标准**
 
-- [ ] 每个组件实现 default / hover / focus / disabled / loading 五态，缺一视为未完成。**未过**：门禁 `INTERACTIVE_STATES` 只校验 hover / focus / disabled / loading **四**态（default 无法机械校验，尚可接受），但另有 4/12 个样式表经自造分层豁免：`StatusPill` / `Tag` / `CountBadge` 记为 marker、`Spinner` 记为 indicator，而规范原文是「每个组件」，未授权分层。`Spinner.module.css` 既无 `loading` 也无 `aria-busy`。→ 关闭条件：把 marker/indicator 分层写回规范取得授权，或补齐这 4 个组件的状态集。
-- [ ] focus 必须可见且未被移除轮廓；disabled 可被读屏识别为不可用；loading 保持尺寸稳定、无布局跳动。**部分过**：focus 可见（`base.css` `.kb-root :focus-visible`，用 `--kb-shadow-focus` 外发光而非投影，符合范围要求）✓；disabled 用原生 `disabled` 属性、可被读屏识别 ✓；loading 尺寸稳定仅有 `.loading { cursor: progress }` 之类的实现，**无任何门禁断言**，需随 KB-05+ 真实界面复核。
-- [ ] 状态胶囊在灰度与色觉障碍模拟下仍可区分。**未过（实色规则被违反）**：规范要求「文字 + 实色（或实色圆点）+ 描边」。实际 `StatusPill.module.css:41-69` 的 `background` 用的是 `-bg` **浅底**令牌（如 `--kb-status-ready-bg` = `#0F2E2B`），不是实色；唯一的实色来自 `.dot { background: currentColor }`（`:37`），而 `.dense`（表格内形态）在 `StatusPill.tsx:38` **移除圆点**却保留浅底——即密集态是「文字 + 浅底 + 描边」，全程无实色。同时 `--kb-status-ready`（`#2FB3A4`，规范 `successReady`）等实色令牌已定义却**零引用**。→ 关闭条件：密集态保留实色承载（实色点或实色描边），或改用实色底 + 反白文字。注：文字 + 描边俱在，故「不靠颜色单独承载」本身仍成立，色觉模拟可区分性大概率不受影响，但「实色」这一条字面未满足。
+- [x] 状态胶囊在灰度与色觉障碍模拟下仍可区分。→ **已修复**：原实现把 `background` 设为 `-bg` 浅底、实色只出现在圆点，而 `.dense`（表格内形态）移除圆点后**全程无实色**；同时 `--kb-status-ready`（规范 `successReady`）等实色令牌已定义却零引用。现改为：`color` 取**实色令牌**，圆点与密集态左侧色条（新增 `--kb-pill-solid-rail`）承载实色，文字改用 `-text` 令牌以保证 4.5:1 对比度（实色对自身浅底不达标），描边保留 —— 三件套齐备且密集态不再丢实色。**并已把该规则写入门禁**：`verify-components.mjs` 新增 `checkStatusPill`，断言实色令牌、`-border` 描边与 `-text` 文字三者同时出现；已用负向测试复现原 bug 验证门禁会真实失败（退出 1）。
+- [ ] 每个组件实现 default / hover / focus / disabled / loading 五态，缺一视为未完成。**未过**：门禁 `INTERACTIVE_STATES` 只校验 hover / focus / disabled / loading **四**态（default 无法机械校验，尚可接受），但另有 4/12 个样式表经自造分层豁免：`StatusPill` / `Tag` / `CountBadge` 记为 marker、`Spinner` 记为 indicator，而规范原文是「每个组件」，未授权分层。`Spinner.module.css` 既无 `loading` 也无 `aria-busy`。→ 关闭条件：把 marker/indicator 分层写回规范取得授权，或补齐这 4 个组件的状态集。**建议按「写回规范取得授权」处理**：marker 不是控件，为其编造 loading 态才是更差的实现。
 - [ ] 全页 primary 按钮唯一性可被校验（组件层给出用法约束）。**偏弱**：`Button.tsx:60-86` 用**模块级全局**计数器统计已挂载 primary，`console.warn` 且仅 dev 生效；既非「每页」口径，也不可能失败。→ 关闭条件：改为可按视图作用域校验（或明确接受 warn 级约束并回写规范）。
 - [ ] 负向校验必须说明原因，不允许只提示「输入有误」。**偏弱**：`TextField` 要求传 `error`，但 `invalid` 缺 `error` 时仅 `console.warn`，不阻断。需随 KB-06 真实表单复核。
+- [ ] focus 必须可见且未被移除轮廓；disabled 可被读屏识别为不可用；loading 保持尺寸稳定、无布局跳动。**部分过**：focus 可见（`base.css` `.kb-root :focus-visible`，用 `--kb-shadow-focus` 外发光而非投影，符合范围要求）✓；disabled 用原生 `disabled` 属性、可被读屏识别 ✓；loading 尺寸稳定仅有实现、**无门禁断言**，需随 KB-05+ 真实界面复核。
 
 **范围项偏差（不进验收清单但需记录）**：
 
 - 危险操作二次确认**未实现**：`Button.tsx:16-19` 明确声明「needs the caller's dialog … a review matter, not something this component can decide」，与范围「危险操作必须二次确认」不符，需在 KB-05/06/07 落地或回写规范。
 - 已通过项（复核确认）：按钮 4 变体 × 3 尺寸（sm 28 / md 34 / lg 40，`--kb-control-*`）；下拉超长值截断 + 完整值 `title`（`Select.tsx:64`）；开关强制附文字说明（`Switch.tsx:17`）；计数徽标 `99+` 封顶（`CountBadge.tsx:30`）；图标按钮 34×34 且同时具备 `title` 与 `aria-label`（`IconButton.tsx:58-59`）；选项卡 2px 主色下划线（`--kb-tab-underline`）；搜索框 / 文本域 / 复选 / 单选 / 分段控件均已具备。
 
-**KB-03 结论：部分闭环。** 五态、状态胶囊实色、primary 唯一性三条未过；状态胶囊实色为硬冲突，其余两条偏口径与强度问题。
+**KB-03 结论：部分闭环（由 2/5 提升至 3/5）。** 状态胶囊实色硬冲突**已修复并已入门禁**；剩余三条为口径与强度问题（五态分层需规范授权、primary 唯一性为 warn 级、负向校验需随 KB-06 复核）。
 
 **不做**：业务组合件（归 KB-05 / KB-06 / KB-07）。
 

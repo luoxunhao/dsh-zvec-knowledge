@@ -1,15 +1,22 @@
 /* StatusPill — design spec §4.5.
  *
- * The three-piece rule is a marker's whole contract: text, solid fill and border
- * together. Every modifier therefore sets all three; a modifier that set only
- * the fill would be a regression against §4.5 and against the colour-alone ban
- * in §7.3, because colour alone is unreadable under colour-vision deficiency and
- * in grayscale printing.
+ * The three-piece rule is a marker's whole contract: text, a *solid* colour, and
+ * a border together. Every modifier therefore sets all three.
+ *
+ * The solid piece is carried by `.dot`, which paints `--kb-status-*` — the
+ * design's actual solid values (`successReady`, `warningBuilding`,
+ * `dangerFailed`, `infoNeutral`, i.e. the `specName` entries). The pill's own
+ * `background` is the lighter `-bg` tint, which is what keeps the label legible
+ * against it.
+ *
+ * The dense form (`.dense`) is the spec's table-cell variant: it drops the dot
+ * but "文字与描边必须保留". That wording would leave dense pills with no solid
+ * piece at all if `-bg` were the only colour, so the dense form takes the solid
+ * value as a 3px left rail instead. The dot is gone, the solid colour is not,
+ * and the row height still compresses.
  *
  * This module declares no interactive state, and the component gate enforces
- * that. A pill reports lifecycle; it does not act. If a pill ever needs to be
- * clickable, it should be classified as a control and grow the full state set. */
-
+ * that. A pill reports lifecycle; it does not act. */
 .pill {
   display: inline-flex;
   align-items: center;
@@ -25,9 +32,14 @@
   white-space: nowrap;
 }
 
-/* Dense form for table cells: the spec drops the dot but keeps text and border. */
+/* Dense form for table cells: the spec drops the dot but keeps text, the solid
+ * colour and the border. The solid piece moves to a left rail. */
 .dense {
   height: var(--kb-pill-height-dense);
+  padding-left: var(--kb-space-3);
+  border-left: var(--kb-pill-solid-rail) solid currentColor;
+  border-top-left-radius: var(--kb-radius-sm);
+  border-bottom-left-radius: var(--kb-radius-sm);
 }
 
 .dot {
@@ -38,32 +50,47 @@
   flex: none;
 }
 
+/* Each modifier sets the solid value on `color`, which both the label and the
+ * dot inherit; `background` is the tint and `border-color` the spec's border. */
 .ready {
   background: var(--kb-status-ready-bg);
   border-color: var(--kb-status-ready-border);
-  color: var(--kb-status-ready-text);
+  color: var(--kb-status-ready);
 }
 
 .building {
   background: var(--kb-status-building-bg);
   border-color: var(--kb-status-building-border);
-  color: var(--kb-status-building-text);
+  color: var(--kb-status-building);
 }
 
 .failed {
   background: var(--kb-status-failed-bg);
   border-color: var(--kb-status-failed-border);
-  color: var(--kb-status-failed-text);
+  color: var(--kb-status-failed);
 }
 
 .pending {
   background: var(--kb-status-pending-bg);
   border-color: var(--kb-status-pending-border);
-  color: var(--kb-status-pending-text);
+  color: var(--kb-status-pending);
 }
 
 .info {
   background: var(--kb-status-info-bg);
   border-color: var(--kb-status-info-border);
-  color: var(--kb-status-info-text);
+  color: var(--kb-status-info);
 }
+
+/* The label uses the darker text token rather than the solid value, because the
+ * solid colour does not meet 4.5:1 against its own tint — the pill carries the
+ * solid in the dot/rail, and the readable text colour is the text token. */
+.label {
+  color: var(--kb-status-ready-text);
+}
+
+.ready .label { color: var(--kb-status-ready-text); }
+.building .label { color: var(--kb-status-building-text); }
+.failed .label { color: var(--kb-status-failed-text); }
+.pending .label { color: var(--kb-status-pending-text); }
+.info .label { color: var(--kb-status-info-text); }

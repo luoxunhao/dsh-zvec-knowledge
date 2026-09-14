@@ -1136,6 +1136,13 @@
       "$type": "dimension",
       "$value": "10px",
       "$description": "状态胶囊左右内距（规范 4.5）。10 不在 4px 间距阶梯内，故单列而非就近取 space2/space3"
+    },
+    "solid": {
+      "rail": {
+        "$type": "dimension",
+        "$value": "3px",
+        "$description": "状态胶囊密集态承载实色的左侧色条宽度（规范 4.5）。规范只要求密集态保留文字与描边，实色由本实现以左色条承载，见 StatusPill.module.css"
+      }
     }
   },
   "icon": {

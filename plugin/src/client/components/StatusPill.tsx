@@ -2,9 +2,16 @@
  * StatusPill — design spec §4.5.
  *
  * The component maps a lifecycle state to its four token values (fill, border,
- * text, dot) so no caller ever assembles a status marker by hand. That is what
+ * solid, text) so no caller ever assembles a status marker by hand. That is what
  * keeps the three-piece rule true: a caller chooses `status="ready"`, not three
  * colours, and cannot accidentally produce a marker that is only coloured.
+ *
+ * The three pieces are carried as follows, and each is load-bearing:
+ *
+ * - **text** — the label, in the status's `-text` token (the solid value would
+ *   not meet 4.5:1 against its own tint);
+ * - **solid** — the dot, or the left rail in the dense form;
+ * - **border** — the pill's outline.
  *
  * `labels` is required rather than derived from the status name, because the
  * visible wording is product copy ("就绪" / "构建中") and the status key is a
@@ -23,7 +30,7 @@ export interface StatusPillProps {
   status: StatusKind
   /** Visible wording for this state. */
   label: string
-  /** Dense form for table cells: drops the dot, keeps text and border. */
+  /** Dense form for table cells: drops the dot, keeps text, solid rail and border. */
   dense?: boolean
 }
 
@@ -35,8 +42,8 @@ export interface StatusPillProps {
 export function StatusPill({ status, label, dense = false }: StatusPillProps): React.JSX.Element {
   return (
     <span className={`${styles.pill} ${styles[status]} ${dense ? styles.dense : ''}`.trim()}>
-      {!dense && <span className={styles.dot} />}
-      {label}
+      {!dense && <span className={styles.dot} aria-hidden="true" />}
+      <span className={styles.label}>{label}</span>
     </span>
   )
 }

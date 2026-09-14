@@ -156,6 +156,42 @@ for (const sheet of moduleSheets) {
   }
 }
 
+/**
+ * The three-piece rule for a status marker (§4.5).
+ *
+ * A marker must carry text, a *solid* colour and a border together; "缺一即违规".
+ * The gate previously checked nothing here, and the violation that slipped
+ * through was exactly the interesting one: the pill set `background` to the
+ * light `-bg` tint and put the solid colour only in the dot — so the dense form,
+ * which drops the dot, carried no solid colour at all.
+ *
+ * So the check is not "does it mention a colour" but "does the solid token
+ * (`--kb-status-<state>`, the design's `successReady` family) actually appear".
+ * The border requirement is checked as a real `border`/`border-color`
+ * declaration rather than any mention of the word.
+ */
+const STATUS_SOLID = /--kb-status-(ready|building|failed|pending|info)\s*\)/
+const STATUS_BORDER = /border(-color)?:\s*[^;]*--kb-status-[a-z]+-border/
+
+/**
+ * Verify the status-pill contract against its own stylesheet.
+ * @param rel - path shown in messages.
+ * @param css - comment-stripped stylesheet source.
+ */
+function checkStatusPill(rel, css) {
+  if (!STATUS_SOLID.test(css)) {
+    failures.push(`${rel}: no solid status colour — §4.5 requires 文字 + 实色 + 描边, and the solid token (--kb-status-*) must be used, not only the -bg tint`)
+  }
+  if (!STATUS_BORDER.test(css)) {
+    failures.push(`${rel}: no status border — §4.5 requires a border on every marker`)
+  }
+  // The text colour must be the readable `-text` token, because the solid value
+  // does not meet 4.5:1 against its own tint.
+  if (!/--kb-status-[a-z]+-text/.test(css)) {
+    failures.push(`${rel}: no status text token — the label must use --kb-status-*-text for contrast`)
+  }
+}
+
 const allSheets = walk(CLIENT_DIR, name => name.endsWith('.css')).sort()
 for (const sheet of allSheets) {
   const name = sheet.split(sep).pop()
@@ -173,6 +209,8 @@ for (const sheet of allSheets) {
       failures.push(`${rel}: bare size ${match[1]}px is neither a token nor in ALLOWED_PX`)
     }
   }
+
+  if (name === 'StatusPill.module.css') checkStatusPill(rel, css)
 }
 
 if (failures.length > 0) {

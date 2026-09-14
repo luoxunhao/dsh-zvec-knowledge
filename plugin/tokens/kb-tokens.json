@@ -1111,6 +1111,14 @@
       "note": "知识库卡片集合图标边长（规范 5.1）"
     },
     {
+      "var": "--kb-pill-solid-rail",
+      "specName": null,
+      "group": "component",
+      "kind": "dimension",
+      "light": "3px",
+      "note": "状态胶囊密集态承载实色的左侧色条宽度（规范 4.5）。规范只要求密集态保留文字与描边，实色由本实现以左色条承载，见 StatusPill.module.css"
+    },
+    {
       "var": "--kb-collection-icon-radius",
       "specName": null,
       "group": "component",
