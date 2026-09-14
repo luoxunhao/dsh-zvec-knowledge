@@ -25,7 +25,7 @@
 import { rmSync } from 'node:fs'
 import type { ZVecCollection } from '@zvec/zvec'
 import { chunkDocument, type Chunk, type ChunkingConfig } from './chunk.ts'
-import { chunkDocInput, chunkRowFromDoc, FIELD_DOC_ID, FIELD_TEXT, VECTOR_FIELD, documentFilter, type ChunkRow, type IndexConfig } from './collection.ts'
+import { chunkDocInput, chunkRowFromDoc, EMBEDDING_DIMENSION, FIELD_DOC_ID, FIELD_TEXT, VECTOR_FIELD, documentFilter, type ChunkRow, type IndexConfig } from './collection.ts'
 import { publishSlot, resetSlot, slotDir, type Slot } from './snapshot.ts'
 import { adopt, releaseSlot } from './registry.ts'
 
@@ -78,8 +78,22 @@ export interface BuildLogLine {
   message: string
 }
 
-/** Embedding function the caller supplies; the plugin does not own the model. */
-export type EmbedFn = (texts: string[]) => Promise<Float32Array[]>
+/**
+ * Embedding provider.
+ *
+ * The provider is an external dependency the plugin does not own (the design spec
+ * puts model selection out of scope), and in practice it is an HTTP service. Two
+ * consequences shape this signature:
+ *
+ * - **It receives an `AbortSignal`.** A network call can hang, and a build that
+ *   cannot be interrupted would pin the fiber until unload. The provider should
+ *   pass the signal to its transport; a provider that ignores it still cannot hang
+ *   the build, because {@link startBuild} races each batch against the signal.
+ * - **It is called in batches.** Batching is the provider's contract rather than a
+ *   per-text call, because an embedding API is materially faster and cheaper per
+ *   request with several inputs.
+ */
+export type EmbedFn = (texts: string[], signal?: AbortSignal) => Promise<Float32Array[]>
 
 /** One document's build request. */
 export interface DocumentBuildRequest {
@@ -178,6 +192,9 @@ export function startBuild(request: BuildRequest): RunningBuild {
 
   const done = (async (): Promise<BuildResult> => {
     let handle: ZVecCollection | null = null
+    // Hoisted out of the try so the cancellation path can report the count it
+    // reached before stopping, rather than losing it at the catch boundary.
+    let discarded = 0
     try {
       enter('parse')
       const documents = request.documents.filter(document => document.text.trim() !== '')
@@ -186,7 +203,6 @@ export function startBuild(request: BuildRequest): RunningBuild {
 
       enter('chunk')
       const planned: { docId: string, chunks: Chunk[] }[] = []
-      let discarded = 0
       for (const document of documents) {
         const result = chunkDocument(document.text, request.chunking)
         discarded += result.discarded
@@ -213,9 +229,22 @@ export function startBuild(request: BuildRequest): RunningBuild {
         for (let offset = 0; offset < item.chunks.length; offset += BATCH) {
           if (controller.signal.aborted) return cancelled(processed, 0, discarded)
           const batch = item.chunks.slice(offset, offset + BATCH)
-          const vectors = await request.embed(batch.map(chunk => chunk.text))
+          // The signal is passed to the provider *and* raced against, because a
+          // provider that ignores it (an HTTP client without cancellation, say)
+          // would otherwise hang the build until the fiber unloads.
+          const vectors = await raceAbort(request.embed(batch.map(chunk => chunk.text), controller.signal), controller)
           if (vectors.length !== batch.length) {
             throw new Error(`embedding provider returned ${vectors.length} vectors for ${batch.length} chunks`)
+          }
+          // The collection's schema is fixed at build time, so a provider that
+          // returns a different width would otherwise fail deep inside the engine
+          // with an error that says nothing about the model having changed.
+          const width = vectors[0]?.length ?? 0
+          if (width !== EMBEDDING_DIMENSION) {
+            throw new Error(
+              `嵌入模型返回 ${width} 维向量，但集合 schema 固定为 ${EMBEDDING_DIMENSION} 维。`
+              + '换用不同维度的模型需要新建知识库，不能就地重建。',
+            )
           }
           if (controller.signal.aborted) return cancelled(processed, 0, discarded)
           handle.upsertSync(batch.map((chunk, index) => chunkDocInput(toRow(item.docId, chunk), vectors[index] as Float32Array)))
@@ -251,6 +280,9 @@ export function startBuild(request: BuildRequest): RunningBuild {
       // retry fail with a lock error instead of a clean rebuild.
       releaseSlot(request.storeRoot, request.collectionId, request.slot)
       discardSlot(request.storeRoot, request.collectionId, request.slot)
+      // A cancellation that surfaced as a rejected race settles the same way as
+      // one the loop noticed between batches, so the two paths cannot diverge.
+      if (error instanceof BuildCancelled) return cancelled(processed, 0, discarded)
       const message = String(error instanceof Error ? error.message : error)
       log('error', message)
       return { ok: false, chunks: 0, docs: 0, discarded: 0, error: message }
@@ -275,6 +307,41 @@ export function startBuild(request: BuildRequest): RunningBuild {
   })()
 
   return { done, cancel: () => controller.abort() }
+}
+
+/**
+ * Reject as soon as the build's controller aborts, whatever the work is doing.
+ *
+ * Observing a signal only *between* awaits is not enough: an embedded HTTP client
+ * that never returns would leave the await pending forever and the cancellation
+ * would never be seen. Racing makes the abort immediate regardless of provider
+ * behaviour.
+ * @param work - the in-flight operation.
+ * @param controller - the build's controller.
+ * @returns the work's result, or a rejection once aborted.
+ */
+async function raceAbort<T>(work: Promise<T>, controller: AbortController): Promise<T> {
+  if (controller.signal.aborted) throw new BuildCancelled()
+  const aborted = new Promise<never>((_resolve, reject) => {
+    controller.signal.addEventListener('abort', () => reject(new BuildCancelled()), { once: true })
+  })
+  return Promise.race([work, aborted])
+}
+
+/**
+ * Raised when a build is cancelled mid-operation.
+ *
+ * A distinct type rather than a message, because the catch block has to tell a
+ * cancellation from a genuine failure: one settles as "cancelled", the other as an
+ * error, and matching on text would break the moment a provider's message happens
+ * to contain the wrong word.
+ */
+export class BuildCancelled extends Error {
+  /** Creates the cancellation marker. */
+  constructor() {
+    super('build cancelled')
+    this.name = 'BuildCancelled'
+  }
 }
 
 /**
