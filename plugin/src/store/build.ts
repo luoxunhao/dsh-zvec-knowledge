@@ -113,6 +113,14 @@ export interface BuildRequest {
   slot: Slot
   /** Index configuration for the new snapshot's schema. */
   index: IndexConfig
+  /**
+   * Vector width the embedding model returns.
+   *
+   * Passed in rather than read from a constant because the schema is created at
+   * this width and the engine rejects anything else — so a mismatch must be caught
+   * here with a message that names the model, not deep inside the engine.
+   */
+  dimension?: number
   /** Documents to index. */
   documents: DocumentBuildRequest[]
   /** Chunking configuration. */
@@ -161,6 +169,9 @@ const PROGRESS_INTERVAL = 64
  */
 export function startBuild(request: BuildRequest): RunningBuild {
   const controller = new AbortController()
+  // Resolved once: the same width is used to create the schema and to validate
+  // every batch, so the two checks cannot disagree about what was expected.
+  const expectedWidth = request.dimension ?? EMBEDDING_DIMENSION
   const stages: StageProgress[] = STAGES.map(id => ({ id, label: STAGE_LABELS[id], state: 'pending' }))
   let processed = 0
   let total = 0
@@ -217,7 +228,7 @@ export function startBuild(request: BuildRequest): RunningBuild {
       // The engine holds an exclusive lock per directory, so the registry is told
       // to release any cached reader on this slot before the directory is recreated.
       releaseSlot(request.storeRoot, request.collectionId, request.slot)
-      handle = resetSlot(request.storeRoot, request.collectionId, request.slot, request.index)
+      handle = resetSlot(request.storeRoot, request.collectionId, request.slot, request.index, expectedWidth)
       // Adopt immediately: the handle now owns the directory's lock, and a stale
       // registry entry would make the next acquire fail rather than reuse it.
       adopt(request.storeRoot, request.collectionId, request.slot, handle)
@@ -236,13 +247,13 @@ export function startBuild(request: BuildRequest): RunningBuild {
           if (vectors.length !== batch.length) {
             throw new Error(`embedding provider returned ${vectors.length} vectors for ${batch.length} chunks`)
           }
-          // The collection's schema is fixed at build time, so a provider that
+          // The collection's schema is fixed at creation, so a provider that
           // returns a different width would otherwise fail deep inside the engine
           // with an error that says nothing about the model having changed.
           const width = vectors[0]?.length ?? 0
-          if (width !== EMBEDDING_DIMENSION) {
+          if (width !== expectedWidth) {
             throw new Error(
-              `嵌入模型返回 ${width} 维向量，但集合 schema 固定为 ${EMBEDDING_DIMENSION} 维。`
+              `嵌入模型返回 ${width} 维向量，但集合 schema 按 ${expectedWidth} 维创建。`
               + '换用不同维度的模型需要新建知识库，不能就地重建。',
             )
           }

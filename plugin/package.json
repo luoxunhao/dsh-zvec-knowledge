@@ -57,6 +57,7 @@
     "verify:embedding": "node scripts/verify-embedding.mjs",
     "verify:contrast": "node scripts/verify-contrast.mjs",
     "verify:quota": "node scripts/verify-kb11-quota.mjs",
+    "verify:e2e": "node scripts/verify-e2e-retrieval.mjs",
     "verify:slots": "node scripts/verify-harness-slots.mjs",
     "verify:spec": "node scripts/verify-spec-tokens.mjs",
     "verify:profile": "node scripts/verify-kb01-profile.mjs",

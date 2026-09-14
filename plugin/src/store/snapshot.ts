@@ -200,13 +200,15 @@ export function inactiveSlot(meta: SnapshotMeta): Slot {
  * @param id - collection identifier.
  * @param slot - slot to clear.
  * @param index - index configuration for the new schema.
+ * @param dimension - vector width the embedding model returns; defaults to the
+ * spec's illustrative figure when a deployment does not state one.
  * @returns an open handle writing into that slot.
  */
-export function resetSlot(storeRoot: string, id: string, slot: Slot, index: IndexConfig): ZVecCollection {
+export function resetSlot(storeRoot: string, id: string, slot: Slot, index: IndexConfig, dimension?: number): ZVecCollection {
   takeForWrite(storeRoot, id, slot)
   const dir = slotDir(storeRoot, id, slot)
   rmSync(dir, { recursive: true, force: true })
-  const schema: ZVecCollectionSchema = buildSchema(id, index)
+  const schema: ZVecCollectionSchema = buildSchema(id, index, dimension)
   return ZVecCreateAndOpen(dir, schema)
 }
 

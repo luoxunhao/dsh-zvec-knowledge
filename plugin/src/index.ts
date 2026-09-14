@@ -30,6 +30,7 @@ import type { Config } from './config.ts'
 import { disposeAll, openHandleCount } from './store/registry.ts'
 import { KnowledgeOperations } from './host/operations.ts'
 import { defineKbSearchTool, KB_SEARCH_TOOL } from './host/search-tool.ts'
+import { createEmbeddingProvider } from './host/embedding.ts'
 import type { EmbedFn } from './store/build.ts'
 
 export { assertValidConfig, Config } from './config.ts'
@@ -142,22 +143,41 @@ const operationsByWorkspace = new Map<string, KnowledgeOperations>()
 /**
  * The embedding provider, supplied by the deployment.
  *
- * Not a configuration field, because a schemastery config cannot carry a
- * function — and not a service, because the harness exposes no embedding
- * endpoint (its LLM service is chat-completion oriented). The design spec puts
- * model selection out of scope for this plugin, so the provider is an explicit
- * injection point: a deployment that wants retrieval wires one, and one that does
- * not gets a clear refusal from the tool rather than an obscure failure.
+ * Not a configuration field, because a schemastery config cannot carry a function
+ * — and not a service, because the harness exposes no embedding endpoint (its LLM
+ * service is chat-completion oriented). The design spec puts model selection out
+ * of scope for this plugin, so the provider is an explicit injection point: a
+ * deployment that wants retrieval wires one, and one that does not gets a clear
+ * refusal from the tool rather than an obscure failure.
  */
 let embeddingProvider: EmbedFn | undefined
 
 /**
+ * Build the provider from the configured endpoint when one is present.
+ *
+ * The API key is read from the environment by name, never held in configuration:
+ * `--dump-config` prints plugin config, so a key placed there would be written to
+ * logs and diagnostics.
+ * @param config - resolved configuration.
+ * @returns the provider, or `undefined` when no endpoint is configured.
+ */
+function providerFromConfig(config: Config): EmbedFn | undefined {
+  const endpoint = config.embedding
+  if (endpoint === undefined) return undefined
+  return createEmbeddingProvider({
+    baseUrl: endpoint.baseUrl,
+    model: endpoint.model,
+    apiKeyEnv: endpoint.apiKeyEnv,
+    batchSize: endpoint.batchSize,
+  })
+}
+
+/**
  * Supply the embedding provider used for indexing and query encoding.
  *
- * Set once at load. Kept as a module-level injection rather than a per-call
- * parameter because the tool's definition is built by the registry, which has no
- * place to thread a deployment dependency through.
- * @param embed - the provider, or `undefined` to clear it.
+ * Overrides whatever the configuration produced, for a deployment that has a
+ * provider object rather than an endpoint (an in-process model, a test double).
+ * @param embed - the provider, or `undefined` to fall back to the configuration.
  */
 export function setEmbeddingProvider(embed: EmbedFn | undefined): void {
   embeddingProvider = embed
@@ -173,13 +193,14 @@ function operationsFor(ctx: Context, config: Config): KnowledgeOperations {
   const workspace = resolveWorkspace(ctx)
   const existing = operationsByWorkspace.get(workspace)
   if (existing !== undefined) return existing
+  const provider = embeddingProvider ?? providerFromConfig(config)
   const created = new KnowledgeOperations({
     workspaceDir: workspace,
     stateDir: config.stateDir,
-    ...(embeddingProvider === undefined ? {} : { embed: embeddingProvider }),
-    // The quota is deployment policy: absent from the config it is unlimited, and
-    // the interface then never shows a restricted state rather than showing one
-    // invented for the demo.
+    ...(provider === undefined ? {} : { embed: provider }),
+    // The width must match the model, and a collection's schema is created at it:
+    // 2560 for the model deployed here, 1024 by default.
+    ...(config.embedding === undefined ? {} : { dimension: config.embedding.dimension }),
     quota: config.quota,
   })
   operationsByWorkspace.set(workspace, created)

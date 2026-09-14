@@ -237,12 +237,14 @@ export function planBuild(documents: DocumentRecord[], config: ChunkingConfig, l
  * pre-submit check instead of decoration.
  * @param plan - the planned build.
  * @param index - index configuration (quantizer drives the storage figure).
+ * @param dimension - vector width; the storage figure scales with it, so a
+ * deployment on a wider model sees the real cost rather than the default's.
  * @returns the estimate.
  */
-export function estimateCost(plan: PreviewResult, index: IndexConfig): CostEstimate {
+export function estimateCost(plan: PreviewResult, index: IndexConfig, dimension: number = EMBEDDING_DIMENSION): CostEstimate {
   const bytesPerElement = BYTES_PER_ELEMENT[index.quantize]
-  const rawVectorBytes = plan.totalChunks * EMBEDDING_DIMENSION * 4
-  const vectorBytes = Math.round(plan.totalChunks * EMBEDDING_DIMENSION * bytesPerElement)
+  const rawVectorBytes = plan.totalChunks * dimension * 4
+  const vectorBytes = Math.round(plan.totalChunks * dimension * bytesPerElement)
   // Embedding dominates; the write and publish stages are proportional to it but
   // an order of magnitude cheaper. Stating the basis keeps the figure honest
   // rather than presenting a precise number with no provenance.

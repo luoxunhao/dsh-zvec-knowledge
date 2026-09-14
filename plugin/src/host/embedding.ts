@@ -151,8 +151,15 @@ export function createEmbeddingProvider(
   const maxRetries = config.maxRetries ?? DEFAULT_MAX_RETRIES
 
   return async (texts: string[], signal?: AbortSignal): Promise<Float32Array[]> => {
-    const apiKey = process.env[config.apiKeyEnv]
-    if (apiKey === undefined || apiKey === '') {
+    // A blank `apiKeyEnv` means the endpoint needs no authentication — a local
+    // server, typically. Treating it as "the variable is missing" would refuse
+    // every call to an endpoint that never wanted a key, which is exactly the
+    // configuration this project runs.
+    const wantsKey = config.apiKeyEnv.trim() !== ''
+    // `?? ''` narrows the `string | undefined` that an index read produces; the
+    // emptiness is then checked once, below, rather than at every use.
+    const apiKey = (wantsKey ? process.env[config.apiKeyEnv] : '') ?? ''
+    if (wantsKey && (apiKey === undefined || apiKey === '')) {
       // Named precisely: an unset key is a deployment mistake, not a retrieval
       // failure, and saying which variable is missing is the whole fix.
       throw new EmbeddingError('auth', `环境变量 ${config.apiKeyEnv} 未设置，无法调用嵌入服务`)
@@ -233,7 +240,10 @@ async function embedOnce(batch: string[], context: BatchContext): Promise<Float3
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        authorization: `Bearer ${context.apiKey}`,
+        // The header is omitted entirely when there is no key, rather than sent
+        // empty: some endpoints reject a malformed `Bearer ` outright, and a
+        // needless header is one more thing to explain in a log.
+        ...(context.apiKey === '' ? {} : { authorization: `Bearer ${context.apiKey}` }),
       },
       body: JSON.stringify({ model: context.model, input: batch, encoding_format: 'float' }),
       signal: controller.signal,

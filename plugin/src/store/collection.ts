@@ -27,7 +27,14 @@ import {
   type ZVecDoc, type ZVecFieldSchema,
 } from '@zvec/zvec'
 
-/** Embedding width the design spec fixes (§5.6): 1024, `VECTOR_FP32`. */
+/**
+ * Vector width used when a deployment does not state one.
+ *
+ * The design spec's illustrative figure. It is a *default*, not a fact about any
+ * particular model: the endpoint actually deployed for this project returns 2560,
+ * so the configured value is what the schema is built with and this is only the
+ * fallback.
+ */
 export const EMBEDDING_DIMENSION = 1024
 
 /** Vector field name, referenced by every insert and query. */
@@ -112,7 +119,7 @@ function scalarFields(): ZVecFieldSchema[] {
  * @param index - vector index configuration.
  * @returns the engine schema.
  */
-export function buildSchema(name: string, index: IndexConfig): ZVecCollectionSchema {
+export function buildSchema(name: string, index: IndexConfig, dimension: number = EMBEDDING_DIMENSION): ZVecCollectionSchema {
   const common = { metricType: ZVecMetricType.COSINE, quantizeType: quantizeType(index.quantize) }
   const byKind = {
     HNSW: { indexType: ZVecIndexType.HNSW, ...common, m: index.m, efConstruction: index.efConstruction },
@@ -124,7 +131,10 @@ export function buildSchema(name: string, index: IndexConfig): ZVecCollectionSch
     vectors: {
       name: VECTOR_FIELD,
       dataType: ZVecDataType.VECTOR_FP32,
-      dimension: EMBEDDING_DIMENSION,
+      // The width comes from the configured embedding model rather than a
+      // constant: the engine rejects vectors of another size, so this is the one
+      // place the model's shape has to be recorded.
+      dimension,
       indexParams: byKind,
     },
     fields: scalarFields(),

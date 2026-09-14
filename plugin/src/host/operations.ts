@@ -44,7 +44,7 @@ import {
   type ChunkingConfig, type CostEstimate, type EmbeddingModel, type HybridWeights, type PreviewResult,
 } from '../store/strategy.ts'
 import { startBuild, type BuildLogLine, type BuildProgress, type EmbedFn } from '../store/build.ts'
-import type { IndexConfig } from '../store/collection.ts'
+import { EMBEDDING_DIMENSION, type IndexConfig } from '../store/collection.ts'
 import { admit, quotaState, type Quota, type QuotaState } from '../store/quota.ts'
 import { search, type SearchResult } from '../store/retrieval.ts'
 import { rmSync } from 'node:fs'
@@ -108,6 +108,14 @@ export interface OperationsOptions {
   stateDir: string
   /** Embedding provider. Required for a build; omitting it makes builds refuse. */
   embed?: EmbedFn
+  /**
+   * Vector width the provider returns.
+   *
+   * Carried alongside the provider because the schema, the cost estimate and the
+   * batch validation must all agree on it; deriving it from the provider's output
+   * would be too late for the first two.
+   */
+  dimension?: number
   /** Retrieval hit counter, for the overview's seven-day figure. */
   hitCounter?: HitCounter
   /**
@@ -156,6 +164,7 @@ export class KnowledgeOperations {
   private readonly workspaceDir: string
   private readonly stateDir: string
   private readonly embed: EmbedFn | undefined
+  private readonly dimension: number
   private readonly hitCounter: HitCounter
   private readonly quota: Quota
 
@@ -166,6 +175,7 @@ export class KnowledgeOperations {
     this.workspaceDir = options.workspaceDir
     this.stateDir = options.stateDir
     this.embed = options.embed
+    this.dimension = options.dimension ?? EMBEDDING_DIMENSION
     this.hitCounter = options.hitCounter ?? createHitCounter()
     this.quota = options.quota ?? { bytes: null, warnAt: 0.9 }
   }
@@ -363,7 +373,7 @@ export class KnowledgeOperations {
    */
   async estimateCost(collectionId: string, chunking: ChunkingConfig, index: IndexConfig): Promise<CostEstimate> {
     const plan = await this.previewChunks(collectionId, chunking)
-    return estimateCost(plan, index)
+    return estimateCost(plan, index, this.dimension)
   }
 
   /**
@@ -416,7 +426,7 @@ export class KnowledgeOperations {
     // an upload had already been refused for — the quota would look unenforced at
     // exactly the moment it matters most.
     const plan = planBuild(records, strategy.chunking)
-    const projectedBytes = estimateCost(plan, strategy.index).vectorBytes
+    const projectedBytes = estimateCost(plan, strategy.index, this.dimension).vectorBytes
       + records.reduce((sum, record) => sum + Buffer.byteLength(record.text, 'utf8'), 0)
     const admission = admit(root, this.quota, projectedBytes, '重建该知识库的索引')
     if (!admission.allowed) return { ok: false, chunks: 0, error: admission.reason ?? '存储配额不足' }
@@ -430,6 +440,7 @@ export class KnowledgeOperations {
       documents: records.map(record => ({ docId: record.id, text: record.text })),
       chunking: strategy.chunking,
       embed: this.embed,
+      dimension: this.dimension,
       onProgress: handlers.onProgress,
       onLog: handlers.onLog,
     })

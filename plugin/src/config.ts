@@ -35,6 +35,32 @@ export interface RetrievalConfig {
 }
 
 /**
+ * Embedding endpoint.
+ *
+ * The design spec puts model selection out of scope for the plugin, so the
+ * deployment names the endpoint, the model, and — the part that must not be
+ * guessed — the **dimension**. A collection's schema is created at one width and
+ * the engine rejects vectors of another, so a mismatch has to be caught at
+ * configuration time rather than at the first write.
+ *
+ * The spec's illustrative 1024 is kept as the default, but it is a default and
+ * not a fact: the model actually deployed here returns 2560, which is exactly the
+ * kind of difference this field exists to express.
+ */
+export interface EmbeddingConfig {
+  /** Base URL or the full endpoint, e.g. `http://127.0.0.1:11434/v1`. */
+  baseUrl: string
+  /** Model identifier sent in the request. */
+  model: string
+  /** Name of the environment variable holding the API key; blank for none. */
+  apiKeyEnv: string
+  /** Vector width the model returns, and the width collections are created at. */
+  dimension: number
+  /** Inputs per request; conservative because compatible endpoints cap low. */
+  batchSize: number
+}
+
+/**
  * Storage quota.
  *
  * The design spec calls for a restricted state (§8.2) that explains "限制来源与解除
@@ -76,6 +102,13 @@ export interface Config {
   chunking: ChunkingConfig
   /** Default retrieval knobs. */
   retrieval: RetrievalConfig
+  /**
+   * Embedding endpoint.
+   *
+   * Optional so a deployment with no model still loads — retrieval then reports
+   * that clearly instead of failing at the first build.
+   */
+  embedding?: EmbeddingConfig
   /** Storage quota; unlimited unless a deployment states one. */
   quota: QuotaConfig
 }
@@ -99,6 +132,18 @@ export const Config: z<Config> = z.object({
     bytes: z.union([z.number(), z.const(null)]).default(null),
     warnAt: z.number().default(0.9),
   }),
+  // Optional as a whole: a deployment with no embedding endpoint still loads, and
+  // retrieval then reports that clearly rather than failing at the first build.
+  // Schemastery marks optionality by *clearing* `required`, not by a `.optional()`.
+  embedding: z.object({
+    baseUrl: z.string(),
+    model: z.string(),
+    // A variable *name*, never the key itself: `--dump-config` prints plugin
+    // config, so a key placed here would be written to logs and diagnostics.
+    apiKeyEnv: z.string().default(''),
+    dimension: z.number().default(1024),
+    batchSize: z.number().default(64),
+  }).required(false),
 })
 
 /**
