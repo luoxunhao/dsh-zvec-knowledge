@@ -47,7 +47,18 @@ export {
   type KnowledgeBaseAppProps,
   type KnowledgeBasePort,
   type HostCollection,
+  type HostDocument,
 } from './app.tsx'
+export {
+  DocumentsPage, ACCEPTED_EXTENSIONS, MAX_UPLOAD_BYTES, MAX_UPLOAD_LABEL,
+  validateUpload,
+  type DocumentsPageProps, type PageDocument, type UploadTransport,
+} from './pages/DocumentsPage.tsx'
+export {
+  DocumentRow, formatChunks, formatSize,
+  type DocumentRowData, type DocumentRowProps, type TransferState,
+} from './components/DocumentRow.tsx'
+export { UploadDropzone, type UploadDropzoneProps } from './components/UploadDropzone.tsx'
 export {
   CreateCollectionDialog, type CreateCollectionDialogProps,
 } from './dialogs/CreateCollectionDialog.tsx'

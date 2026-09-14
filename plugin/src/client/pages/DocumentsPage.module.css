@@ -1,0 +1,105 @@
+/* DocumentsPage — design spec §5.2 (文档接入) and §6.3 (文档列表). */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kb-space-4);
+  min-width: 0;
+}
+
+.notice {
+  display: flex;
+  align-items: center;
+  gap: var(--kb-space-2);
+  margin: 0;
+  padding: var(--kb-space-3) var(--kb-space-4);
+  border: 1px solid var(--kb-status-info-border);
+  border-radius: var(--kb-radius-md);
+  background: var(--kb-status-info-bg);
+  color: var(--kb-status-info-text);
+  font-size: var(--kb-size-body-sm);
+  line-height: var(--kb-leading-body-sm);
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--kb-space-3);
+  flex-wrap: wrap;
+  padding: var(--kb-space-3) var(--kb-space-4);
+  border: 1px solid var(--kb-border-subtle);
+  border-radius: var(--kb-radius-lg);
+  background: var(--kb-bg-surface);
+}
+
+.toolbarSearch {
+  flex: 1 1 var(--kb-search-width);
+  min-width: 0;
+}
+
+.uploading {
+  margin-left: auto;
+  color: var(--kb-text-secondary);
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--kb-border-subtle);
+  border-radius: var(--kb-radius-lg);
+  background: var(--kb-bg-surface);
+  overflow: hidden;
+}
+
+/* The header row mirrors DocumentRow's grid exactly, so the columns line up
+ * between the header and every row without duplicating widths per row. */
+.head {
+  display: grid;
+  grid-template-columns: var(--kb-doc-type-col) minmax(0, 1fr) var(--kb-doc-chunks-col) var(--kb-doc-status-col) var(--kb-doc-actions-col);
+  align-items: center;
+  gap: var(--kb-space-3);
+  height: var(--kb-control-md);
+  padding: 0 var(--kb-space-4);
+  border-bottom: 1px solid var(--kb-divider-card);
+  background: var(--kb-bg-subtle);
+  font-size: var(--kb-size-caption);
+  line-height: var(--kb-leading-caption);
+  color: var(--kb-text-tertiary);
+}
+
+.skeleton {
+  height: var(--kb-table-row-height);
+  border-bottom: 1px solid var(--kb-divider-card);
+  background: var(--kb-bg-subtle);
+}
+
+.error {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kb-space-2);
+  padding: var(--kb-space-6);
+  border: 1px solid var(--kb-status-failed-border);
+  border-radius: var(--kb-radius-lg);
+  background: var(--kb-status-failed-bg);
+}
+
+.errorTitle {
+  display: flex;
+  align-items: center;
+  gap: var(--kb-space-2);
+  margin: 0;
+  font-size: var(--kb-size-title);
+  line-height: var(--kb-leading-title);
+  font-weight: 600;
+  color: var(--kb-status-failed-text);
+}
+
+.errorBody {
+  margin: 0;
+  font-size: var(--kb-size-body-sm);
+  line-height: var(--kb-leading-body-sm);
+  color: var(--kb-status-failed-text);
+}

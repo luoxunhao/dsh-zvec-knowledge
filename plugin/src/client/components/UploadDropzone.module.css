@@ -1,0 +1,116 @@
+/* UploadDropzone — design spec §5.2 (文档接入).
+ *
+ * `upload` is added to the icon set by this slice; the zone is a button, which is
+ * what gives it the focus state the spec requires. */
+
+.wrap {
+  display: block;
+}
+
+/* The native input is the accessible fallback target but is driven by the button
+ * and the label, so it is visually hidden rather than removed — a `display: none`
+ * input cannot be activated at all in some browsers. */
+.input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.zone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--kb-space-2);
+  width: 100%;
+  padding: var(--kb-space-8) var(--kb-space-6);
+  /* Dashed border is the spec's drop-zone treatment; the colour comes from the
+   * border token so both themes stay in step. */
+  border: 1px dashed var(--kb-border-strong);
+  border-radius: var(--kb-radius-lg);
+  background: var(--kb-bg-surface);
+  color: var(--kb-text-secondary);
+  font-family: var(--kb-font-sans);
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.12s ease, background-color 0.12s ease;
+}
+
+.zone:hover:not(:disabled) {
+  border-color: var(--kb-brand-border);
+  background: var(--kb-bg-hover);
+}
+
+/* Focus is a colour change plus the ring token pair; the spec forbids expressing
+ * focus with a shadow alone, and never by removing the outline. */
+.zone:focus-visible {
+  border-color: var(--kb-brand);
+  outline: var(--kb-outline-focus);
+  outline-offset: 2px;
+  box-shadow: var(--kb-shadow-focus);
+}
+
+.zone:disabled {
+  border-color: var(--kb-border-subtle);
+  background: var(--kb-bg-subtle);
+  color: var(--kb-text-disabled);
+  cursor: not-allowed;
+}
+
+/* Active drag state: brand border plus tint, so the target is unmistakable while
+ * the pointer is over it. */
+.dragging {
+  border-color: var(--kb-brand);
+  background: var(--kb-brand-tint);
+}
+
+.icon {
+  display: flex;
+  color: var(--kb-brand);
+}
+
+.zone:disabled .icon {
+  color: var(--kb-text-disabled);
+}
+
+.primary {
+  font-size: var(--kb-size-body);
+  line-height: var(--kb-leading-body);
+  color: var(--kb-text-primary);
+}
+
+.zone:disabled .primary {
+  color: var(--kb-text-disabled);
+}
+
+.secondary {
+  font-size: var(--kb-size-caption);
+  line-height: var(--kb-leading-caption);
+  color: var(--kb-text-tertiary);
+}
+
+/* Busy: transfers are in flight. The zone stays usable — the spec puts progress
+ * in the list rows precisely so uploading does not block the page — so this only
+ * softens it and states the count, keeping the box size stable. */
+.loading .zone {
+  border-color: var(--kb-brand-border);
+  background: var(--kb-brand-tint);
+}
+
+.loading .primary {
+  color: var(--kb-text-secondary);
+}
+
+.count {
+  display: flex;
+  align-items: center;
+  gap: var(--kb-space-1);
+  font-size: var(--kb-size-caption);
+  line-height: var(--kb-leading-caption);
+  color: var(--kb-brand);
+}

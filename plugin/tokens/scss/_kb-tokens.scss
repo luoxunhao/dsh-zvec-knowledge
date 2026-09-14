@@ -1,7 +1,7 @@
 // 由 scripts/gen-tokens.mjs 从 tokens/kb-tokens.json 生成，请勿手工编辑。
 // 令牌源：《DSH 知识库插件（基于 zvec）设计规范》v1.1.0 第 3 章（浅色）、第 7 章（深色）
 //
-// 共 143 项令牌。深色变量以 -dark 后缀单独导出。
+// 共 148 项令牌。深色变量以 -dark 后缀单独导出。
 //
 // ⚠️ Sass 变量在构建期被替换，**不随主题切换**。凡需要随浅/深主题变化的样式，
 //    必须使用 CSS 自定义属性 `var(--kb-*)`，不要使用本文件中的 $ 变量。
@@ -115,6 +115,11 @@ $kb-sidebar-rail-width: 64px;
 $kb-search-width: 280px;
 $kb-empty-text-width: 360px;
 $kb-skeleton-card-height: 180px;
+$kb-doc-type-col: 72px;
+$kb-doc-chunks-col: 80px;
+$kb-doc-status-col: 96px;
+$kb-doc-actions-col: 64px;
+$kb-doc-progress-width: 220px;
 $kb-dialog-width: 480px;
 $kb-overlay-scrim: rgba(19, 22, 25, 0.42);
 $kb-overlay-z: 1000;
@@ -311,6 +316,11 @@ $kb-token-names: (
   "--kb-search-width": $kb-search-width,
   "--kb-empty-text-width": $kb-empty-text-width,
   "--kb-skeleton-card-height": $kb-skeleton-card-height,
+  "--kb-doc-type-col": $kb-doc-type-col,
+  "--kb-doc-chunks-col": $kb-doc-chunks-col,
+  "--kb-doc-status-col": $kb-doc-status-col,
+  "--kb-doc-actions-col": $kb-doc-actions-col,
+  "--kb-doc-progress-width": $kb-doc-progress-width,
   "--kb-dialog-width": $kb-dialog-width,
   "--kb-overlay-scrim": $kb-overlay-scrim,
   "--kb-overlay-z": $kb-overlay-z,

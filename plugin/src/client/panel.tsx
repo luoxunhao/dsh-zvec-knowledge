@@ -27,8 +27,9 @@ import { Button } from './components/Button.tsx'
 import { Tabs } from './components/Tabs.tsx'
 import type { StorageUsage } from './components/StorageUsageCard.tsx'
 import type { StatusKind } from './components/StatusPill.tsx'
-import type { KnowledgeBasePort, HostCollection } from './app.tsx'
+import type { KnowledgeBasePort, HostCollection, HostDocument } from './app.tsx'
 import type { PanelState, KnowledgeView } from './index.tsx'
+import { DocumentsPage, type PageDocument } from './pages/DocumentsPage.tsx'
 import styles from './KnowledgePanel.module.css'
 
 /** Options accepted by {@link KnowledgeBasePanel}. */
@@ -64,7 +65,28 @@ const STATUS_LABELS: Record<StatusKind, string> = {
 }
 
 /** Views whose page is not part of this slice. */
-const PENDING_VIEWS: KnowledgeView[] = ['documents', 'build', 'retrieval', 'rag', 'settings']
+const PENDING_VIEWS: KnowledgeView[] = ['build', 'retrieval', 'rag', 'settings']
+
+/**
+ * Project a host document into the page's shape.
+ *
+ * The two are structurally the same today, and this exists so they need not be:
+ * the port is the host's contract and the page's type is the view's, and keeping
+ * the translation in one place is what lets either change without the other.
+ * @param document - the host's record.
+ * @returns the page's shape.
+ */
+function toPageDocument(document: HostDocument): PageDocument {
+  return {
+    id: document.id,
+    name: document.name,
+    bytes: document.bytes,
+    ext: document.ext,
+    status: document.status,
+    chunks: document.chunks,
+    error: document.error,
+  }
+}
 
 /**
  * Format an ISO timestamp for display.
@@ -89,11 +111,15 @@ function formatTimestamp(iso: string | null): string {
 export function KnowledgeBasePanel({ state, port }: KnowledgeBasePanelProps): React.JSX.Element {
   const [view, setView] = useState<KnowledgeView>(state.get())
   const [collections, setCollections] = useState<HostCollection[]>([])
+  const [documents, setDocuments] = useState<HostDocument[]>([])
   const [builds, setBuilds] = useState<BuildRecord[]>([])
   const [usage, setUsage] = useState<StorageUsage | null>(null)
   const [loading, setLoading] = useState(port !== undefined)
   const [error, setError] = useState<string | null>(null)
   const [dialogOpen, setDialogOpen] = useState(false)
+  // Which collection the documents view is working against. Kept here rather
+  // than in the documents page so switching views does not forget the choice.
+  const [selectedCollection, setSelectedCollection] = useState<string | null>(null)
 
   // Mirror the shared selection in both directions: the sidebar row can change
   // it, and the in-panel tabs change it here.
@@ -123,6 +149,31 @@ export function KnowledgeBasePanel({ state, port }: KnowledgeBasePanelProps): Re
   }
 
   useEffect(() => { void load() }, [port])
+
+  // The first collection becomes the default target so the documents view is
+  // usable without an extra click, but an explicit choice is never overridden.
+  useEffect(() => {
+    if (selectedCollection === null && collections.length > 0) {
+      setSelectedCollection(collections[0]?.id ?? null)
+    }
+  }, [collections, selectedCollection])
+
+  /** Load the selected collection's documents. */
+  const loadDocuments = async (collectionId: string | null): Promise<void> => {
+    // `listDocuments` is optional on the port so a host can wire collections
+    // before documents; without it the list is simply empty rather than an error.
+    if (port?.listDocuments === undefined || collectionId === null) {
+      setDocuments([])
+      return
+    }
+    try {
+      setDocuments(await port.listDocuments(collectionId))
+    } catch (cause) {
+      setError(String(cause instanceof Error ? cause.message : cause))
+    }
+  }
+
+  useEffect(() => { void loadDocuments(selectedCollection) }, [port, selectedCollection])
 
   /** Switch view through the shared holder so the sidebar row follows. */
   const changeView = (next: string): void => {
@@ -176,16 +227,42 @@ export function KnowledgeBasePanel({ state, port }: KnowledgeBasePanelProps): Re
             error={error}
             showChrome={false}
             onCreate={() => setDialogOpen(true)}
-            onOpen={() => { /* detail page arrives with KB-06 */ }}
+            // Opening a card selects it and switches to the document chain, which
+            // is the next thing a user does after creating a collection.
+            onOpen={id => { setSelectedCollection(id); changeView('documents') }}
             onDelete={id => { void remove(id) }}
             onRetry={() => { void load() }}
           />
+        ) : view === 'documents' ? (
+          <DocumentsPage
+            documents={documents.map(toPageDocument)}
+            transport={port?.uploadDocument === undefined || selectedCollection === null ? undefined : {
+              upload: (file, onProgress, signal) =>
+                port.uploadDocument!(selectedCollection, file, onProgress, signal)
+                  .then(host => {
+                    // Refresh from the host rather than appending locally: the
+                    // host owns the record, and a local guess would drift from
+                    // the stored status the moment a build changes it.
+                    void loadDocuments(selectedCollection)
+                    return toPageDocument(host)
+                  }),
+            }}
+            onRemove={id => {
+              if (port?.removeDocument === undefined || selectedCollection === null) return
+              const remove = port.removeDocument
+              void remove(selectedCollection, id).then(() => loadDocuments(selectedCollection))
+            }}
+            loading={loading}
+            error={error}
+            onRetry={() => { void load() }}
+            collectionId={selectedCollection}
+          />
         ) : (
           <EmptyState
-            icon={view === 'documents' ? 'file' : view === 'retrieval' ? 'search' : 'info'}
+            icon={view === 'retrieval' ? 'search' : 'info'}
             title={`${VIEWS.find(item => item.value === view)?.label ?? view} 尚未实现`}
             description={PENDING_VIEWS.includes(view)
-              ? '该页面属于后续 issue 的范围（KB-06 起），当前版本只交付总览页。'
+              ? '该页面属于后续 issue 的范围（KB-07 起），当前版本交付总览与文档接入。'
               : '该页面尚未实现。'}
             action={<Button variant="secondary" onClick={() => changeView('overview')}>返回总览</Button>}
           />

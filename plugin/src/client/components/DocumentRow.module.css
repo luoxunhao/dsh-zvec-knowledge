@@ -1,0 +1,136 @@
+/* DocumentRow — design spec §5.2 (行内进度) and §6.3 (文档列表).
+ *
+ * A grid rather than a table: the row carries a progress bar in place of a plain
+ * cell while uploading, and a grid keeps the four columns aligned across both
+ * shapes without a table cell that changes its children's layout. */
+
+.row {
+  display: grid;
+  grid-template-columns: var(--kb-doc-type-col) minmax(0, 1fr) var(--kb-doc-chunks-col) var(--kb-doc-status-col) var(--kb-doc-actions-col);
+  align-items: center;
+  gap: var(--kb-space-3);
+  /* Row height from the table token so the list and the table views line up. */
+  min-height: var(--kb-table-row-height);
+  padding: 0 var(--kb-space-4);
+  border-bottom: 1px solid var(--kb-divider-card);
+  background: var(--kb-bg-surface);
+}
+
+.row:last-child {
+  border-bottom: none;
+}
+
+.row:hover {
+  background: var(--kb-bg-hover);
+}
+
+/* Failed rows carry the danger tint so a failure is findable without reading
+ * every status pill; the pill still states it in text. */
+.rowFailed {
+  background: var(--kb-status-failed-bg);
+}
+
+.type {
+  display: flex;
+  align-items: center;
+  gap: var(--kb-space-2);
+  color: var(--kb-text-tertiary);
+}
+
+.ext {
+  color: var(--kb-text-tertiary);
+  text-transform: uppercase;
+}
+
+.main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kb-space-1);
+  min-width: 0;
+}
+
+.name {
+  font-size: var(--kb-size-body-sm);
+  line-height: var(--kb-leading-body-sm);
+  color: var(--kb-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The transfer line occupies the same slot as the size line, so the row height
+ * does not change when a transfer starts or finishes. */
+.transfer {
+  display: flex;
+  align-items: center;
+  gap: var(--kb-space-2);
+}
+
+.bar {
+  flex: 1;
+  min-width: 0;
+  max-width: var(--kb-doc-progress-width);
+}
+
+.percent {
+  flex: none;
+  color: var(--kb-text-secondary);
+}
+
+.meta {
+  display: flex;
+  align-items: center;
+  gap: var(--kb-space-2);
+  font-size: var(--kb-size-caption);
+  line-height: var(--kb-leading-caption);
+}
+
+.size {
+  color: var(--kb-text-tertiary);
+}
+
+.reason {
+  display: flex;
+  align-items: center;
+  gap: var(--kb-space-1);
+  color: var(--kb-status-failed-text);
+}
+
+.chunks {
+  color: var(--kb-text-secondary);
+}
+
+.status {
+  display: flex;
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--kb-space-1);
+}
+
+.action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--kb-icon-button-compact);
+  height: var(--kb-icon-button-compact);
+  padding: 0;
+  border: none;
+  border-radius: var(--kb-radius-xs);
+  background: transparent;
+  color: var(--kb-text-tertiary);
+  cursor: pointer;
+}
+
+.action:hover {
+  background: var(--kb-bg-subtle);
+  color: var(--kb-text-primary);
+}
+
+.action:focus-visible {
+  outline: var(--kb-outline-focus);
+  outline-offset: 1px;
+  box-shadow: var(--kb-shadow-focus);
+}

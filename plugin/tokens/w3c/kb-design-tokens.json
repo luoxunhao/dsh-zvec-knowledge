@@ -1054,6 +1054,68 @@
       }
     }
   },
+  "doc": {
+    "type": {
+      "col": {
+        "$type": "dimension",
+        "$value": "72px",
+        "$description": "文档列表「类型」列宽（规范 6.3 未给数值，按 18px 图标 + 扩展名文本推导）",
+        "$extensions": {
+          "com.dsh.zvec-knowledge": {
+            "derived": true
+          }
+        }
+      }
+    },
+    "chunks": {
+      "col": {
+        "$type": "dimension",
+        "$value": "80px",
+        "$description": "文档列表「分片数」列宽（规范 6.3 未给数值，按等宽数字 6 位 + 内边距推导）",
+        "$extensions": {
+          "com.dsh.zvec-knowledge": {
+            "derived": true
+          }
+        }
+      }
+    },
+    "status": {
+      "col": {
+        "$type": "dimension",
+        "$value": "96px",
+        "$description": "文档列表「状态」列宽（规范 6.3 未给数值，按密集态状态胶囊宽度推导）",
+        "$extensions": {
+          "com.dsh.zvec-knowledge": {
+            "derived": true
+          }
+        }
+      }
+    },
+    "actions": {
+      "col": {
+        "$type": "dimension",
+        "$value": "64px",
+        "$description": "文档列表操作列宽（规范 6.3 未给数值，容纳两个 18px 图标按钮）",
+        "$extensions": {
+          "com.dsh.zvec-knowledge": {
+            "derived": true
+          }
+        }
+      }
+    },
+    "progress": {
+      "width": {
+        "$type": "dimension",
+        "$value": "220px",
+        "$description": "行内上传进度条最大宽度（规范 5.2 只给高度与圆角，未给宽度）",
+        "$extensions": {
+          "com.dsh.zvec-knowledge": {
+            "derived": true
+          }
+        }
+      }
+    }
+  },
   "dialog": {
     "width": {
       "$type": "dimension",

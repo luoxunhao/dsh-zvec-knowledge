@@ -46,6 +46,30 @@ export interface HostCollection {
   createdAt: string
 }
 
+/** One document as the host reports it. */
+export interface HostDocument {
+  /** Stable document id. */
+  id: string
+  /** Original file name. */
+  name: string
+  /** Size in bytes. */
+  bytes: number
+  /** Lower-case extension. */
+  ext: string
+  /** Index lifecycle status. */
+  status: StatusKind
+  /**
+   * Chunks indexed, or `null` while the value is genuinely unknown.
+   *
+   * `null` is the spec's 待构建 value: a freshly uploaded document has not been
+   * built, so its chunk count is not zero — it is unmeasured. The distinction is
+   * the difference between "待构建" and "this document produced nothing".
+   */
+  chunks: number | null
+  /** Failure reason, when the last attempt failed. */
+  error?: string
+}
+
 /** Data the app needs from the host. */
 export interface KnowledgeBasePort {
   /** List collections with their statistics. */
@@ -58,6 +82,23 @@ export interface KnowledgeBasePort {
   createCollection: (values: { name: string, collectionId: string, description: string }) => Promise<void>
   /** Delete a collection. */
   deleteCollection: (id: string) => Promise<void>
+  /** List one collection's documents. */
+  listDocuments?: (collectionId: string) => Promise<HostDocument[]>
+  /**
+   * Transfer and store one file.
+   *
+   * `onProgress` reports a fraction in [0, 1]; `signal` is aborted when the user
+   * cancels, and a transport that ignores it would leave the transfer running
+   * while the UI claimed otherwise.
+   */
+  uploadDocument?: (
+    collectionId: string,
+    file: File,
+    onProgress: (fraction: number) => void,
+    signal: AbortSignal,
+  ) => Promise<HostDocument>
+  /** Remove one document. */
+  removeDocument?: (collectionId: string, id: string) => Promise<void>
 }
 
 /** Options accepted by {@link KnowledgeBaseApp}. */

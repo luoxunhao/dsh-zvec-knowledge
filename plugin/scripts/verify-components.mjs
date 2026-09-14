@@ -106,6 +106,7 @@ const TIERS = new Map([
   ['Checkbox.module.css', { tier: 'interactive', why: 'checkbox and radio group control' }],
   ['SegmentedControl.module.css', { tier: 'interactive', why: 'in-view switcher' }],
   ['Tabs.module.css', { tier: 'interactive', why: 'region switcher' }],
+  ['UploadDropzone.module.css', { tier: 'interactive', why: 'drop zone; it is a button, which is what makes it keyboard reachable' }],
   ['StatusPill.module.css', { tier: 'marker', why: 'lifecycle state marker; it reports, it does not act' }],
   ['Tag.module.css', { tier: 'marker', why: 'classification marker; removal goes through an IconButton' }],
   ['CountBadge.module.css', { tier: 'marker', why: 'numeric marker with no interaction of its own' }],
@@ -118,6 +119,8 @@ const TIERS = new Map([
   ['AppShell.module.css', { tier: 'container', why: 'application frame; nav items are buttons inside and declare no shared state rule' }],
   ['OverviewPage.module.css', { tier: 'container', why: 'page layout; it styles tables and grids, not controls' }],
   ['KnowledgePanel.module.css', { tier: 'container', why: 'panel body inside the host main column; the tab strip inside carries its own states' }],
+  ['DocumentsPage.module.css', { tier: 'container', why: 'page layout: toolbar, list frame and states; the controls inside carry their own states' }],
+  ['DocumentRow.module.css', { tier: 'container', why: 'list row frame; its cancel/retry/remove controls live inside and declare their own states' }],
   ['CreateCollectionDialog.module.css', { tier: 'container', why: 'dialog frame; its close control and fields carry their own states' }],
 ])
 

@@ -146,6 +146,36 @@ html,body{margin:0;padding:0;background:var(--kb-bg-app)}
 }
 
 /**
+ * Render the documents page with a mix of transfer and index states.
+ *
+ * The interesting states are the ones that only exist mid-operation: an upload in
+ * flight, a cancelled one, a rejected format, and a stored document whose chunk
+ * count is still unknown. Rendering them together is how the row heights and the
+ * pending marker get checked visually rather than argued about.
+ * @param options - theme selection.
+ * @returns a complete HTML document string.
+ */
+function renderDocuments({ theme }) {
+  const documents = [
+    { id: 'd1', name: '产品需求文档.md', bytes: 184_320, ext: 'md', status: 'ready', chunks: 342 },
+    { id: 'd2', name: '接口手册.pdf', bytes: 2_411_724, ext: 'pdf', status: 'pending', chunks: null },
+    { id: 'd3', name: '运维手册.docx', bytes: 512_000, ext: 'docx', status: 'failed', chunks: null, error: '解析失败：文档已加密' },
+  ]
+  const page = React.createElement(client.DocumentsPage, {
+    documents,
+    onRemove: () => {},
+    collectionId: 'kb_prod_2f8a',
+  })
+  const css = extractStyles()
+  const inner = renderToStaticMarkup(page)
+  return `<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>KB-06 documents</title>
+<style>${css}</style>
+<style>html,body{margin:0;padding:0;background:var(--kb-bg-app)}#root{padding:24px;width:1200px}</style>
+</head><body${theme === 'dark' ? ' data-ds-dark-theme' : ''}><div id="root">${inner}</div></body></html>`
+}
+
+/**
  * Render one page variant to a full HTML document.
  * @param options - theme and whether to render the dialog.
  * @returns a complete HTML document string.
@@ -238,6 +268,8 @@ const variants = [
   // panel body inside a sidebar'd shell, which is how the plugin actually ships.
   ['host-light', { theme: 'light' }, renderHostPanel],
   ['host-dark', { theme: 'dark' }, renderHostPanel],
+  ['documents', { theme: 'light' }, renderDocuments],
+  ['documents-dark', { theme: 'dark' }, renderDocuments],
 ]
 for (const [name, options, render] of variants) {
   const file = join(OUT, `${name}.html`)

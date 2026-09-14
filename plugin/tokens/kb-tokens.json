@@ -959,6 +959,51 @@
       "derived": true
     },
     {
+      "var": "--kb-doc-type-col",
+      "specName": null,
+      "group": "component",
+      "kind": "dimension",
+      "light": "72px",
+      "note": "文档列表「类型」列宽（规范 6.3 未给数值，按 18px 图标 + 扩展名文本推导）",
+      "derived": true
+    },
+    {
+      "var": "--kb-doc-chunks-col",
+      "specName": null,
+      "group": "component",
+      "kind": "dimension",
+      "light": "80px",
+      "note": "文档列表「分片数」列宽（规范 6.3 未给数值，按等宽数字 6 位 + 内边距推导）",
+      "derived": true
+    },
+    {
+      "var": "--kb-doc-status-col",
+      "specName": null,
+      "group": "component",
+      "kind": "dimension",
+      "light": "96px",
+      "note": "文档列表「状态」列宽（规范 6.3 未给数值，按密集态状态胶囊宽度推导）",
+      "derived": true
+    },
+    {
+      "var": "--kb-doc-actions-col",
+      "specName": null,
+      "group": "component",
+      "kind": "dimension",
+      "light": "64px",
+      "note": "文档列表操作列宽（规范 6.3 未给数值，容纳两个 18px 图标按钮）",
+      "derived": true
+    },
+    {
+      "var": "--kb-doc-progress-width",
+      "specName": null,
+      "group": "component",
+      "kind": "dimension",
+      "light": "220px",
+      "note": "行内上传进度条最大宽度（规范 5.2 只给高度与圆角，未给宽度）",
+      "derived": true
+    },
+    {
       "var": "--kb-dialog-width",
       "specName": null,
       "group": "layout",

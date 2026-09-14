@@ -35,6 +35,9 @@ export type IconName =
   | 'list'
   | 'trash'
   | 'filter'
+  | 'upload'
+  | 'retry'
+  | 'stop'
 
 /** Options accepted by {@link Icon}. */
 export interface IconProps extends Omit<SVGProps<SVGSVGElement>, 'name'> {
@@ -66,6 +69,9 @@ const GLYPHS: Record<IconName, readonly string[]> = {
   list: ['M4 6h16', 'M4 12h16', 'M4 18h16'],
   trash: ['M4 7h16', 'M9 7V4h6v3', 'M6 7l1 14h10l1-14', 'M10 11v6', 'M14 11v6'],
   filter: ['M3 5h18', 'M6 12h12', 'M10 19h4'],
+  upload: ['M12 16V4', 'M7.5 8.5 12 4l4.5 4.5', 'M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3'],
+  retry: ['M4 12a8 8 0 1 0 2.4-5.7', 'M4 4.5V9h4.5'],
+  stop: ['M7 7h10v10H7z'],
 }
 
 /**

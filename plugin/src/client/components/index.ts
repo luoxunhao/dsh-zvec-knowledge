@@ -31,3 +31,8 @@ export { StatCard, type StatCardProps } from './StatCard.tsx'
 export { StorageUsageCard, type StorageUsage, type StorageUsageCardProps } from './StorageUsageCard.tsx'
 export { CollectionCard, type CollectionCardProps, type CollectionCardStats } from './CollectionCard.tsx'
 export { EmptyState, type EmptyStateProps } from './EmptyState.tsx'
+export { UploadDropzone, type UploadDropzoneProps } from './UploadDropzone.tsx'
+export {
+  DocumentRow, formatChunks, formatSize,
+  type DocumentRowData, type DocumentRowProps, type TransferState,
+} from './DocumentRow.tsx'
