@@ -145,11 +145,23 @@ if (layerAt !== -1) {
 
   // Every configured key must appear, because the earlier evidence was cut off
   // mid-`retrieval:` and looked complete until someone read the end.
-  const required = ['stateDir', 'chunking', 'mode', 'chunkTokens', 'overlapTokens', 'minChunkTokens', 'retrieval', 'topk', 'minScore']
+  const required = [
+    'stateDir', 'chunking', 'mode', 'chunkTokens', 'overlapTokens', 'minChunkTokens',
+    'retrieval', 'topk', 'minScore',
+    // KB-11 additions: the two blocks added after the first review.
+    'quota', 'bytes', 'warnAt', 'embedding', 'baseUrl', 'model', 'dimension',
+  ]
   const missing = required.filter(key => !body.includes(key))
   check('dump-config: config block is complete, not truncated', missing.length === 0, missing.length === 0 ? `all ${required.length} keys present` : `missing ${missing.join(', ')}`)
   check('dump-config: minScore is 0.55', /minScore:\s*0\.55/.test(body), body.match(/minScore:.*/)?.[0]?.trim() ?? '(absent)')
   check('dump-config: stateDir is workspace-relative', /stateDir:\s*\.dsh-kb-zvec/.test(body), body.match(/stateDir:.*/)?.[0]?.trim() ?? '(absent)')
+
+  // The API key must never reach the dump. Checked by name against the whole
+  // capture: `--dump-config` prints config, so a key placed in config would be
+  // written to logs and diagnostics.
+  const leaked = /(api[_-]?key|authorization|bearer)\s*:\s*\S+/i.exec(dump.text)
+  check('dump-config: no credential appears in the dump', leaked === null, leaked === null ? 'no key-like field in 345 lines' : `found ${leaked[0]}`)
+  check('dump-config: the embedding key is named, not inlined', /apiKeyEnv/.test(body), body.match(/apiKeyEnv:.*/)?.[0]?.trim() ?? '(absent)')
 }
 
 // The plugin's exported entry points must resolve from inside the profile: an
@@ -163,6 +175,35 @@ if (existsSync(installed)) {
   const entries = ['./lib/index.js', './lib/client.js', './cordis.patch.yml']
   const missing = entries.filter(entry => !existsSync(join(installed, entry)))
   check('install: all published entries resolve', missing.length === 0, missing.length === 0 ? entries.join(', ') : `missing ${missing.join(', ')}`)
+
+  // The token artifacts are published API, so a profile consumer must be able to
+  // reach them without the repository.
+  const tokenEntries = ['./tokens/kb-tokens.json', './tokens/scss/_kb-tokens.scss', './tokens/w3c/kb-design-tokens.json']
+  const tokenMissing = tokenEntries.filter(entry => !existsSync(join(installed, entry)))
+  check('install: token artifacts are published', tokenMissing.length === 0, tokenMissing.length === 0 ? `${tokenEntries.length} artifacts present` : `missing ${tokenMissing.join(', ')}`)
+
+  // The host bundle must carry the tool registration, and the client bundle the
+  // three slot contributions. Checked by reading the installed files rather than
+  // the repository's, so a `files[]` omission is caught here.
+  const hostBundle = readFileSync(join(installed, 'lib', 'index.js'), 'utf8')
+  const toolBundle = readFileSync(join(installed, 'lib', 'host', 'search-tool.js'), 'utf8')
+  check('install: the host registers dsh_kb_search', /dsh_kb_search/.test(hostBundle), 'tool name present in the host bundle')
+  check('install: the tool bundle carries the spec field names', /match_score/.test(toolBundle) && /below_floor/.test(toolBundle), 'match_score and below_floor present')
+  check('install: the host declares the tools injection', /inject\s*=\s*\[['"]tools['"]\]/.test(hostBundle), "inject = ['tools']")
+
+  const clientBundle = readFileSync(join(installed, 'lib', 'client.js'), 'utf8')
+  for (const seam of ['sidebar.panellist', 'tool.call.toolview', 'dsh_kb_search']) {
+    check(`install: the client bundle contributes ${seam}`, clientBundle.includes(seam), seam)
+  }
+  // The client bundle must not require anything outside the module table.
+  const requires = [...clientBundle.matchAll(/require\("([^"]+)"\)/g)].map(match => match[1])
+  const allowed = new Set(['react', 'react/jsx-runtime'])
+  const foreign = [...new Set(requires)].filter(name => !allowed.has(name))
+  check('install: the client bundle imports only module-table entries', foreign.length === 0, foreign.length === 0 ? `${requires.length} requires, all allowlisted` : `found ${foreign.join(', ')}`)
+
+  // Stylesheets must be embedded in the bundle: the plugin has no host-side asset
+  // route, so a stylesheet left as a separate file would never load.
+  check('install: the client bundle carries its stylesheets', /data-plugin-css/.test(clientBundle), 'style injection present')
 }
 
 console.log(`\nKB-01 profile acceptance: ${passes.length} passed, ${failures.length} failed`)
