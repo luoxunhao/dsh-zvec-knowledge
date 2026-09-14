@@ -117,6 +117,7 @@ const TIERS = new Map([
   ['EmptyState.module.css', { tier: 'container', why: 'empty-state panel; the action passed in is a Button' }],
   ['AppShell.module.css', { tier: 'container', why: 'application frame; nav items are buttons inside and declare no shared state rule' }],
   ['OverviewPage.module.css', { tier: 'container', why: 'page layout; it styles tables and grids, not controls' }],
+  ['KnowledgePanel.module.css', { tier: 'container', why: 'panel body inside the host main column; the tab strip inside carries its own states' }],
   ['CreateCollectionDialog.module.css', { tier: 'container', why: 'dialog frame; its close control and fields carry their own states' }],
 ])
 

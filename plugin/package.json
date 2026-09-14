@@ -51,12 +51,13 @@
     "verify:components": "node scripts/verify-components.mjs",
     "verify:kb10": "node scripts/verify-kb10.mjs",
     "verify:kb04kb05": "node scripts/verify-kb04-kb05.mjs",
+    "verify:slots": "node scripts/verify-harness-slots.mjs",
     "verify:profile": "node scripts/verify-kb01-profile.mjs",
     "smoke:zvec": "node scripts/zvec-smoke.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json --noEmit",
     "build": "node scripts/clean-build.mjs && node scripts/gen-tokens.mjs && tsc -p tsconfig.json && tsc -p tsconfig.client.json && tsdown",
     "test:kb10": "npm run build && node scripts/verify-kb10.mjs",
-    "verify": "node scripts/gen-tokens.mjs --check && node scripts/verify-manifest.mjs && node scripts/verify-components.mjs && node scripts/verify-kb10.mjs && node scripts/verify-kb04-kb05.mjs"
+    "verify": "node scripts/gen-tokens.mjs --check && node scripts/verify-manifest.mjs && node scripts/verify-components.mjs && node scripts/verify-kb10.mjs && node scripts/verify-kb04-kb05.mjs && node scripts/verify-harness-slots.mjs"
   },
   "dependencies": {
     "@zvec/zvec": "^0.7.1"

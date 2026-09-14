@@ -93,6 +93,59 @@ const BUILDS = [
 ]
 
 /**
+ * Render the panel as the host frames it.
+ *
+ * The harness owns the sidebar and the main column, so this walkthrough draws a
+ * *stand-in* frame around the real panel component: a minimal 240px sidebar with
+ * the 知识库 row in the position the plugin registers it, and the panel in the
+ * main column. What it verifies is that the panel does not draw a second frame of
+ * its own and that it fills the column.
+ * @param options - theme selection.
+ * @returns a complete HTML document string.
+ */
+function renderHostPanel({ theme }) {
+  const panel = React.createElement(client.KnowledgeBasePanel, {
+    state: client.panelState,
+    port: {
+      listCollections: async () => COLLECTIONS,
+      listBuilds: async () => BUILDS,
+      getUsage: async () => ({ bytes: 18_432_000, quotaBytes: 104_857_600 }),
+      createCollection: async () => {},
+      deleteCollection: async () => {},
+    },
+  })
+
+  // A deliberately plain frame: the point is to see the panel's own geometry, so
+  // the stand-in chrome uses the token surfaces without imitating host components.
+  const body = `<div class="host-frame">
+    <aside class="host-sidebar">
+      <div class="host-brand">DeepSeek Harness</div>
+      <button class="host-row" type="button"><span class="host-glyph">▤</span>会话</button>
+      <button class="host-row host-row-active" type="button" aria-current="page"><span class="host-glyph">▥</span>知识库</button>
+      <button class="host-row" type="button"><span class="host-glyph">▦</span>设置</button>
+    </aside>
+    <div class="host-main">${renderToStaticMarkup(panel)}</div>
+  </div>`
+
+  const css = extractStyles()
+
+  return `<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>KB panel in host</title>
+<style>${css}</style>
+<style>
+html,body{margin:0;padding:0;background:var(--kb-bg-app)}
+.host-frame{display:grid;grid-template-columns:240px minmax(0,1fr);height:100vh}
+.host-sidebar{display:flex;flex-direction:column;gap:4px;padding:12px;background:var(--kb-bg-surface);border-right:1px solid var(--kb-border-subtle)}
+.host-brand{font:600 14px var(--kb-font-sans);color:var(--kb-text-primary);padding:8px 12px}
+.host-row{display:flex;align-items:center;gap:12px;height:34px;padding:0 12px;border:1px solid transparent;border-radius:6px;background:transparent;color:var(--kb-text-secondary);font:14px var(--kb-font-sans);text-align:left;cursor:pointer}
+.host-row-active{background:var(--kb-brand-tint);border-color:var(--kb-brand-border);color:var(--kb-brand);font-weight:500}
+.host-glyph{opacity:.8}
+.host-main{min-width:0;overflow:hidden}
+</style>
+</head><body${theme === 'dark' ? ' data-ds-dark-theme' : ''}>${body}</body></html>`
+}
+
+/**
  * Render one page variant to a full HTML document.
  * @param options - theme and whether to render the dialog.
  * @returns a complete HTML document string.
@@ -177,8 +230,17 @@ function extractStyles() {
 }
 
 mkdirSync(OUT, { recursive: true })
-for (const [name, options] of [['light', { theme: 'light', withDialog: false }], ['dark', { theme: 'dark', withDialog: false }], ['dialog', { theme: 'light', withDialog: true }]]) {
+const variants = [
+  ['light', { theme: 'light', withDialog: false }, renderPage],
+  ['dark', { theme: 'dark', withDialog: false }, renderPage],
+  ['dialog', { theme: 'light', withDialog: true }, renderPage],
+  // The host-framed variants are the ones that show the real integration: the
+  // panel body inside a sidebar'd shell, which is how the plugin actually ships.
+  ['host-light', { theme: 'light' }, renderHostPanel],
+  ['host-dark', { theme: 'dark' }, renderHostPanel],
+]
+for (const [name, options, render] of variants) {
   const file = join(OUT, `${name}.html`)
-  writeFileSync(file, renderPage(options), 'utf8')
+  writeFileSync(file, render(options), 'utf8')
   console.log(`wrote ${file}`)
 }

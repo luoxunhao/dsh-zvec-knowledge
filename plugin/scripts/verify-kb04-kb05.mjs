@@ -53,6 +53,69 @@ function read(relativePath) {
 }
 
 // ---------------------------------------------------------------------------
+// KB-04 — host integration (the sidebar entry and the main panel)
+//
+// The plugin is integrated into dsh web, not a standalone app: a 知识库 row in
+// the host sidebar addresses a main-column panel. These checks assert the
+// *registration contract*, which is the part that silently does nothing when it
+// is wrong — a mistyped slot key or a mismatched id/key pair produces a plugin
+// that loads cleanly and shows no UI at all.
+// ---------------------------------------------------------------------------
+const entryTsx = read('index.tsx')
+const panelIdTs = read('panel-id.ts')
+const slotsTs = read('slots.ts')
+
+{
+  // Both registrations must go through `inject`, because the two owner entries
+  // are mounted by other plugins and activation order is not guaranteed; a bare
+  // `register` into an undeclared slot throws.
+  //
+  // Comments are stripped first: the module docs quote the call, and counting
+  // prose would make this assertion about the documentation instead of the code.
+  const entryCode = entryTsx.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+  const injectCalls = (entryCode.match(/ctx\.slots\.inject\(/g) ?? []).length
+  // Each register must sit inside an inject callback, i.e. appear on the same
+  // statement as its inject call. A register on a line of its own would run
+  // immediately and throw whenever the owning entry has not mounted yet.
+  const nestedRegisters = (entryCode.match(/ctx\.slots\.inject\([^)]*\(\) => ctx\.slots\.register\(/g) ?? []).length
+  check('KB-04 integration: both slots registered through inject', injectCalls === 2, `${injectCalls} ctx.slots.inject call(s)`)
+  check('KB-04 integration: every register runs inside an inject callback', nestedRegisters === 2, `${nestedRegisters} of ${injectCalls} injected`)
+  check('KB-04 integration: slots service is a required injection', /inject: string\[\] = \['slots'\]/.test(entryCode), "inject declares ['slots']")
+
+  // The sidebar row and the main panel must address each other. The sidebar
+  // treats a list entry's `id` as the main panel key it selects, so the two
+  // constants being equal is what makes them one destination.
+  check('KB-04 integration: sidebar id equals panel key', /KNOWLEDGE_SIDEBAR_ID = 'knowledge'/.test(panelIdTs) && /KNOWLEDGE_PANEL_KEY = 'knowledge'/.test(panelIdTs), 'id and key are both knowledge')
+  check('KB-04 integration: panel registered under the keyed main slot', /name: 'main', key: KNOWLEDGE_PANEL_KEY/.test(entryTsx), 'main/key registration present')
+  check('KB-04 integration: sidebar row registered with label metadata', /name: 'sidebar\.panellist'/.test(entryTsx) && /label: KNOWLEDGE_LABEL/.test(entryTsx), 'panellist registration carries the row label')
+  check('KB-04 integration: row label is 知识库', /KNOWLEDGE_LABEL = '知识库'/.test(panelIdTs), 'the entry reads 知识库 in the sidebar')
+
+  // The icon is supplied, not the button: the sidebar owns the row, so the
+  // component must not draw its own chrome or an accessible name (the host
+  // button already carries one).
+  const iconTsx = read('panel-icon.tsx')
+  check('KB-04 integration: row glyph is decorative', /aria-hidden="true"/.test(iconTsx), 'the host button owns the accessible name')
+  check('KB-04 integration: glyph receives owner share', /size: number[\s\S]{0,80}active: boolean/.test(slotsTs), 'owner props restated from SidebarPanelIconOwnerProps')
+
+  // Disposal order: the panel must go before the row, or a click could ask the
+  // layout service to select a panel that is no longer registered.
+  const disposePanel = entryTsx.indexOf('disposePanel()')
+  const disposeRow = entryTsx.indexOf('disposeRow()')
+  check('KB-04 integration: panel disposed before its sidebar row', disposePanel !== -1 && disposeRow !== -1 && disposePanel < disposeRow, 'panel disposer runs first')
+
+  // The panel must not draw a second application frame: the host owns sidebar
+  // and topbar, so re-drawing them would give the user two of each.
+  const panelCss = read('KnowledgePanel.module.css')
+  const frameTokens = /--kb-sidebar-width|--kb-topbar-height|--kb-sidebar-rail-width/.test(panelCss)
+  check('KB-04 integration: panel draws no second frame', !frameTokens, frameTokens ? 'panel CSS uses frame geometry tokens' : 'no sidebar/topbar geometry in the panel')
+  const shellTsx = read('shell/AppShell.tsx')
+  check('KB-04 integration: shell kept for standalone rendering only', /showChrome/.test(read('pages/OverviewPage.tsx')), 'the page adapts to a host that supplies its own chrome')
+
+  // The declaration shim is the integration contract; it must state both seams.
+  check('KB-04 integration: slot shim declares both seams', /'sidebar\.panellist'/.test(slotsTs) && /'main':/.test(slotsTs), 'both keys restated with kind and owner')
+}
+
+// ---------------------------------------------------------------------------
 // KB-04 — application shell and navigation
 // ---------------------------------------------------------------------------
 const shellTsx = read('shell/AppShell.tsx')

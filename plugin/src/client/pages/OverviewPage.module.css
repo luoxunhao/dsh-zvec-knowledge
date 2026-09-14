@@ -18,6 +18,13 @@
   flex-wrap: wrap;
 }
 
+/* With the title block suppressed the header holds only the actions, which are
+ * right-aligned to the same edge they occupy when the title is present — so the
+ * primary button does not appear to move between hosts. */
+.headerActionsOnly {
+  justify-content: flex-end;
+}
+
 .headerText {
   display: flex;
   flex-direction: column;

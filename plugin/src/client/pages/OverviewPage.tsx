@@ -85,6 +85,16 @@ export interface OverviewPageProps {
   onDelete: (id: string) => void
   /** Called to retry after a failure. */
   onRetry?: () => void
+  /**
+   * Whether to render the page's own title block.
+   *
+   * Inside the harness shell the panel already sits in a main column with its own
+   * chrome, so a second title would be redundant. The actions row renders either
+   * way, because 创建知识库 is the page's primary and must not appear to move
+   * depending on the host. Defaults to `true` so the page stays usable standalone
+   * — the visual walkthrough renders it that way.
+   */
+  showChrome?: boolean
 }
 
 /** Status filter options; `all` is the unfiltered view. */
@@ -109,7 +119,7 @@ const VIEW_OPTIONS = [
  */
 export function OverviewPage({
   collections, builds, hits7d, loading = false, error = null,
-  onCreate, onOpen, onDelete, onRetry,
+  onCreate, onOpen, onDelete, onRetry, showChrome = true,
 }: OverviewPageProps): React.JSX.Element {
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState<string>('all')
@@ -132,13 +142,15 @@ export function OverviewPage({
 
   return (
     <div className={styles.page}>
-      <header className={styles.header}>
-        <div className={styles.headerText}>
-          <h2 className={styles.title}>知识库总览</h2>
-          <p className={styles.description}>
-            管理本地知识库，查看构建状态与检索命中情况。
-          </p>
-        </div>
+      <header className={`${styles.header} ${showChrome ? '' : styles.headerActionsOnly}`.trim()}>
+        {showChrome && (
+          <div className={styles.headerText}>
+            <h2 className={styles.title}>知识库总览</h2>
+            <p className={styles.description}>
+              管理本地知识库，查看构建状态与检索命中情况。
+            </p>
+          </div>
+        )}
         <div className={styles.headerActions}>
           <Button variant="secondary" icon="refresh" onClick={onRetry}>刷新</Button>
           {/* The page's single primary action. */}

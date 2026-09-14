@@ -1,0 +1,44 @@
+/* KnowledgePanel — the body of the main-column panel.
+ *
+ * The harness layout owns the frame (sidebar, main column, panel selection), so
+ * this stylesheet deliberately contains no frame geometry: no sidebar width, no
+ * topbar height, no app background. It styles the panel's own two regions — the
+ * sub-navigation strip and the scrolling body — and nothing else.
+ *
+ * The panel fills the main column rather than sizing itself: `height: 100%` plus
+ * a scrolling body is what keeps the tab strip pinned while a long collection list
+ * scrolls under it. */
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  /* The panel is a page surface inside the host's main column, so it takes the
+   * app background rather than the raised surface colour the chrome uses. */
+  background: var(--kb-bg-app);
+}
+
+.tabs {
+  flex: none;
+  padding: 0 var(--kb-space-6);
+  background: var(--kb-bg-surface);
+  border-bottom: 1px solid var(--kb-divider-card);
+}
+
+.body {
+  flex: 1;
+  min-height: 0;
+  padding: var(--kb-space-6);
+  overflow-y: auto;
+}
+
+@media (max-width: 720px) {
+  .tabs {
+    padding: 0 var(--kb-space-4);
+  }
+
+  .body {
+    padding: var(--kb-space-4);
+  }
+}
