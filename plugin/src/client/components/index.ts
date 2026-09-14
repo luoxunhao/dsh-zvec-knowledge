@@ -31,6 +31,7 @@ export { StatCard, type StatCardProps } from './StatCard.tsx'
 export { StorageUsageCard, type StorageUsage, type StorageUsageCardProps } from './StorageUsageCard.tsx'
 export { CollectionCard, type CollectionCardProps, type CollectionCardStats } from './CollectionCard.tsx'
 export { EmptyState, type EmptyStateProps } from './EmptyState.tsx'
+export { QuotaNotice, type QuotaNoticeProps, type QuotaStateView } from './QuotaNotice.tsx'
 export { UploadDropzone, type UploadDropzoneProps } from './UploadDropzone.tsx'
 export {
   DocumentRow, formatChunks, formatSize,

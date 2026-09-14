@@ -176,6 +176,38 @@ function renderDocuments({ theme }) {
 }
 
 /**
+ * Render the restricted state at three levels of severity.
+ *
+ * The three are rendered side by side because the distinction is the point: a
+ * user near the limit needs a warning they can still act on, one who has been
+ * refused needs the numbers and the remedy, and one at the limit needs to know
+ * what to delete. Rendering them together is also how the tone difference between
+ * warning and danger gets checked rather than asserted.
+ * @param options - theme selection.
+ * @returns a complete HTML document string.
+ */
+function renderQuota({ theme }) {
+  const states = [
+    { title: '接近上限（warnAt 0.9 触发）', state: { used: 92 * 1024 * 1024, limit: 100 * 1024 * 1024, fraction: 0.92, nearLimit: true, exceeded: false }, blocked: null },
+    { title: '写入被拒（存储仍低于上限）', state: { used: 58 * 1024 * 1024, limit: 60 * 1024 * 1024, fraction: 0.97, nearLimit: true, exceeded: false }, blocked: '上传该文档需要约 3.1 MB，将占用 61 MB，超出配额 60 MB（当前已用 58 MB，尚缺 1.2 MB）。' },
+    { title: '已达上限', state: { used: 100 * 1024 * 1024, limit: 100 * 1024 * 1024, fraction: 1, nearLimit: true, exceeded: true }, blocked: null },
+  ]
+  const body = states.map(entry => `<div class="case"><h3>${entry.title}</h3>${renderToStaticMarkup(
+    React.createElement(client.QuotaNotice, { state: entry.state, blocked: entry.blocked }),
+  )}</div>`).join('')
+  const css = extractStyles()
+  return `<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>KB-11 quota states</title>
+<style>${css}</style>
+<style>
+html,body{margin:0;padding:0;background:var(--kb-bg-app)}
+#root{padding:24px;width:900px;display:flex;flex-direction:column;gap:24px}
+.case h3{margin:0 0 8px;font:600 14px var(--kb-font-sans);color:var(--kb-text-primary)}
+</style>
+</head><body${theme === 'dark' ? ' data-ds-dark-theme' : ''}><div id="root">${body}</div></body></html>`
+}
+
+/**
  * Render one page variant to a full HTML document.
  * @param options - theme and whether to render the dialog.
  * @returns a complete HTML document string.
@@ -270,6 +302,8 @@ const variants = [
   ['host-dark', { theme: 'dark' }, renderHostPanel],
   ['documents', { theme: 'light' }, renderDocuments],
   ['documents-dark', { theme: 'dark' }, renderDocuments],
+  ['quota', { theme: 'light' }, renderQuota],
+  ['quota-dark', { theme: 'dark' }, renderQuota],
 ]
 for (const [name, options, render] of variants) {
   const file = join(OUT, `${name}.html`)
