@@ -1,0 +1,96 @@
+/* CostEstimate — design spec §5.6 (代价预估). */
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kb-space-3);
+  padding: var(--kb-space-4);
+  border: 1px solid var(--kb-border-subtle);
+  border-radius: var(--kb-radius-lg);
+  background: var(--kb-bg-surface);
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--kb-space-3);
+  flex-wrap: wrap;
+}
+
+.title {
+  margin: 0;
+  font-size: var(--kb-size-title);
+  line-height: var(--kb-leading-title);
+  font-weight: 600;
+  color: var(--kb-text-primary);
+}
+
+.badge {
+  padding: 0 var(--kb-space-2);
+  height: var(--kb-badge-height);
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--kb-brand-border);
+  border-radius: var(--kb-radius-full);
+  background: var(--kb-brand-tint);
+  color: var(--kb-brand);
+  font-size: var(--kb-size-caption);
+  line-height: var(--kb-leading-caption);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--kb-space-4);
+  margin: 0;
+}
+
+.item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kb-space-1);
+  min-width: 0;
+}
+
+.label {
+  font-size: var(--kb-size-caption);
+  line-height: var(--kb-leading-caption);
+  color: var(--kb-text-tertiary);
+}
+
+.value {
+  margin: 0;
+  font-size: var(--kb-size-h3);
+  line-height: var(--kb-leading-h3);
+  font-weight: 600;
+  color: var(--kb-text-primary);
+}
+
+.detail {
+  font-size: var(--kb-size-caption);
+  line-height: var(--kb-leading-caption);
+  color: var(--kb-text-tertiary);
+}
+
+/* A zero-chunk plan is a warning rather than an error: the configuration is
+ * valid, it just would not index anything. */
+.warning {
+  display: flex;
+  align-items: center;
+  gap: var(--kb-space-2);
+  margin: 0;
+  padding: var(--kb-space-2) var(--kb-space-3);
+  border: 1px solid var(--kb-status-building-border);
+  border-radius: var(--kb-radius-sm);
+  background: var(--kb-status-building-bg);
+  color: var(--kb-status-building-text);
+  font-size: var(--kb-size-caption);
+  line-height: var(--kb-leading-caption);
+}
+
+@media (max-width: 1100px) {
+  .grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

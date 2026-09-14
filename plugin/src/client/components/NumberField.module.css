@@ -1,0 +1,89 @@
+/* NumberField — design spec §4.2 (numeric form control) used by §5.5 / §5.6. */
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kb-space-1);
+}
+
+.label {
+  font-size: var(--kb-size-body-sm);
+  line-height: var(--kb-leading-body-sm);
+  color: var(--kb-text-primary);
+}
+
+.input {
+  width: 100%;
+  height: var(--kb-control-md);
+  padding: 0 var(--kb-space-3);
+  border: 1px solid var(--kb-border-strong);
+  border-radius: var(--kb-radius-sm);
+  background: var(--kb-bg-surface);
+  color: var(--kb-text-primary);
+  font-family: var(--kb-font-mono);
+  font-size: var(--kb-size-body-sm);
+  font-variant-numeric: tabular-nums;
+  transition: border-color 0.12s ease, background-color 0.12s ease;
+}
+
+.input:hover:not(:disabled) {
+  border-color: var(--kb-neutral-400);
+}
+
+/* Focus is a border-colour change plus the ring token pair; the spec forbids
+ * expressing focus with a shadow. */
+.input:focus-visible {
+  border-color: var(--kb-brand);
+  outline: var(--kb-outline-focus);
+  outline-offset: 1px;
+  box-shadow: var(--kb-shadow-focus);
+}
+
+.input:disabled {
+  background: var(--kb-bg-subtle);
+  border-color: var(--kb-border-subtle);
+  color: var(--kb-text-disabled);
+  cursor: not-allowed;
+}
+
+.invalid {
+  border-color: var(--kb-status-failed);
+  --kb-focus-ring-color: var(--kb-status-failed);
+}
+
+/* Busy: the field's value is being applied. The box keeps its size and only the
+ * cursor changes, so a recomputing preview cannot make the form jump. */
+.loading .input {
+  cursor: progress;
+  border-color: var(--kb-brand-border);
+}
+
+.loading .label {
+  color: var(--kb-text-secondary);
+}
+
+.hint {
+  font-size: var(--kb-size-caption);
+  line-height: var(--kb-leading-caption);
+  color: var(--kb-text-secondary);
+}
+
+/* The rejection always states the accepted range, per §8.3. */
+.error {
+  font-size: var(--kb-size-caption);
+  line-height: var(--kb-leading-caption);
+  color: var(--kb-status-failed-text);
+}
+
+/* The spinner arrows are hidden: the field is a parameter box, and the browser's
+ * steppers are unusable at this control height. Keyboard arrows still work. */
+.input::-webkit-outer-spin-button,
+.input::-webkit-inner-spin-button {
+  appearance: none;
+  margin: 0;
+}
+
+.input[type='number'] {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}

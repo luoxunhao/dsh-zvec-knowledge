@@ -1004,6 +1004,69 @@
       "derived": true
     },
     {
+      "var": "--kb-preview-ordinal-col",
+      "specName": null,
+      "group": "component",
+      "kind": "dimension",
+      "light": "48px",
+      "note": "分片预览「序号」列宽（规范 5.5 未给数值）",
+      "derived": true
+    },
+    {
+      "var": "--kb-preview-token-col",
+      "specName": null,
+      "group": "component",
+      "kind": "dimension",
+      "light": "76px",
+      "note": "分片预览「token 数」列宽（规范 5.5 未给数值）",
+      "derived": true
+    },
+    {
+      "var": "--kb-preview-overlap-col",
+      "specName": null,
+      "group": "component",
+      "kind": "dimension",
+      "light": "84px",
+      "note": "分片预览「重叠量」列宽（规范 5.5 未给数值）",
+      "derived": true
+    },
+    {
+      "var": "--kb-preview-range-col",
+      "specName": null,
+      "group": "component",
+      "kind": "dimension",
+      "light": "96px",
+      "note": "分片预览「字符区间」列宽（规范 5.5 未给数值）",
+      "derived": true
+    },
+    {
+      "var": "--kb-preview-skeleton-height",
+      "specName": null,
+      "group": "component",
+      "kind": "dimension",
+      "light": "168px",
+      "note": "分片预览骨架屏高度，按预览区典型高度取值（规范 8.1 要求骨架形状与最终内容一致）",
+      "derived": true
+    },
+    {
+      "var": "--kb-log-max-height",
+      "specName": null,
+      "group": "component",
+      "kind": "dimension",
+      "light": "220px",
+      "note": "构建日志展开后最大高度，超出滚动（规范 5.3 未给数值）",
+      "derived": true
+    },
+    {
+      "var": "--kb-panel-max-width",
+      "specName": null,
+      "group": "layout",
+      "kind": "dimension",
+      "light": "880px",
+      "note": "配置器等内容区最大宽度。规范未给数值，按可读行宽与三段式表单列宽推导，避免超宽屏下行长过长",
+      "derived": true
+    },
+    {
       "var": "--kb-dialog-width",
       "specName": null,
       "group": "layout",

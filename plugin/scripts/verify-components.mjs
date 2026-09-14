@@ -100,6 +100,7 @@ const TIERS = new Map([
   ['Button.module.css', { tier: 'interactive', why: 'primary action control' }],
   ['IconButton.module.css', { tier: 'interactive', why: 'action control' }],
   ['TextField.module.css', { tier: 'interactive', why: 'text, search and textarea input' }],
+  ['NumberField.module.css', { tier: 'interactive', why: 'numeric parameter input; has its own focus/disabled/loading treatment' }],
   ['SearchField.module.css', { tier: 'interactive', why: 'search input with a clear affordance' }],
   ['Select.module.css', { tier: 'interactive', why: 'single-value chooser' }],
   ['Switch.module.css', { tier: 'interactive', why: 'boolean control' }],
@@ -121,6 +122,10 @@ const TIERS = new Map([
   ['KnowledgePanel.module.css', { tier: 'container', why: 'panel body inside the host main column; the tab strip inside carries its own states' }],
   ['DocumentsPage.module.css', { tier: 'container', why: 'page layout: toolbar, list frame and states; the controls inside carry their own states' }],
   ['DocumentRow.module.css', { tier: 'container', why: 'list row frame; its cancel/retry/remove controls live inside and declare their own states' }],
+  ['BuildPipeline.module.css', { tier: 'container', why: 'pipeline frame: stage nodes, progress and log; the cancel/retry/log controls inside carry their own states' }],
+  ['ChunkPreview.module.css', { tier: 'container', why: 'preview panel; it reports rows and totals, no control of its own' }],
+  ['CostEstimate.module.css', { tier: 'container', why: 'estimate readout; purely descriptive' }],
+  ['BuildPage.module.css', { tier: 'container', why: 'page layout for the strategy configurator; the fields inside carry their own states' }],
   ['CreateCollectionDialog.module.css', { tier: 'container', why: 'dialog frame; its close control and fields carry their own states' }],
 ])
 

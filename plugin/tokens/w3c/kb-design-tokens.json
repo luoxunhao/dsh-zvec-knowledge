@@ -1116,6 +1116,96 @@
       }
     }
   },
+  "preview": {
+    "ordinal": {
+      "col": {
+        "$type": "dimension",
+        "$value": "48px",
+        "$description": "分片预览「序号」列宽（规范 5.5 未给数值）",
+        "$extensions": {
+          "com.dsh.zvec-knowledge": {
+            "derived": true
+          }
+        }
+      }
+    },
+    "token": {
+      "col": {
+        "$type": "dimension",
+        "$value": "76px",
+        "$description": "分片预览「token 数」列宽（规范 5.5 未给数值）",
+        "$extensions": {
+          "com.dsh.zvec-knowledge": {
+            "derived": true
+          }
+        }
+      }
+    },
+    "overlap": {
+      "col": {
+        "$type": "dimension",
+        "$value": "84px",
+        "$description": "分片预览「重叠量」列宽（规范 5.5 未给数值）",
+        "$extensions": {
+          "com.dsh.zvec-knowledge": {
+            "derived": true
+          }
+        }
+      }
+    },
+    "range": {
+      "col": {
+        "$type": "dimension",
+        "$value": "96px",
+        "$description": "分片预览「字符区间」列宽（规范 5.5 未给数值）",
+        "$extensions": {
+          "com.dsh.zvec-knowledge": {
+            "derived": true
+          }
+        }
+      }
+    },
+    "skeleton": {
+      "height": {
+        "$type": "dimension",
+        "$value": "168px",
+        "$description": "分片预览骨架屏高度，按预览区典型高度取值（规范 8.1 要求骨架形状与最终内容一致）",
+        "$extensions": {
+          "com.dsh.zvec-knowledge": {
+            "derived": true
+          }
+        }
+      }
+    }
+  },
+  "log": {
+    "max": {
+      "height": {
+        "$type": "dimension",
+        "$value": "220px",
+        "$description": "构建日志展开后最大高度，超出滚动（规范 5.3 未给数值）",
+        "$extensions": {
+          "com.dsh.zvec-knowledge": {
+            "derived": true
+          }
+        }
+      }
+    }
+  },
+  "panel": {
+    "max": {
+      "width": {
+        "$type": "dimension",
+        "$value": "880px",
+        "$description": "配置器等内容区最大宽度。规范未给数值，按可读行宽与三段式表单列宽推导，避免超宽屏下行长过长",
+        "$extensions": {
+          "com.dsh.zvec-knowledge": {
+            "derived": true
+          }
+        }
+      }
+    }
+  },
   "dialog": {
     "width": {
       "$type": "dimension",

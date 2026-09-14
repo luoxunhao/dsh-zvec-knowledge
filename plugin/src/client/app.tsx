@@ -21,6 +21,8 @@ import { EmptyState } from './components/EmptyState.tsx'
 import { Button } from './components/Button.tsx'
 import type { StorageUsage } from './components/StorageUsageCard.tsx'
 import type { StatusKind } from './components/StatusPill.tsx'
+import type { HostPreview, HostCost, ChunkingDraft, IndexDraft } from './pages/BuildPage.tsx'
+import type { StageView, LogLine } from './components/BuildPipeline.tsx'
 
 /** One collection as the host reports it. */
 export interface HostCollection {
@@ -99,6 +101,33 @@ export interface KnowledgeBasePort {
   ) => Promise<HostDocument>
   /** Remove one document. */
   removeDocument?: (collectionId: string, id: string) => Promise<void>
+  /**
+   * Compute the chunk preview for a candidate chunking strategy.
+   *
+   * Host-side on purpose: the preview must come from the same chunker the build
+   * uses, or the two would eventually disagree — and the preview's whole purpose
+   * is to predict what the build will do.
+   */
+  previewChunks?: (collectionId: string, chunking: ChunkingDraft) => Promise<HostPreview>
+  /** Estimate the cost of a plan. */
+  estimateCost?: (collectionId: string, chunking: ChunkingDraft, index: IndexDraft) => Promise<HostCost>
+  /** The strategy a collection was last built with, for a pre-filled configurator. */
+  storedStrategy?: (collectionId: string) => Promise<{ chunking: ChunkingDraft, index: IndexDraft } | null>
+  /**
+   * Run the index build.
+   *
+   * Progress, log lines and cancellation all flow through the callbacks, because
+   * the build is a long task that must remain observable and interruptible.
+   */
+  buildIndex?: (
+    collectionId: string,
+    strategy: { chunking: ChunkingDraft, index: IndexDraft },
+    handlers: {
+      onProgress: (progress: { stages: StageView[], processed: number, total: number, fraction: number }) => void
+      onLog: (line: LogLine) => void
+    },
+    signal: AbortSignal,
+  ) => Promise<{ ok: boolean, chunks: number, error?: string }>
 }
 
 /** Options accepted by {@link KnowledgeBaseApp}. */

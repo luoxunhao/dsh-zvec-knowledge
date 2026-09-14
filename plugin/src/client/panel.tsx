@@ -19,7 +19,7 @@
  * @module dsh-zvec-knowledge/client/panel
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { OverviewPage, type BuildRecord, type OverviewCollection } from './pages/OverviewPage.tsx'
 import { CreateCollectionDialog } from './dialogs/CreateCollectionDialog.tsx'
 import { EmptyState } from './components/EmptyState.tsx'
@@ -30,6 +30,12 @@ import type { StatusKind } from './components/StatusPill.tsx'
 import type { KnowledgeBasePort, HostCollection, HostDocument } from './app.tsx'
 import type { PanelState, KnowledgeView } from './index.tsx'
 import { DocumentsPage, type PageDocument } from './pages/DocumentsPage.tsx'
+import {
+  BuildPage,
+  type BuildPageProps, type ChunkingDraft, type IndexDraft,
+  type HostPreview, type HostCost, type HostModelOption, type HostQuantizerOption,
+} from './pages/BuildPage.tsx'
+import type { StageView, LogLine } from './components/BuildPipeline.tsx'
 import styles from './KnowledgePanel.module.css'
 
 /** Options accepted by {@link KnowledgeBasePanel}. */
@@ -64,8 +70,69 @@ const STATUS_LABELS: Record<StatusKind, string> = {
   info: '信息',
 }
 
+/**
+ * Chunking defaults, mirroring the host's §10.1 values.
+ *
+ * Duplicated here rather than fetched so the configurator renders immediately and
+ * stays usable while the host bridge is being wired; the host's stored strategy
+ * replaces them once it arrives.
+ */
+const CHUNKING_FALLBACK: ChunkingDraft = {
+  mode: 'heading',
+  chunkTokens: 1024,
+  overlapTokens: 128,
+  minChunkTokens: 64,
+  preserveCodeBlocks: true,
+  splitTablesByRow: false,
+}
+
+/** Index defaults, mirroring the host's §10.1 values and the engine's real set. */
+const INDEX_FALLBACK: IndexDraft = {
+  model: 'local-1024',
+  kind: 'HNSW',
+  m: 32,
+  efConstruction: 200,
+  quantize: 'INT8',
+  denseWeight: 0.6,
+  fullTextWeight: 0.4,
+}
+
+/** The four stages before any build has run. Labels are mandatory (§5.3). */
+const INITIAL_STAGES: StageView[] = [
+  { id: 'parse', label: '解析文档', state: 'pending' },
+  { id: 'chunk', label: '切分与嵌入', state: 'pending' },
+  { id: 'index', label: '写入索引', state: 'pending' },
+  { id: 'publish', label: '校验与发布', state: 'pending' },
+]
+
 /** Views whose page is not part of this slice. */
-const PENDING_VIEWS: KnowledgeView[] = ['build', 'retrieval', 'rag', 'settings']
+const PENDING_VIEWS: KnowledgeView[] = ['retrieval', 'rag', 'settings']
+
+/**
+ * Embedding model options.
+ *
+ * One entry, because the collection schema is created at 1024 dimensions and a
+ * different model would need a new collection rather than a new setting. The
+ * list lives on the client only until the host exposes its provider list; the
+ * configurator's contract does not change when it does.
+ */
+const MODEL_OPTIONS: HostModelOption[] = [
+  {
+    id: 'local-1024',
+    label: '本地嵌入模型（1024 维）',
+    dimension: 1024,
+    metric: 'cosine',
+    note: '与集合 schema 一致，无需重建集合',
+  },
+]
+
+/** Quantizer options, each stating the compression/recall trade-off (§5.6). */
+const QUANTIZER_OPTIONS: HostQuantizerOption[] = [
+  { value: 'INT8', label: 'INT8', tradeoff: '相对 FP32 压缩 4×，召回损失小，推荐默认' },
+  { value: 'INT4', label: 'INT4', tradeoff: '相对 FP32 压缩 8×，召回损失明显增大' },
+  { value: 'FP16', label: 'FP16', tradeoff: '相对 FP32 压缩 2×，召回损失极小' },
+  { value: 'none', label: '不量化', tradeoff: '不压缩，存储占用最高，召回最好' },
+]
 
 /**
  * Project a host document into the page's shape.
@@ -121,6 +188,24 @@ export function KnowledgeBasePanel({ state, port }: KnowledgeBasePanelProps): Re
   // than in the documents page so switching views does not forget the choice.
   const [selectedCollection, setSelectedCollection] = useState<string | null>(null)
 
+  // ---- Build (KB-07) state ----
+  const [chunking, setChunking] = useState<ChunkingDraft>(CHUNKING_FALLBACK)
+  const [index, setIndex] = useState<IndexDraft>(INDEX_FALLBACK)
+  const [preview, setPreview] = useState<HostPreview | null>(null)
+  const [previewError, setPreviewError] = useState<string | null>(null)
+  const [cost, setCost] = useState<HostCost | null>(null)
+  const [stages, setStages] = useState<StageView[]>(INITIAL_STAGES)
+  const [processed, setProcessed] = useState(0)
+  const [total, setTotal] = useState(0)
+  const [fraction, setFraction] = useState(0)
+  const [log, setLog] = useState<LogLine[]>([])
+  const [building, setBuilding] = useState(false)
+  const [buildError, setBuildError] = useState<string | null>(null)
+  // Whether retrieval is currently served from a previous snapshot: true from
+  // the moment a build starts until it publishes.
+  const [servingPrevious, setServingPrevious] = useState(false)
+  const buildController = useRef<AbortController | null>(null)
+
   // Mirror the shared selection in both directions: the sidebar row can change
   // it, and the in-panel tabs change it here.
   useEffect(() => state.subscribe(() => setView(state.get())), [state])
@@ -174,6 +259,113 @@ export function KnowledgeBasePanel({ state, port }: KnowledgeBasePanelProps): Re
   }
 
   useEffect(() => { void loadDocuments(selectedCollection) }, [port, selectedCollection])
+
+  // ---- Build strategy: prefill, preview, estimate ----
+
+  // Load the stored strategy so a rebuild shows what it is changing rather than
+  // silently presenting defaults that differ from the live index.
+  useEffect(() => {
+    let cancelled = false
+    const load = async (): Promise<void> => {
+      if (port?.storedStrategy === undefined || selectedCollection === null) return
+      try {
+        const stored = await port.storedStrategy(selectedCollection)
+        if (cancelled || stored === null) return
+        setChunking(stored.chunking)
+        setIndex(stored.index)
+      } catch {
+        // A missing stored strategy is not an error: the defaults are valid, and
+        // surfacing a failure here would block a first build.
+      }
+    }
+    void load()
+    return () => { cancelled = true }
+  }, [port, selectedCollection])
+
+  // Recompute the preview and estimate whenever a parameter changes. Both derive
+  // from the same host call path, so the numbers the user sees are the numbers the
+  // build will produce.
+  useEffect(() => {
+    let cancelled = false
+    const run = async (): Promise<void> => {
+      if (selectedCollection === null) {
+        setPreview(null)
+        setCost(null)
+        return
+      }
+      try {
+        setPreviewError(null)
+        setPreview(null)
+        setCost(null)
+        const nextPreview = port?.previewChunks !== undefined
+          ? await port.previewChunks(selectedCollection, chunking)
+          : { rows: [], totalChunks: 0, averageTokens: 0, discarded: 0, totalTokens: 0 }
+        if (cancelled) return
+        setPreview(nextPreview)
+        const nextCost = port?.estimateCost !== undefined
+          ? await port.estimateCost(selectedCollection, chunking, index)
+          : null
+        if (cancelled) return
+        setCost(nextCost)
+      } catch (cause) {
+        if (cancelled) return
+        // The preview failure is reported in the preview panel rather than the
+        // page error, so an invalid parameter does not look like a load failure.
+        setPreviewError(String(cause instanceof Error ? cause.message : cause))
+      }
+    }
+    void run()
+    return () => { cancelled = true }
+  }, [port, selectedCollection, chunking, index])
+
+  /** Run the index build. */
+  const submitBuild = async (): Promise<void> => {
+    if (port?.buildIndex === undefined || selectedCollection === null) return
+    const controller = new AbortController()
+    buildController.current = controller
+    setBuilding(true)
+    setBuildError(null)
+    setLog([])
+    setProcessed(0)
+    setTotal(0)
+    setFraction(0)
+    setStages(INITIAL_STAGES)
+    // Retrieval keeps serving the previous snapshot for the whole build; the
+    // interface says so rather than leaving the user to infer it (§5.3).
+    setServingPrevious(true)
+    try {
+      const result = await port.buildIndex(
+        selectedCollection,
+        { chunking, index },
+        {
+          onProgress: next => {
+            setStages(next.stages)
+            setProcessed(next.processed)
+            setTotal(next.total)
+            setFraction(next.fraction)
+          },
+          onLog: line => setLog(previous => [...previous, line]),
+        },
+        controller.signal,
+      )
+      if (!result.ok) setBuildError(result.error ?? '构建未完成')
+      // Refresh either way: a cancelled build still changed the active documents'
+      // status, and a successful one changed the collection's chunk count.
+      await load()
+      await loadDocuments(selectedCollection)
+    } catch (cause) {
+      setBuildError(String(cause instanceof Error ? cause.message : cause))
+    } finally {
+      setBuilding(false)
+      setServingPrevious(false)
+      buildController.current = null
+    }
+  }
+
+  /** Cancel the running build. */
+  const cancelBuild = (): void => {
+    buildController.current?.abort()
+  }
 
   /** Switch view through the shared holder so the sidebar row follows. */
   const changeView = (next: string): void => {
@@ -257,12 +449,41 @@ export function KnowledgeBasePanel({ state, port }: KnowledgeBasePanelProps): Re
             onRetry={() => { void load() }}
             collectionId={selectedCollection}
           />
+        ) : view === 'build' ? (
+          <BuildPage
+            collectionId={selectedCollection}
+            chunking={chunking}
+            onChunkingChange={setChunking}
+            index={index}
+            onIndexChange={setIndex}
+            preview={preview}
+            previewError={previewError}
+            cost={cost}
+            models={MODEL_OPTIONS}
+            quantizers={QUANTIZER_OPTIONS}
+            stages={stages}
+            processed={processed}
+            total={total}
+            fraction={fraction}
+            log={log}
+            running={building}
+            buildError={buildError}
+            servingPreviousSnapshot={servingPrevious}
+            hasDocuments={documents.length > 0}
+            onSubmit={() => { void submitBuild() }}
+            onCancel={cancelBuild}
+            onRetry={() => { void submitBuild() }}
+            onReset={() => {
+              setChunking(CHUNKING_FALLBACK)
+              setIndex(INDEX_FALLBACK)
+            }}
+          />
         ) : (
           <EmptyState
             icon={view === 'retrieval' ? 'search' : 'info'}
             title={`${VIEWS.find(item => item.value === view)?.label ?? view} 尚未实现`}
             description={PENDING_VIEWS.includes(view)
-              ? '该页面属于后续 issue 的范围（KB-07 起），当前版本交付总览与文档接入。'
+              ? '该页面属于后续 issue 的范围（KB-08 起），当前版本交付总览、文档接入与索引构建。'
               : '该页面尚未实现。'}
             action={<Button variant="secondary" onClick={() => changeView('overview')}>返回总览</Button>}
           />

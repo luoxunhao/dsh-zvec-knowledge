@@ -1,7 +1,7 @@
 // 由 scripts/gen-tokens.mjs 从 tokens/kb-tokens.json 生成，请勿手工编辑。
 // 令牌源：《DSH 知识库插件（基于 zvec）设计规范》v1.1.0 第 3 章（浅色）、第 7 章（深色）
 //
-// 共 148 项令牌。深色变量以 -dark 后缀单独导出。
+// 共 155 项令牌。深色变量以 -dark 后缀单独导出。
 //
 // ⚠️ Sass 变量在构建期被替换，**不随主题切换**。凡需要随浅/深主题变化的样式，
 //    必须使用 CSS 自定义属性 `var(--kb-*)`，不要使用本文件中的 $ 变量。
@@ -120,6 +120,13 @@ $kb-doc-chunks-col: 80px;
 $kb-doc-status-col: 96px;
 $kb-doc-actions-col: 64px;
 $kb-doc-progress-width: 220px;
+$kb-preview-ordinal-col: 48px;
+$kb-preview-token-col: 76px;
+$kb-preview-overlap-col: 84px;
+$kb-preview-range-col: 96px;
+$kb-preview-skeleton-height: 168px;
+$kb-log-max-height: 220px;
+$kb-panel-max-width: 880px;
 $kb-dialog-width: 480px;
 $kb-overlay-scrim: rgba(19, 22, 25, 0.42);
 $kb-overlay-z: 1000;
@@ -321,6 +328,13 @@ $kb-token-names: (
   "--kb-doc-status-col": $kb-doc-status-col,
   "--kb-doc-actions-col": $kb-doc-actions-col,
   "--kb-doc-progress-width": $kb-doc-progress-width,
+  "--kb-preview-ordinal-col": $kb-preview-ordinal-col,
+  "--kb-preview-token-col": $kb-preview-token-col,
+  "--kb-preview-overlap-col": $kb-preview-overlap-col,
+  "--kb-preview-range-col": $kb-preview-range-col,
+  "--kb-preview-skeleton-height": $kb-preview-skeleton-height,
+  "--kb-log-max-height": $kb-log-max-height,
+  "--kb-panel-max-width": $kb-panel-max-width,
   "--kb-dialog-width": $kb-dialog-width,
   "--kb-overlay-scrim": $kb-overlay-scrim,
   "--kb-overlay-z": $kb-overlay-z,

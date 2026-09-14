@@ -40,6 +40,16 @@ export interface DocumentRecord {
   bytes: number
   /** Lower-case extension without the dot, e.g. `md`; drives the type icon. */
   ext: string
+  /**
+   * The document's extracted plain text.
+   *
+   * Stored rather than re-read from the original file, because the original may
+   * have moved or changed between upload and rebuild — and a rebuild that read a
+   * different revision would silently produce an index that does not match what
+   * the user uploaded. It is also why `bytes` is recorded separately: the byte
+   * count describes the source file, while this describes what is indexed.
+   */
+  text: string
   /** Lifecycle status. */
   status: DocumentStatus
   /**

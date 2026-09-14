@@ -59,6 +59,18 @@ export {
   type DocumentRowData, type DocumentRowProps, type TransferState,
 } from './components/DocumentRow.tsx'
 export { UploadDropzone, type UploadDropzoneProps } from './components/UploadDropzone.tsx'
+export { NumberField, type NumberFieldProps } from './components/NumberField.tsx'
+export { ChunkPreview, type ChunkPreviewProps, type PreviewRowData } from './components/ChunkPreview.tsx'
+export { CostEstimate, type CostEstimateProps } from './components/CostEstimate.tsx'
+export {
+  BuildPipeline, formatLogTime,
+  type BuildPipelineProps, type LogLine, type StageId, type StageState, type StageView,
+} from './components/BuildPipeline.tsx'
+export {
+  BuildPage, validateChunkingDraft, validateWeightsDraft,
+  type BuildPageProps, type ChunkingDraft, type IndexDraft,
+  type HostPreview, type HostCost, type HostModelOption, type HostQuantizerOption,
+} from './pages/BuildPage.tsx'
 export {
   CreateCollectionDialog, type CreateCollectionDialogProps,
 } from './dialogs/CreateCollectionDialog.tsx'

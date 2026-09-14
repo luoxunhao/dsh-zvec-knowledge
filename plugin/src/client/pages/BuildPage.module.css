@@ -1,0 +1,169 @@
+/* BuildPage — design spec §5.5 / §5.6 / §6.5 (索引策略配置).
+ *
+ * The page is a single column of numbered sections followed by the cost estimate
+ * and only then the action row. That vertical order is the requirement, not a
+ * stylistic choice, so nothing here uses a layout that could reorder them. */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kb-space-5);
+  max-width: var(--kb-panel-max-width);
+  min-width: 0;
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--kb-space-4);
+  flex-wrap: wrap;
+}
+
+.headerText {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kb-space-1);
+  min-width: 0;
+}
+
+.title {
+  margin: 0;
+  font-size: var(--kb-size-title);
+  line-height: var(--kb-leading-title);
+  font-weight: 600;
+  color: var(--kb-text-primary);
+}
+
+.description {
+  margin: 0;
+  font-size: var(--kb-size-body-sm);
+  line-height: var(--kb-leading-body-sm);
+  color: var(--kb-text-secondary);
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kb-space-3);
+  padding: var(--kb-space-4);
+  border: 1px solid var(--kb-border-subtle);
+  border-radius: var(--kb-radius-lg);
+  background: var(--kb-bg-surface);
+}
+
+.sectionTitle {
+  margin: 0;
+  font-size: var(--kb-size-title);
+  line-height: var(--kb-leading-title);
+  font-weight: 600;
+  color: var(--kb-text-primary);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--kb-space-3);
+  flex-wrap: wrap;
+}
+
+.fieldLabel {
+  font-size: var(--kb-size-body-sm);
+  line-height: var(--kb-leading-body-sm);
+  color: var(--kb-text-primary);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--kb-space-3);
+}
+
+.switches {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kb-space-2);
+}
+
+/* Read-only parameter grid (§5.6): these are stated, not offered for editing. */
+.readonly {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--kb-space-3);
+  margin: 0;
+  padding: var(--kb-space-3);
+  border: 1px dashed var(--kb-border-strong);
+  border-radius: var(--kb-radius-md);
+  background: var(--kb-bg-subtle);
+}
+
+.readonlyItem {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kb-space-1);
+  min-width: 0;
+}
+
+.readonlyLabel {
+  font-size: var(--kb-size-caption);
+  line-height: var(--kb-leading-caption);
+  color: var(--kb-text-tertiary);
+}
+
+.readonlyValue {
+  margin: 0;
+  color: var(--kb-text-primary);
+}
+
+.weights {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kb-space-2);
+}
+
+.hint {
+  margin: 0;
+  font-size: var(--kb-size-caption);
+  line-height: var(--kb-leading-caption);
+  color: var(--kb-text-tertiary);
+}
+
+.error {
+  display: flex;
+  align-items: center;
+  gap: var(--kb-space-2);
+  margin: 0;
+  font-size: var(--kb-size-body-sm);
+  line-height: var(--kb-leading-body-sm);
+  color: var(--kb-status-failed-text);
+}
+
+/* The action row sits after the estimate in source order; `justify-content`
+ * only positions it within its own row and cannot move it above the estimate. */
+.submit {
+  display: flex;
+  align-items: center;
+  gap: var(--kb-space-3);
+  flex-wrap: wrap;
+  padding-top: var(--kb-space-2);
+}
+
+.submitHint {
+  font-size: var(--kb-size-caption);
+  line-height: var(--kb-leading-caption);
+  color: var(--kb-text-tertiary);
+}
+
+@media (max-width: 1100px) {
+  .grid,
+  .readonly {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .grid,
+  .readonly {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

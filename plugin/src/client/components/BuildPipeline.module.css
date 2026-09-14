@@ -1,0 +1,234 @@
+/* BuildPipeline — design spec §5.3 (索引构建流水线). */
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kb-space-4);
+  padding: var(--kb-space-4);
+  border: 1px solid var(--kb-border-subtle);
+  border-radius: var(--kb-radius-lg);
+  background: var(--kb-bg-surface);
+}
+
+/* The rebuild notice uses the info semantic pair, not brand: it reports a state
+ * rather than inviting an action. */
+.notice {
+  display: flex;
+  align-items: center;
+  gap: var(--kb-space-2);
+  margin: 0;
+  padding: var(--kb-space-2) var(--kb-space-3);
+  border: 1px solid var(--kb-status-info-border);
+  border-radius: var(--kb-radius-sm);
+  background: var(--kb-status-info-bg);
+  color: var(--kb-status-info-text);
+  font-size: var(--kb-size-body-sm);
+  line-height: var(--kb-leading-body-sm);
+}
+
+/* Four stage nodes in a row, connected by a rule so the sequence reads as a
+ * pipeline rather than four unrelated chips. */
+.stages {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--kb-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.stage {
+  display: flex;
+  align-items: center;
+  gap: var(--kb-space-2);
+  padding: var(--kb-space-3);
+  border: 1px solid var(--kb-border-subtle);
+  border-radius: var(--kb-radius-md);
+  background: var(--kb-bg-subtle);
+  min-width: 0;
+}
+
+.stageGlyph {
+  font-size: var(--kb-size-body-sm);
+  line-height: 1;
+  color: var(--kb-text-tertiary);
+}
+
+.stageLabel {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--kb-size-body-sm);
+  line-height: var(--kb-leading-body-sm);
+  color: var(--kb-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stageState {
+  font-size: var(--kb-size-caption);
+  line-height: var(--kb-leading-caption);
+  color: var(--kb-text-tertiary);
+  white-space: nowrap;
+}
+
+/* Running: brand treatment, and the state word is what carries the meaning. */
+.stage_running {
+  border-color: var(--kb-brand-border);
+  background: var(--kb-brand-tint);
+}
+
+.stage_running .stageGlyph,
+.stage_running .stageState {
+  color: var(--kb-brand);
+}
+
+.stage_running .stageLabel {
+  color: var(--kb-text-primary);
+}
+
+.stage_done {
+  border-color: var(--kb-status-ready-border);
+  background: var(--kb-status-ready-bg);
+}
+
+.stage_done .stageGlyph,
+.stage_done .stageState {
+  color: var(--kb-status-ready-text);
+}
+
+.stage_done .stageLabel {
+  color: var(--kb-text-primary);
+}
+
+.progress {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kb-space-2);
+}
+
+.progressHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--kb-space-3);
+}
+
+.progressLabel {
+  font-size: var(--kb-size-caption);
+  line-height: var(--kb-leading-caption);
+  color: var(--kb-text-secondary);
+}
+
+.progressCounts {
+  color: var(--kb-text-primary);
+}
+
+.error {
+  display: flex;
+  align-items: center;
+  gap: var(--kb-space-2);
+  margin: 0;
+  font-size: var(--kb-size-body-sm);
+  line-height: var(--kb-leading-body-sm);
+  color: var(--kb-status-failed-text);
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: var(--kb-space-3);
+  flex-wrap: wrap;
+}
+
+.logToggle {
+  display: flex;
+  align-items: center;
+  gap: var(--kb-space-1);
+  margin-left: auto;
+  padding: var(--kb-space-1) var(--kb-space-2);
+  border: none;
+  border-radius: var(--kb-radius-xs);
+  background: transparent;
+  color: var(--kb-text-secondary);
+  font-family: var(--kb-font-sans);
+  font-size: var(--kb-size-body-sm);
+  cursor: pointer;
+}
+
+.logToggle:hover {
+  background: var(--kb-bg-hover);
+  color: var(--kb-text-primary);
+}
+
+.logToggle:focus-visible {
+  outline: var(--kb-outline-focus);
+  outline-offset: 1px;
+  box-shadow: var(--kb-shadow-focus);
+}
+
+.log {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kb-space-1);
+  max-height: var(--kb-log-max-height);
+  margin: 0;
+  padding: var(--kb-space-3);
+  list-style: none;
+  overflow-y: auto;
+  border: 1px solid var(--kb-divider-card);
+  border-radius: var(--kb-radius-md);
+  background: var(--kb-bg-subtle);
+}
+
+.logLine {
+  display: flex;
+  align-items: baseline;
+  gap: var(--kb-space-3);
+}
+
+.logTime {
+  flex: none;
+  color: var(--kb-text-tertiary);
+}
+
+.logMessage {
+  font-family: var(--kb-font-mono);
+  font-size: var(--kb-size-mono);
+  line-height: var(--kb-leading-mono);
+}
+
+/* Log colour semantics per §5.3: success in the ready tone, running in brand,
+ * plain information in the secondary text colour. */
+.log_success .logMessage {
+  color: var(--kb-status-ready-text);
+}
+
+.log_running .logMessage {
+  color: var(--kb-brand);
+}
+
+.log_info .logMessage {
+  color: var(--kb-text-secondary);
+}
+
+.log_error .logMessage {
+  color: var(--kb-status-failed-text);
+}
+
+.logEmpty {
+  font-size: var(--kb-size-caption);
+  color: var(--kb-text-tertiary);
+}
+
+@media (max-width: 1100px) {
+  .stages {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .stages {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

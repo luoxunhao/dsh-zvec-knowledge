@@ -38,6 +38,15 @@ export interface SelectProps {
   loading?: boolean
   /** Disables interaction and applies the reduced-contrast treatment. */
   disabled?: boolean
+  /**
+   * Supporting text below the control.
+   *
+   * Used by the strategy configurator to state an option's trade-off (the spec
+   * requires the quantizer copy to name both the compression ratio and the recall
+   * loss), which is why it sits outside the `<option>` — a native option cannot
+   * carry formatted help text.
+   */
+  hint?: string
 }
 
 /**
@@ -46,7 +55,7 @@ export interface SelectProps {
  * @returns the select element.
  */
 export function Select({
-  label, value, onChange, options, loading = false, disabled = false,
+  label, value, onChange, options, loading = false, disabled = false, hint,
 }: SelectProps): React.JSX.Element {
   const id = useId()
   const selected = options.find(option => option.value === value)
@@ -72,6 +81,7 @@ export function Select({
           ? <span className={styles.trailing}><Spinner size="sm" /></span>
           : <span className={styles.chevron}><Icon name="chevron-down" /></span>}
       </div>
+      {hint !== undefined && <span className={styles.hint}>{hint}</span>}
     </div>
   )
 }
