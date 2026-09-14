@@ -447,6 +447,24 @@ export class KnowledgeOperations {
   }
 
   /**
+   * Embed one query string.
+   *
+   * Separate from the build's batch `embed` because a query is embedded one at a
+   * time and on the latency-critical path: the tool cannot wait for a batch to
+   * fill, and the build cannot afford a per-text provider round trip.
+   * @param text - the query.
+   * @returns the query vector.
+   * @throws {Error} when no provider is configured.
+   */
+  async embedQuery(text: string): Promise<Float32Array> {
+    if (this.embed === undefined) throw new Error('宿主未提供嵌入模型')
+    const vectors = await this.embed([text])
+    const first = vectors[0]
+    if (first === undefined) throw new Error('嵌入模型未返回向量')
+    return first
+  }
+
+  /**
    * The seven-day hit figure for the overview.
    * @param collectionId - collection identifier.
    * @returns hit count.
