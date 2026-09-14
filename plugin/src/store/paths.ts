@@ -25,11 +25,13 @@ import { isAbsolute, join, normalize, resolve, sep } from 'node:path'
  */
 const COLLECTION_ID = /^kb_[a-z][a-z0-9]{0,15}_[0-9a-f]{4}$/
 
-/** Relative path of the chunks index inside a collection directory. */
-export const CHUNKS_FILE = 'chunks.jsonl'
-
-/** Relative path of a collection's metadata record. */
-export const COLLECTION_FILE = 'collection.json'
+/**
+ * Relative path of a collection's metadata and snapshot pointer.
+ *
+ * The name is owned by `snapshot.ts` (as `SNAPSHOT_META_FILE`); it is repeated
+ * here only so path-only callers can locate it without importing the store.
+ */
+export const COLLECTION_FILE = 'meta.json'
 
 /**
  * Validate a collection identifier.
