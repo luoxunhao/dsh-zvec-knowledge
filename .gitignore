@@ -1,6 +1,11 @@
 # Dependencies
 node_modules/
 
+# pnpm content-addressable store. A store is a local cache, never a source
+# artifact — committing it both bloats the repo and leaks the absolute paths of
+# whatever profiles happened to be installed.
+.pnpm-store/
+
 # Build output (plugin declares its own too; kept here for a single source of truth)
 plugin/lib/
 plugin/tmp/
