@@ -55,6 +55,7 @@
     "verify:kb07": "node scripts/verify-kb07.mjs",
     "verify:kb08": "node scripts/verify-kb08.mjs",
     "verify:embedding": "node scripts/verify-embedding.mjs",
+    "verify:contrast": "node scripts/verify-contrast.mjs",
     "verify:slots": "node scripts/verify-harness-slots.mjs",
     "verify:spec": "node scripts/verify-spec-tokens.mjs",
     "verify:profile": "node scripts/verify-kb01-profile.mjs",
@@ -62,7 +63,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json --noEmit",
     "build": "node scripts/clean-build.mjs && node scripts/gen-tokens.mjs && tsc -p tsconfig.json && tsc -p tsconfig.client.json && tsdown",
     "test:kb10": "npm run build && node scripts/verify-kb10.mjs",
-    "verify": "node scripts/gen-tokens.mjs --check && node scripts/verify-manifest.mjs && node scripts/verify-components.mjs && node scripts/verify-kb10.mjs && node scripts/verify-kb04-kb05.mjs && node scripts/verify-kb06.mjs && node scripts/verify-kb06-cancel.mjs && node scripts/verify-kb07.mjs && node scripts/verify-kb08.mjs && node scripts/verify-embedding.mjs && node scripts/verify-harness-slots.mjs && node scripts/verify-spec-tokens.mjs"
+    "verify": "node scripts/gen-tokens.mjs --check && node scripts/verify-manifest.mjs && node scripts/verify-components.mjs && node scripts/verify-contrast.mjs && node scripts/verify-kb10.mjs && node scripts/verify-kb04-kb05.mjs && node scripts/verify-kb06.mjs && node scripts/verify-kb06-cancel.mjs && node scripts/verify-kb07.mjs && node scripts/verify-kb08.mjs && node scripts/verify-embedding.mjs && node scripts/verify-harness-slots.mjs && node scripts/verify-spec-tokens.mjs"
   },
   "dependencies": {
     "@zvec/zvec": "^0.7.1"

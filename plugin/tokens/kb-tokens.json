@@ -340,18 +340,18 @@
       "specName": "textSecondary",
       "group": "text",
       "kind": "color",
-      "light": "#6B7484",
+      "light": "#697181",
       "dark": "#A7B0BF",
-      "note": "二级文字"
+      "note": "二级文字。v1.1.2 修正：浅色原值 #6B7484 对应用底仅 4.36:1，低于规范自定的 4.5:1，改为 #697181（4.54:1）"
     },
     {
       "var": "--kb-text-tertiary",
       "specName": "textTertiary",
       "group": "text",
       "kind": "color",
-      "light": "#9AA3B2",
+      "light": "#676D77",
       "dark": "#8A93A3",
-      "note": "三级文字"
+      "note": "三级文字。v1.1.2 修正：浅色原值 #9AA3B2 对卡片仅 2.54:1、对次级填充 2.21:1，远低于 4.5:1，改为 #676D77（对卡片 4.53:1 / 对次级填充 4.53:1）。**用途受限**：三级文字只用于非关键辅助信息（时间戳、单位、占位说明），不得承载用户必须读到才能操作的内容"
     },
     {
       "var": "--kb-text-disabled",
@@ -423,9 +423,9 @@
       "specName": "warningBuilding",
       "group": "status",
       "kind": "color",
-      "light": "#D98B1F",
+      "light": "#CF841E",
       "dark": "#E0A33A",
-      "note": "构建中"
+      "note": "构建中实色。v1.1.2 修正：浅色原值 #D98B1F 对卡片仅 2.74:1，低于图形 3:1 要求，改为 #CF841E（3.01:1）"
     },
     {
       "var": "--kb-status-building-bg",
