@@ -1,0 +1,105 @@
+/* CreateCollectionDialog — design spec §5.1 / §6.2 create affordance.
+ *
+ * The overlay is the one place the spec allows a shadow ("阴影仅三级且只用于浮层"),
+ * so the dialog uses the level-2 token and the page behind it does not. */
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--kb-space-4);
+  background: var(--kb-overlay-scrim);
+  z-index: var(--kb-overlay-z);
+}
+
+.dialog {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: var(--kb-dialog-width);
+  max-height: 100%;
+  border: 1px solid var(--kb-border-subtle);
+  border-radius: var(--kb-radius-lg);
+  background: var(--kb-bg-surface);
+  /* Level-2 shadow: a floating layer, which is what the shadow scale is for. */
+  box-shadow: var(--kb-shadow-2);
+  overflow: hidden;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--kb-space-3);
+  padding: var(--kb-space-4) var(--kb-space-5);
+  border-bottom: 1px solid var(--kb-divider-card);
+}
+
+.title {
+  margin: 0;
+  font-size: var(--kb-size-title);
+  line-height: var(--kb-leading-title);
+  font-weight: 600;
+  color: var(--kb-text-primary);
+}
+
+.close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--kb-icon-button-compact);
+  height: var(--kb-icon-button-compact);
+  padding: 0;
+  border: none;
+  border-radius: var(--kb-radius-xs);
+  background: transparent;
+  color: var(--kb-text-tertiary);
+  cursor: pointer;
+}
+
+.close:hover {
+  background: var(--kb-bg-hover);
+  color: var(--kb-text-primary);
+}
+
+.close:focus-visible {
+  outline: var(--kb-outline-focus);
+  outline-offset: 1px;
+  box-shadow: var(--kb-shadow-focus);
+}
+
+.close:disabled {
+  color: var(--kb-text-disabled);
+  cursor: not-allowed;
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kb-space-4);
+  padding: var(--kb-space-5);
+  overflow-y: auto;
+}
+
+/* Submit failure is stated with its cause, per the negative-validation rule. */
+.submitError {
+  display: flex;
+  align-items: center;
+  gap: var(--kb-space-2);
+  margin: 0;
+  font-size: var(--kb-size-caption);
+  line-height: var(--kb-leading-caption);
+  color: var(--kb-status-failed-text);
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--kb-space-2);
+  padding: var(--kb-space-4) var(--kb-space-5);
+  border-top: 1px solid var(--kb-divider-card);
+  background: var(--kb-bg-surface);
+}

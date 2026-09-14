@@ -1,0 +1,259 @@
+/* OverviewPage — design spec §6.2 (知识库总览).
+ *
+ * The page is a vertical stack of sections with a consistent rhythm. Only the
+ * main area carries content weight; the shell around it stays flat. */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kb-space-6);
+  min-width: 0;
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--kb-space-4);
+  flex-wrap: wrap;
+}
+
+.headerText {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kb-space-1);
+  min-width: 0;
+}
+
+.title {
+  margin: 0;
+  font-size: var(--kb-size-h3);
+  line-height: var(--kb-leading-h3);
+  font-weight: 600;
+  color: var(--kb-text-primary);
+}
+
+.description {
+  margin: 0;
+  font-size: var(--kb-size-body-sm);
+  line-height: var(--kb-leading-body-sm);
+  color: var(--kb-text-secondary);
+}
+
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: var(--kb-space-2);
+  flex: none;
+}
+
+/* Four equal tiles. `repeat(4, minmax(0, 1fr))` rather than `1fr` so a long
+ * figure cannot widen its own column and break the equal-width rule. */
+.stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--kb-space-4);
+}
+
+.filters {
+  display: flex;
+  align-items: center;
+  gap: var(--kb-space-3);
+  flex-wrap: wrap;
+  padding: var(--kb-space-3) var(--kb-space-4);
+  border: 1px solid var(--kb-border-subtle);
+  border-radius: var(--kb-radius-lg);
+  background: var(--kb-bg-surface);
+}
+
+.filterSearch {
+  flex: 1 1 var(--kb-search-width);
+  min-width: 0;
+}
+
+.viewSwitch {
+  margin-left: auto;
+}
+
+.activeFilters {
+  display: flex;
+  align-items: center;
+  gap: var(--kb-space-2);
+  flex-wrap: wrap;
+}
+
+.activeLabel {
+  font-size: var(--kb-size-caption);
+  line-height: var(--kb-leading-caption);
+  color: var(--kb-text-tertiary);
+}
+
+.activeCount {
+  color: var(--kb-text-secondary);
+}
+
+.collections {
+  min-width: 0;
+}
+
+/* Three cards per row at the target width. `auto-fill` with the card width token
+ * means the grid degrades to two then one column instead of overflowing, which
+ * is what keeps the layout from wrapping mid-row. */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--kb-collection-card-width), 1fr));
+  gap: var(--kb-space-4);
+  align-items: start;
+}
+
+.skeleton {
+  height: var(--kb-skeleton-card-height);
+  border: 1px solid var(--kb-border-subtle);
+  border-radius: var(--kb-radius-lg);
+  background: var(--kb-bg-subtle);
+}
+
+.error {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kb-space-2);
+  padding: var(--kb-space-6);
+  border: 1px solid var(--kb-status-failed-border);
+  border-radius: var(--kb-radius-lg);
+  background: var(--kb-status-failed-bg);
+}
+
+.errorTitle {
+  display: flex;
+  align-items: center;
+  gap: var(--kb-space-2);
+  margin: 0;
+  font-size: var(--kb-size-title);
+  line-height: var(--kb-leading-title);
+  font-weight: 600;
+  color: var(--kb-status-failed-text);
+}
+
+.errorBody {
+  margin: 0;
+  font-size: var(--kb-size-body-sm);
+  line-height: var(--kb-leading-body-sm);
+  color: var(--kb-status-failed-text);
+}
+
+.builds {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kb-space-3);
+}
+
+.sectionTitle {
+  margin: 0;
+  font-size: var(--kb-size-title);
+  line-height: var(--kb-leading-title);
+  font-weight: 600;
+  color: var(--kb-text-primary);
+}
+
+.buildsEmpty {
+  margin: 0;
+  padding: var(--kb-space-6);
+  border: 1px solid var(--kb-border-subtle);
+  border-radius: var(--kb-radius-lg);
+  background: var(--kb-bg-surface);
+  font-size: var(--kb-size-body-sm);
+  color: var(--kb-text-secondary);
+}
+
+/* ---- Tables ---- */
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  border: 1px solid var(--kb-border-subtle);
+  border-radius: var(--kb-radius-lg);
+  background: var(--kb-bg-surface);
+  overflow: hidden;
+}
+
+/* Caption at caption size, per §6.2's "表头 caption 级". */
+.tableCaption {
+  padding: var(--kb-space-3) var(--kb-space-4);
+  text-align: left;
+  font-size: var(--kb-size-caption);
+  line-height: var(--kb-leading-caption);
+  color: var(--kb-text-secondary);
+  background: var(--kb-bg-subtle);
+  border-bottom: 1px solid var(--kb-divider-card);
+}
+
+.table th {
+  padding: var(--kb-space-3) var(--kb-space-4);
+  text-align: left;
+  font-size: var(--kb-size-caption);
+  line-height: var(--kb-leading-caption);
+  font-weight: 500;
+  color: var(--kb-text-tertiary);
+  border-bottom: 1px solid var(--kb-divider-card);
+}
+
+.table td {
+  /* Row height 44 from §6.2. */
+  height: var(--kb-table-row-height);
+  padding: 0 var(--kb-space-4);
+  border-bottom: 1px solid var(--kb-divider-card);
+  font-size: var(--kb-size-body-sm);
+  color: var(--kb-text-primary);
+  vertical-align: middle;
+}
+
+.table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.table tbody tr:hover {
+  background: var(--kb-bg-hover);
+}
+
+.tableMono {
+  color: var(--kb-text-secondary);
+}
+
+.tableLink {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--kb-text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  border-radius: var(--kb-radius-xs);
+}
+
+.tableLink:hover {
+  color: var(--kb-brand);
+}
+
+.tableLink:focus-visible {
+  outline: var(--kb-outline-focus);
+  outline-offset: 2px;
+  box-shadow: var(--kb-shadow-focus);
+}
+
+/* Below the four-tile breakpoint the stats drop to two columns, then one; the
+ * card grid handles itself through `auto-fill`. */
+@media (max-width: 1100px) {
+  .stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .stats {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .headerActions {
+    width: 100%;
+  }
+}

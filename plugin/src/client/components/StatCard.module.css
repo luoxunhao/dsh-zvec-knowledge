@@ -1,0 +1,48 @@
+/* StatCard — design spec §6.2 (四张等宽统计卡). */
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kb-space-2);
+  /* Equal widths come from the grid, not from this rule; the height token keeps
+   * the four tiles the same height even when only one carries a detail line. */
+  min-height: var(--kb-stat-card-height);
+  padding: var(--kb-space-4);
+  border: 1px solid var(--kb-border-subtle);
+  border-radius: var(--kb-radius-lg);
+  background: var(--kb-bg-surface);
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--kb-space-2);
+}
+
+.label {
+  font-size: var(--kb-size-caption);
+  line-height: var(--kb-leading-caption);
+  color: var(--kb-text-secondary);
+}
+
+.icon {
+  display: flex;
+  color: var(--kb-text-tertiary);
+}
+
+/* h2 level with tabular figures, per §6.2: the row must align across tiles. */
+.value {
+  margin: 0;
+  font-size: var(--kb-size-h2);
+  line-height: var(--kb-leading-h2);
+  font-weight: 600;
+  color: var(--kb-text-primary);
+}
+
+.detail {
+  margin: 0;
+  font-size: var(--kb-size-caption);
+  line-height: var(--kb-leading-caption);
+  color: var(--kb-text-tertiary);
+}

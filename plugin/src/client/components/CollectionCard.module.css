@@ -1,0 +1,192 @@
+/* CollectionCard — design spec §5.1 (知识库卡片).
+ *
+ * The card is a container, not a control: it has no interactive state of its own
+ * and is deliberately not classified as such. The two real controls inside it
+ * (the name button and the delete action) carry their own states, which is what
+ * keeps the five-state rule meaningful rather than something the card fakes. */
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kb-space-4);
+  /* Card width comes from the token because the three-column grid depends on
+   * it: the width and the gap together decide whether three fit. */
+  width: var(--kb-collection-card-width);
+  max-width: 100%;
+  padding: var(--kb-space-4);
+  border: 1px solid var(--kb-border-subtle);
+  border-radius: var(--kb-radius-lg);
+  background: var(--kb-bg-surface);
+  /* Depth comes from the border, not a shadow: the spec allows shadows only on
+   * floating layers, and a card in a grid is not one. */
+  transition: border-color 0.12s ease, background-color 0.12s ease;
+}
+
+.card:hover {
+  border-color: var(--kb-border-strong);
+}
+
+.selected {
+  border-color: var(--kb-brand);
+}
+
+.head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--kb-space-3);
+}
+
+.icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--kb-collection-icon);
+  height: var(--kb-collection-icon);
+  flex: none;
+  border-radius: var(--kb-collection-icon-radius);
+  background: var(--kb-brand-tint);
+  color: var(--kb-brand);
+}
+
+.identity {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--kb-space-1);
+}
+
+.name {
+  margin: 0;
+  font-size: var(--kb-size-title);
+  line-height: var(--kb-leading-title);
+  font-weight: 600;
+}
+
+/* The name is the card's primary affordance; it is a real button so it is
+ * keyboard reachable, styled to look like text until interacted with. */
+.nameButton {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--kb-text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  border-radius: var(--kb-radius-xs);
+}
+
+.nameButton:hover {
+  color: var(--kb-brand);
+}
+
+.nameButton:focus-visible {
+  outline: var(--kb-outline-focus);
+  outline-offset: 2px;
+  box-shadow: var(--kb-shadow-focus);
+}
+
+.nameButton:disabled {
+  color: var(--kb-text-disabled);
+  cursor: not-allowed;
+}
+
+.techId {
+  margin: 0;
+  color: var(--kb-text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The status pill is pinned to the top-right of the header regardless of how
+ * long the name is, which is why the identity column flexes and this does not. */
+.status {
+  flex: none;
+}
+
+.stats {
+  display: flex;
+  gap: var(--kb-space-5);
+  margin: 0;
+  /* Internal divider above the scale row, per §5.1's anatomy. */
+  padding-top: var(--kb-space-4);
+  border-top: 1px solid var(--kb-divider-card);
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kb-space-1);
+  min-width: 0;
+}
+
+.statLabel {
+  font-size: var(--kb-size-caption);
+  line-height: var(--kb-leading-caption);
+  color: var(--kb-text-tertiary);
+}
+
+.statValue {
+  margin: 0;
+  color: var(--kb-text-primary);
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--kb-space-3);
+  padding-top: var(--kb-space-3);
+  border-top: 1px solid var(--kb-divider-card);
+}
+
+.updated {
+  display: flex;
+  align-items: center;
+  gap: var(--kb-space-2);
+  color: var(--kb-text-tertiary);
+}
+
+.updatedText {
+  color: var(--kb-text-tertiary);
+}
+
+/* Actions are hidden until hover or focus-within, per §5.1. `visibility` rather
+ * than `display` keeps them in the tab order: a keyboard user reaches them and
+ * `:focus-within` then reveals what they are on. */
+.actions {
+  display: flex;
+  gap: var(--kb-space-1);
+  visibility: hidden;
+}
+
+.card:hover .actions,
+.card:focus-within .actions {
+  visibility: visible;
+}
+
+.action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--kb-icon-button-compact);
+  height: var(--kb-icon-button-compact);
+  padding: 0;
+  border: none;
+  border-radius: var(--kb-radius-xs);
+  background: transparent;
+  color: var(--kb-text-tertiary);
+  cursor: pointer;
+}
+
+.action:hover {
+  background: var(--kb-bg-hover);
+  color: var(--kb-status-failed-text);
+}
+
+.action:focus-visible {
+  outline: var(--kb-outline-focus);
+  outline-offset: 1px;
+  box-shadow: var(--kb-shadow-focus);
+}

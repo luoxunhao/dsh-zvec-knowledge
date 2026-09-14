@@ -14,5 +14,9 @@ plugin/zvec-smoke-report.json
 # Scratch: harness homes, generated reports, one-off logs, source binaries
 .workbuddy/tmp/
 
+# Vision-tool artifacts (screenshots produced during visual walkthroughs). These
+# are regenerable from `scripts/render-visual.mjs` and are not sources.
+.dsh-vision-router/
+
 # Pipeline intermediates
 output/

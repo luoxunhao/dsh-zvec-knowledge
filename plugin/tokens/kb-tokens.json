@@ -923,6 +923,85 @@
       "light": "56px",
       "note": "应用外壳顶栏高度"
     },
+    {
+      "var": "--kb-sidebar-rail-width",
+      "specName": null,
+      "group": "layout",
+      "kind": "dimension",
+      "light": "64px",
+      "note": "窄屏下侧栏收起的图标轨道宽度。规范 6.1 只给 240，窄屏行为由本实现约定：收起为图标轨道而非抽屉，保证所有目的地仍一击可达"
+    },
+    {
+      "var": "--kb-search-width",
+      "specName": null,
+      "group": "layout",
+      "kind": "dimension",
+      "light": "280px",
+      "note": "顶栏全局搜索框工作宽度（规范 6.1 未给数值，按侧栏 240 + 顶栏留白推导）",
+      "derived": true
+    },
+    {
+      "var": "--kb-empty-text-width",
+      "specName": null,
+      "group": "layout",
+      "kind": "dimension",
+      "light": "360px",
+      "note": "空状态说明文字的最大行宽（规范 8.1 未给数值，按可读行宽约 40 汉字推导）",
+      "derived": true
+    },
+    {
+      "var": "--kb-skeleton-card-height",
+      "specName": null,
+      "group": "layout",
+      "kind": "dimension",
+      "light": "180px",
+      "note": "知识库卡片骨架屏高度。规范 8.1 要求骨架形状与最终内容一致，取值按 CollectionCard 的实测高度设定",
+      "derived": true
+    },
+    {
+      "var": "--kb-dialog-width",
+      "specName": null,
+      "group": "layout",
+      "kind": "dimension",
+      "light": "480px",
+      "note": "对话框最大宽度（规范未给数值，按三字段表单的可读行宽推导）",
+      "derived": true
+    },
+    {
+      "var": "--kb-overlay-scrim",
+      "specName": null,
+      "group": "surface",
+      "kind": "color",
+      "light": "rgba(19, 22, 25, 0.42)",
+      "dark": "rgba(0, 0, 0, 0.6)",
+      "note": "浮层遮罩色。规范未令牌化遮罩，此处补齐以免业务样式出现裸 rgba"
+    },
+    {
+      "var": "--kb-overlay-z",
+      "specName": null,
+      "group": "layout",
+      "kind": "other",
+      "light": "1000",
+      "note": "浮层层级。与宿主 z-index 是否冲突需在真实宿主中核对"
+    },
+    {
+      "var": "--kb-breakpoint-stats",
+      "specName": null,
+      "group": "layout",
+      "kind": "dimension",
+      "light": "1100px",
+      "note": "统计卡由四列降为两列、侧栏收起为图标轨道的断点。规范未给断点，按三列卡片 + 240 侧栏的最小可用宽度推导",
+      "derived": true
+    },
+    {
+      "var": "--kb-breakpoint-compact",
+      "specName": null,
+      "group": "layout",
+      "kind": "dimension",
+      "light": "720px",
+      "note": "顶栏隐藏全局搜索、主区收窄内边距的断点（规范未给数值）",
+      "derived": true
+    },
 
     {
       "var": "--kb-shadow-1",

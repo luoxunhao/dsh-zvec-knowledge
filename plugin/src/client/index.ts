@@ -1,21 +1,19 @@
 /**
  * dsh-zvec-knowledge — browser half.
  *
- * The client half owns everything the plugin renders inside the web shell. In
- * this first slice that is exactly one thing: the design-token stylesheet.
- * Tokens have to be present before any component exists, because the design
- * spec forbids hardcoded colours and sizes in component styles — a component
- * written before the tokens land would have to be rewritten.
+ * The client half owns everything the plugin renders inside the web shell: the
+ * design-token stylesheets, the component library, and the composed app surface
+ * that the KB-04 shell and KB-05 overview reach through.
  *
  * The stylesheets are imported for side effects. tsdown compiles them and the
  * emitted bundle injects one tagged `<style data-plugin-css>` per sheet at
  * factory execution, so the plugin carries its own styles without a host-side
  * asset route.
  *
- * Slot contributions (overview page, collection detail, retrieval test) arrive
- * with KB-04 onwards and will add `'slots'` to {@link inject} at that point;
- * declaring a required service this half does not yet use would only keep the
- * fiber pending for no benefit.
+ * Slot contributions into the harness conversation UI arrive with KB-08 (the
+ * retrieval tool's collapsed call block); the KB-04/KB-05 pages are a
+ * self-contained surface, so this half currently injects no service. Declaring a
+ * required service it does not yet use would only keep the fiber pending.
  *
  * @module dsh-zvec-knowledge/client
  */
@@ -28,6 +26,23 @@ import './styles/base.css'
 export const name = 'zvec-knowledge/client'
 
 export * from './components/index.ts'
+export { AppShell, NAV_ITEMS, type NavId, type AppShellProps } from './shell/AppShell.tsx'
+export { OverviewPage, type OverviewPageProps, type OverviewCollection, type BuildRecord } from './pages/OverviewPage.tsx'
+export {
+  KnowledgeBaseApp,
+  type KnowledgeBaseAppProps,
+  type KnowledgeBasePort,
+  type HostCollection,
+} from './app.tsx'
+export {
+  CreateCollectionDialog, type CreateCollectionDialogProps,
+} from './dialogs/CreateCollectionDialog.tsx'
+export {
+  COLLECTION_ID_PATTERN, buildCollectionId, domainFromName, isValidCollectionId,
+  shortHash, validateCollectionId, validateCollectionName,
+} from './collection-id.ts'
+export { formatBytes } from './components/StorageUsageCard.tsx'
+export { formatCount } from './components/CollectionCard.tsx'
 
 /** Required client services. See the module note on why this is empty. */
 export const inject: string[] = []

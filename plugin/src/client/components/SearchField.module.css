@@ -1,0 +1,118 @@
+/* SearchField — design spec §4.2 (search input) and §6.1 (topbar search).
+ *
+ * Same control surface as TextField, with a leading glyph and a trailing clear
+ * affordance positioned inside the box. Declares the states the component gate
+ * requires of an interactive stylesheet. */
+
+.field {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.icon {
+  position: absolute;
+  left: var(--kb-space-3);
+  display: flex;
+  color: var(--kb-text-tertiary);
+  pointer-events: none;
+}
+
+.input {
+  width: 100%;
+  height: var(--kb-control-md);
+  /* Left inset clears the glyph; the right inset is reserved even when no clear
+   * button is rendered, so the text does not reflow as the query becomes empty. */
+  padding: 0 var(--kb-field-search-inset) 0 var(--kb-field-search-inset);
+  border: 1px solid var(--kb-border-strong);
+  border-radius: var(--kb-radius-sm);
+  background: var(--kb-bg-surface);
+  color: var(--kb-text-primary);
+  font-family: var(--kb-font-sans);
+  font-size: var(--kb-size-body-sm);
+  transition: border-color 0.12s ease, background-color 0.12s ease;
+  /* The native clear affordance is hidden because a real button is rendered
+   * instead; two clear buttons in one field is worse than one. */
+  appearance: none;
+}
+
+.input::-webkit-search-cancel-button {
+  appearance: none;
+}
+
+.input::placeholder {
+  color: var(--kb-text-tertiary);
+}
+
+.input:hover:not(:disabled) {
+  border-color: var(--kb-neutral-400);
+}
+
+/* Focus is a border-colour change plus the ring token pair; the spec forbids
+ * expressing focus with a shadow. */
+.input:focus-visible {
+  border-color: var(--kb-brand);
+  outline: var(--kb-outline-focus);
+  outline-offset: 1px;
+  box-shadow: var(--kb-shadow-focus);
+}
+
+.input:disabled {
+  background: var(--kb-bg-subtle);
+  border-color: var(--kb-border-subtle);
+  color: var(--kb-text-disabled);
+  cursor: not-allowed;
+}
+
+.clear {
+  position: absolute;
+  right: var(--kb-space-2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--kb-icon-button-compact);
+  height: var(--kb-icon-button-compact);
+  padding: 0;
+  border: none;
+  border-radius: var(--kb-radius-xs);
+  background: transparent;
+  color: var(--kb-text-tertiary);
+  cursor: pointer;
+}
+
+.clear:hover {
+  background: var(--kb-bg-hover);
+  color: var(--kb-text-primary);
+}
+
+.clear:focus-visible {
+  outline: var(--kb-outline-focus);
+  outline-offset: 1px;
+  box-shadow: var(--kb-shadow-focus);
+}
+
+/* Disabled covers the clear button too: with the input inert, a live clear
+ * affordance would be the only interactive thing left in the field. */
+.disabled .clear {
+  display: none;
+}
+
+/* Busy: the field keeps its box and reserves the trailing slot, so a search that
+ * is being executed does not make the control jump. Same treatment as TextField,
+ * because the two are the same family of control. */
+.loading .input {
+  padding-right: var(--kb-field-search-inset);
+  cursor: progress;
+}
+
+.loading .clear {
+  display: none;
+}
+
+.spinner {
+  position: absolute;
+  right: var(--kb-space-3);
+  display: flex;
+  color: var(--kb-text-tertiary);
+  pointer-events: none;
+}

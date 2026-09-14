@@ -46,6 +46,13 @@ const ALLOWED_PX = new Map([
   ['12px', 'spinner small edge length'],
   ['14px', 'spinner medium edge length'],
   ['18px', 'spinner large edge length'],
+  // Media-query breakpoints cannot read a custom property: `@media (max-width:
+  // var(--x))` is invalid CSS. The responsive ladder is therefore the one place a
+  // length must be a literal, and the values live here so they are reviewable in
+  // one place. They are mirrored as `--kb-breakpoint-*` tokens for documentation
+  // and for any future JS-side matchMedia use.
+  ['1100px', 'stats/grid collapse breakpoint (--kb-breakpoint-stats); @media cannot use var()'],
+  ['720px', 'compact breakpoint (--kb-breakpoint-compact); @media cannot use var()'],
 ])
 
 /**
@@ -80,11 +87,20 @@ const INTERACTIVE_STATES = [
  * deliberate act: a new stylesheet that appears in none of these maps fails the
  * gate, so nobody adds a component without deciding whether it is a control.
  * Each entry states why.
+ *
+ * `container` is the tier for the composition layer — cards, pages, the shell and
+ * the dialog frame. These are not controls: clicking a shell frame does nothing,
+ * so demanding a `:hover` rule from it would push an author to invent an
+ * affordance nothing can reach. The tier is not an exemption from the other two
+ * checks: containers are still scanned for colour literals and bare sizes, and
+ * any real control inside one carries its own states in its own stylesheet, which
+ * is where the gate looks for them.
  */
 const TIERS = new Map([
   ['Button.module.css', { tier: 'interactive', why: 'primary action control' }],
   ['IconButton.module.css', { tier: 'interactive', why: 'action control' }],
   ['TextField.module.css', { tier: 'interactive', why: 'text, search and textarea input' }],
+  ['SearchField.module.css', { tier: 'interactive', why: 'search input with a clear affordance' }],
   ['Select.module.css', { tier: 'interactive', why: 'single-value chooser' }],
   ['Switch.module.css', { tier: 'interactive', why: 'boolean control' }],
   ['Checkbox.module.css', { tier: 'interactive', why: 'checkbox and radio group control' }],
@@ -93,7 +109,15 @@ const TIERS = new Map([
   ['StatusPill.module.css', { tier: 'marker', why: 'lifecycle state marker; it reports, it does not act' }],
   ['Tag.module.css', { tier: 'marker', why: 'classification marker; removal goes through an IconButton' }],
   ['CountBadge.module.css', { tier: 'marker', why: 'numeric marker with no interaction of its own' }],
+  ['ProgressBar.module.css', { tier: 'marker', why: 'progress indicator; it reports a value, it does not act' }],
   ['Spinner.module.css', { tier: 'indicator', why: 'it is the loading state; it has no states of its own' }],
+  ['StatCard.module.css', { tier: 'container', why: 'summary tile; the tile itself is not clickable' }],
+  ['StorageUsageCard.module.css', { tier: 'container', why: 'sidebar readout; contains a progress marker, no control' }],
+  ['CollectionCard.module.css', { tier: 'container', why: 'card frame; its two controls (name button, delete) live inside and carry their own states' }],
+  ['EmptyState.module.css', { tier: 'container', why: 'empty-state panel; the action passed in is a Button' }],
+  ['AppShell.module.css', { tier: 'container', why: 'application frame; nav items are buttons inside and declare no shared state rule' }],
+  ['OverviewPage.module.css', { tier: 'container', why: 'page layout; it styles tables and grids, not controls' }],
+  ['CreateCollectionDialog.module.css', { tier: 'container', why: 'dialog frame; its close control and fields carry their own states' }],
 ])
 
 /**
@@ -136,7 +160,7 @@ for (const sheet of moduleSheets) {
   const rel = relative(ROOT, sheet)
   const declared = TIERS.get(name)
   if (declared === undefined) {
-    failures.push(`${rel}: unclassified — add it to TIERS as interactive, marker or indicator`)
+    failures.push(`${rel}: unclassified — add it to TIERS as interactive, marker, container or indicator`)
     continue
   }
   if (declared.tier === 'interactive') {
@@ -151,8 +175,16 @@ for (const sheet of moduleSheets) {
         + 'state, or remove the affordance',
       )
     } else notes.push(`${rel}: marker — ${declared.why}`)
+  } else if (declared.tier === 'container' || declared.tier === 'indicator') {
+    // Composition and pure-indicator layers: no state rule is demanded, and a
+    // hover affordance on a container is not an error either (a card may
+    // highlight its border). The colour-literal and bare-size checks below still
+    // apply, which is what keeps this tier from becoming a loophole.
+    notes.push(`${rel}: ${declared.tier} — ${declared.why}`)
   } else {
-    notes.push(`${rel}: indicator — ${declared.why}`)
+    // An unrecognised tier is a typo in TIERS, and treating it as "no rule"
+    // would silently exempt the stylesheet from everything.
+    failures.push(`${rel}: unknown tier ${JSON.stringify(declared.tier)} — expected interactive, marker, container or indicator`)
   }
 }
 

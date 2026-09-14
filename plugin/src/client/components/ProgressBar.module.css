@@ -1,0 +1,35 @@
+/* ProgressBar — design spec §4.7 (装载/构建进度) and §5.1 (占用条).
+ *
+ * Height and radius come from the token pair the spec gives for the bar, and the
+ * track colour is shared with the score bar through the generated token so a
+ * theme cannot desync the two. */
+
+.track {
+  width: 100%;
+  height: var(--kb-progress-height);
+  border-radius: var(--kb-progress-radius);
+  background: var(--kb-score-track);
+  overflow: hidden;
+}
+
+.fill {
+  height: 100%;
+  border-radius: inherit;
+  transition: width 0.2s ease;
+}
+
+.brand {
+  background: var(--kb-brand);
+}
+
+.success {
+  background: var(--kb-status-ready);
+}
+
+.warning {
+  background: var(--kb-status-building);
+}
+
+.danger {
+  background: var(--kb-status-failed);
+}

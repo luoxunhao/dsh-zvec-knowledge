@@ -1,7 +1,7 @@
 // 由 scripts/gen-tokens.mjs 从 tokens/kb-tokens.json 生成，请勿手工编辑。
 // 令牌源：《DSH 知识库插件（基于 zvec）设计规范》v1.1.0 第 3 章（浅色）、第 7 章（深色）
 //
-// 共 134 项令牌。深色变量以 -dark 后缀单独导出。
+// 共 143 项令牌。深色变量以 -dark 后缀单独导出。
 //
 // ⚠️ Sass 变量在构建期被替换，**不随主题切换**。凡需要随浅/深主题变化的样式，
 //    必须使用 CSS 自定义属性 `var(--kb-*)`，不要使用本文件中的 $ 变量。
@@ -111,6 +111,15 @@ $kb-control-md: 34px;
 $kb-control-lg: 40px;
 $kb-sidebar-width: 240px;
 $kb-topbar-height: 56px;
+$kb-sidebar-rail-width: 64px;
+$kb-search-width: 280px;
+$kb-empty-text-width: 360px;
+$kb-skeleton-card-height: 180px;
+$kb-dialog-width: 480px;
+$kb-overlay-scrim: rgba(19, 22, 25, 0.42);
+$kb-overlay-z: 1000;
+$kb-breakpoint-stats: 1100px;
+$kb-breakpoint-compact: 720px;
 $kb-shadow-1: 0 1px 2px 0 rgba(16, 19, 26, 0.06);
 $kb-shadow-2: 0 4px 12px -2px rgba(16, 19, 26, 0.08);
 $kb-shadow-3: 0 12px 32px -8px rgba(16, 19, 26, 0.12);
@@ -143,7 +152,7 @@ $kb-focus-ring-color: var(--kb-brand);
 $kb-outline-focus: 2px solid var(--kb-focus-ring-color);
 $kb-shadow-focus: 0 0 0 4px color-mix(in srgb, var(--kb-focus-ring-color) 15%, transparent);
 
-// ---- 深色覆盖（47 项）----
+// ---- 深色覆盖（48 项）----
 $kb-brand-dark: #6F7BE8;
 $kb-brand-hover-dark: #5C68DF;
 $kb-brand-pressed-dark: #4A55C8;
@@ -191,6 +200,7 @@ $kb-score-relevant-dark: #8BBA4E;
 $kb-score-fair-dark: #E0A33A;
 $kb-score-low-dark: #EE5A73;
 $kb-score-track-dark: #2C313C;
+$kb-overlay-scrim-dark: rgba(0, 0, 0, 0.6);
 
 // ---- 令牌名 → 变量 映射 ----
 $kb-token-names: (
@@ -297,6 +307,15 @@ $kb-token-names: (
   "--kb-control-lg": $kb-control-lg,
   "--kb-sidebar-width": $kb-sidebar-width,
   "--kb-topbar-height": $kb-topbar-height,
+  "--kb-sidebar-rail-width": $kb-sidebar-rail-width,
+  "--kb-search-width": $kb-search-width,
+  "--kb-empty-text-width": $kb-empty-text-width,
+  "--kb-skeleton-card-height": $kb-skeleton-card-height,
+  "--kb-dialog-width": $kb-dialog-width,
+  "--kb-overlay-scrim": $kb-overlay-scrim,
+  "--kb-overlay-z": $kb-overlay-z,
+  "--kb-breakpoint-stats": $kb-breakpoint-stats,
+  "--kb-breakpoint-compact": $kb-breakpoint-compact,
   "--kb-shadow-1": $kb-shadow-1,
   "--kb-shadow-2": $kb-shadow-2,
   "--kb-shadow-3": $kb-shadow-3,

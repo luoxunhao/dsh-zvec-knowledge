@@ -1,0 +1,50 @@
+/* StorageUsageCard — design spec §6.1 (侧栏存储用量卡). */
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kb-space-2);
+  padding: var(--kb-space-3);
+  border: 1px solid var(--kb-border-subtle);
+  border-radius: var(--kb-radius-md);
+  background: var(--kb-bg-surface);
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--kb-space-2);
+}
+
+.title {
+  font-size: var(--kb-size-caption);
+  line-height: var(--kb-leading-caption);
+  color: var(--kb-text-secondary);
+}
+
+/* The near-limit marker carries text, so the state is not colour-only. */
+.warn {
+  font-size: var(--kb-size-caption);
+  line-height: var(--kb-leading-caption);
+  color: var(--kb-status-building-text);
+}
+
+.bar {
+  display: flex;
+}
+
+.figures {
+  color: var(--kb-text-primary);
+}
+
+.sep {
+  color: var(--kb-text-tertiary);
+}
+
+.loading {
+  margin: 0;
+  font-size: var(--kb-size-caption);
+  line-height: var(--kb-leading-caption);
+  color: var(--kb-text-tertiary);
+}
