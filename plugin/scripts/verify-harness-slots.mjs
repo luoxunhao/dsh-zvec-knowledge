@@ -124,10 +124,37 @@ check('probe: panel key and sidebar id are readable', panelKey !== undefined && 
   }
 }
 
-// 3. The two registrations must address each other.
+// 3. The three registrations must address each other correctly.
 check('contract: sidebar id matches the panel key', panelKey === sidebarId, `id=${sidebarId} key=${panelKey}`)
 check('contract: the panel is registered into main', /name: 'main', key: KNOWLEDGE_PANEL_KEY/.test(entrySource), 'main/key registration found')
 check('contract: the row is registered into sidebar.panellist', /name: 'sidebar\.panellist'/.test(entrySource), 'panellist registration found')
+
+// The tool-view cell is keyed by the WIRE TOOL NAME, and a mismatch renders
+// nothing at all with no error — so the shared constant is checked against the
+// harness's own record of registered tool names.
+{
+  const entry = slotEntry('tool.call.toolview')
+  check('harness: tool.call.toolview exists', entry !== null, entry === null ? 'not in the catalogue' : 'present in the catalogue')
+  if (entry !== null) {
+    check('harness: tool.call.toolview is a keyed session slot', /kind: "keyed"/.test(entry) && /scope: "session"/.test(entry), 'kind=keyed, scope=session')
+
+    // The catalogue lists the keys other tools already occupy. Claiming one would
+    // replace that tool's view rather than add our own.
+    const taken = /already taken: ([^"]*)/.exec(entry)?.[1] ?? ''
+    const takenKeys = taken.split(',').map(value => value.trim()).filter(Boolean)
+    const shared = readFileSync(resolve(ROOT, 'src/shared/contract.ts'), 'utf8')
+    const wireName = /KB_SEARCH_TOOL = '([^']+)'/.exec(shared)?.[1]
+    check('contract: the tool-view key is the shared wire name', wireName !== undefined && entrySource.includes('KB_SEARCH_TOOL'), `key=${wireName}`)
+    check(
+      'harness: the tool-view key is free',
+      wireName !== undefined && !takenKeys.includes(wireName),
+      `key "${wireName}" vs ${takenKeys.length} taken keys`,
+    )
+    // The tool name the host registers must be the same string the client keys on.
+    const hostTool = readFileSync(resolve(ROOT, 'src/host/search-tool.ts'), 'utf8')
+    check('contract: host and client share one tool name', /from '\.\.\/shared\/contract\.ts'/.test(hostTool), 'the host imports the shared constant rather than declaring its own')
+  }
+}
 
 console.log(`\nHarness integration: ${passes.length} passed, ${failures.length} failed`)
 console.log(`  harness  ${harness}\n`)

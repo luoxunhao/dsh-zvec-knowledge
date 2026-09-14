@@ -78,8 +78,10 @@ const slotsTs = read('slots.ts')
   // statement as its inject call. A register on a line of its own would run
   // immediately and throw whenever the owning entry has not mounted yet.
   const nestedRegisters = (entryCode.match(/ctx\.slots\.inject\([^)]*\(\) => ctx\.slots\.register\(/g) ?? []).length
-  check('KB-04 integration: both slots registered through inject', injectCalls === 2, `${injectCalls} ctx.slots.inject call(s)`)
-  check('KB-04 integration: every register runs inside an inject callback', nestedRegisters === 2, `${nestedRegisters} of ${injectCalls} injected`)
+  // Three contributions: the knowledge panel, its sidebar row, and (KB-08) the
+  // retrieval call's view inside a turn.
+  check('KB-04 integration: all three slots registered through inject', injectCalls === 3, `${injectCalls} ctx.slots.inject call(s)`)
+  check('KB-04 integration: every register runs inside an inject callback', nestedRegisters === injectCalls && injectCalls > 0, `${nestedRegisters} of ${injectCalls} injected`)
   check('KB-04 integration: slots service is a required injection', /inject: string\[\] = \['slots'\]/.test(entryCode), "inject declares ['slots']")
 
   // The sidebar row and the main panel must address each other. The sidebar

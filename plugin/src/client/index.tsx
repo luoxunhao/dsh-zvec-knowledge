@@ -26,10 +26,12 @@ import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import './styles/tokens.generated.css'
 import './styles/base.css'
 import { KnowledgeBasePanel } from './panel.tsx'
+import { SearchToolView, type SearchToolViewProps } from './SearchToolView.tsx'
 import {
   KNOWLEDGE_LABEL, KNOWLEDGE_ORDER, KNOWLEDGE_PANEL_KEY, KNOWLEDGE_SIDEBAR_ID,
 } from './panel-id.ts'
 import { KnowledgeIcon } from './panel-icon.tsx'
+import { KB_SEARCH_TOOL } from '../shared/contract.ts'
 
 /** The loader keys this half by the package name plus this suffix. */
 export const name = 'zvec-knowledge/client'
@@ -173,13 +175,24 @@ export function apply(ctx: ClientContext): void {
       ),
     ))
 
+    // The retrieval call's own view inside a turn. Keyed by the wire tool name,
+    // which nothing else occupies, so this is additive rather than a takeover.
+    const disposeToolView = ctx.slots.inject('tool.call.toolview', () => ctx.slots.register(
+      { name: 'tool.call.toolview', key: KB_SEARCH_TOOL },
+      (props: { callId: string, toolName: string, block: SearchToolViewProps['block'], cwd?: string }) => (
+        <SearchToolView {...props} />
+      ),
+    ))
+
     return () => {
       // The panel is disposed first: with the row gone, nothing can select a
-      // panel that is no longer registered.
+      // panel that is no longer registered. The tool view goes last because it is
+      // the surface a live turn is most likely to be rendering.
       disposePanel()
       disposeRow()
+      disposeToolView()
     }
-  }, 'zvec-knowledge: sidebar entry and main panel')
+  }, 'zvec-knowledge: sidebar entry, main panel and retrieval tool view')
 
   // Stylesheet presence marker. It gives the browser half one observable,
   // disposable effect, which is what makes its lifecycle testable, and later

@@ -26,9 +26,11 @@
 
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { KnowledgeOperations } from './operations.ts'
+import { KB_SEARCH_TOOL } from '../shared/contract.ts'
 
-/** Tool name, fixed by the design spec. */
-export const KB_SEARCH_TOOL = 'dsh_kb_search'
+// The wire name is declared once in `shared/contract.ts` and re-exported here, so
+// the host registration and the client's tool-view cell cannot drift apart.
+export { KB_SEARCH_TOOL }
 
 /** Default hit count when the caller omits `topk`. */
 export const DEFAULT_TOPK = 8

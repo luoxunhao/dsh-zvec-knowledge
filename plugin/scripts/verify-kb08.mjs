@@ -275,6 +275,71 @@ function toolWith(overrides = {}, minScore = 0.55) {
   check('side-effects: search is the only engine call', /operations\.search\(/.test(source), 'search() present')
 }
 
+// ---------------------------------------------------------------------------
+// 11. Conversation tool-call block (§5.4)
+// ---------------------------------------------------------------------------
+{
+  globalThis.document = {
+    documentElement: { setAttribute() {}, removeAttribute() {} },
+    createElement: () => ({ dataset: {}, style: {}, appendChild() {}, setAttribute() {} }),
+    head: { appendChild() {} },
+    querySelector: () => null,
+    querySelectorAll: () => [],
+  }
+  globalThis.window = {
+    addEventListener() {},
+    removeEventListener() {},
+    __ModuleLoader__: { load() {} },
+  }
+  const React = await import('react')
+  const jsxRuntime = await import('react/jsx-runtime')
+  const { renderToStaticMarkup } = await import('react-dom/server')
+
+  const source = readFileSync(join(ROOT, 'src', 'client', 'SearchToolView.tsx'), 'utf8')
+  const css = readFileSync(join(ROOT, 'src', 'client', 'SearchToolView.module.css'), 'utf8')
+
+  // The summary line is the spec's exact format and must be self-explanatory:
+  // hits and duration without expanding.
+  const summarySource = /export function summaryLine[\s\S]*?\n\}/.exec(source)?.[0] ?? ''
+  check('tool view: summary states the hit count', /条命中/.test(summarySource), '命中数')
+  check('tool view: summary states the duration', /ms/.test(summarySource), '耗时')
+  check('tool view: summary separates with the spec\'s separator', /·/.test(summarySource), '·')
+  check('tool view: running state is distinguished', /进行中/.test(summarySource), 'a call in flight says so')
+  check('tool view: below-floor hits are surfaced in the summary', /低于阈值/.test(summarySource), 'filtered count visible without expanding')
+
+  // Tool name and parameters are monospaced, and the timing uses the teal tone.
+  check('tool view: tool name is monospaced', /kb-mono \$\{styles\.toolName\}/.test(source), 'kb-mono on the tool name')
+  check('tool view: parameters are monospaced', /kb-mono \$\{styles\.paramValue\}/.test(source), 'kb-mono on parameter values')
+  check('tool view: duration uses the teal semantic tone', /\.summary\s*\{[^}]*--kb-status-ready-text/.test(css), '青绿 for timing')
+
+  // The three parameters must be shown on expand. Matched against the JSX source,
+  // where the class is an expression rather than a literal attribute.
+  for (const param of ['query', 'collection', 'topk']) {
+    check(
+      `tool view: expanded form shows ${param}`,
+      new RegExp(`styles\\.paramLabel\\}>${param}<`).test(source),
+      param,
+    )
+  }
+
+  // Collapsed by default: the card renders a toggle, and the body is conditional.
+  check('tool view: collapsed by default', /useState\(false\)/.test(source), 'starts closed')
+  check('tool view: the head is the toggle', /aria-expanded=\{open\}/.test(source), 'the summary row is a button with aria-expanded')
+
+  // Citations carry number, file, location, band and score (KB-09's tracing requirement).
+  const citationBlock = source.slice(source.indexOf('citations.map'), source.indexOf('citations.map') + 1400)
+  check('citations: numbered', /citationIndex/.test(citationBlock), '序号 rendered')
+  check('citations: file named', /citationFile/.test(citationBlock), '文件名 rendered')
+  check('citations: location given', /char_start\}-\{hit\.char_end\}/.test(citationBlock), '字符区间 rendered')
+  check('citations: score shown', /match_score\.toFixed/.test(citationBlock), '分数 rendered')
+  check('citations: band shown as a word, not colour alone', /BAND_LABEL\[hit\.band\]/.test(citationBlock), '置信度以文字承载')
+
+  // Malformed arguments must not blank the turn.
+  const { parseArgs, parseResult } = await import(new URL('../lib/client.js', import.meta.url).href)
+    .then(module => module).catch(() => ({}))
+  check('tool view: argument parsing is total', /try\s*\{[\s\S]*JSON\.parse[\s\S]*\}\s*catch/.test(source), 'a malformed argument string cannot throw')
+}
+
 console.log(`\nKB-08 acceptance: ${passes.length} passed, ${failures.length} failed\n`)
 for (const line of passes) console.log(`  PASS  ${line}`)
 for (const line of failures) console.log(`  FAIL  ${line}`)

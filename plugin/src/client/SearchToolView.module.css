@@ -1,0 +1,206 @@
+/* SearchToolView — design spec §5.4 (会话内嵌的工具调用折叠块).
+ *
+ * The card sits inside a turn's message flow, so it inherits none of the panel's
+ * layout: it is a self-contained block whose collapsed form is one line, and whose
+ * expanded form adds parameters and the citation list.
+ *
+ * Everything here sizes against the token set, and the only accent colour outside
+ * the citation bands is the duration's teal (§5.4 specifies 青绿 for the timing). */
+
+.card {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--kb-border-subtle);
+  border-radius: var(--kb-radius-md);
+  background: var(--kb-bg-surface);
+  overflow: hidden;
+}
+
+/* The head is the toggle, so it is a real button: the whole summary line is the
+ * affordance, which is what makes it reachable without hunting for a chevron. */
+.head {
+  display: flex;
+  align-items: center;
+  gap: var(--kb-space-2);
+  width: 100%;
+  min-height: var(--kb-control-md);
+  padding: var(--kb-space-2) var(--kb-space-3);
+  border: none;
+  background: transparent;
+  color: var(--kb-text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.head:hover {
+  background: var(--kb-bg-hover);
+}
+
+.head:focus-visible {
+  outline: var(--kb-outline-focus);
+  outline-offset: -1px;
+  box-shadow: var(--kb-shadow-focus);
+}
+
+.head:disabled {
+  color: var(--kb-text-disabled);
+  cursor: not-allowed;
+}
+
+/* The chevron rotates to signal state; the rotation is the only motion, and the
+ * reduced-motion rule in base.css suppresses it. */
+.chevron {
+  display: flex;
+  flex: none;
+  color: var(--kb-text-tertiary);
+  transform: rotate(-90deg);
+  transition: transform 0.12s ease;
+}
+
+.chevron[data-open='true'] {
+  transform: rotate(0deg);
+}
+
+.toolName {
+  flex: none;
+  color: var(--kb-text-primary);
+}
+
+.sep {
+  flex: none;
+  color: var(--kb-text-tertiary);
+}
+
+.summary {
+  flex: 1;
+  min-width: 0;
+  /* The timing segment carries the teal semantic tone the spec names for it. */
+  color: var(--kb-status-ready-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A failed or empty call is marked in words as well as tone: the row must not
+ * rely on colour to say the retrieval was useless. */
+.failedTag {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--kb-space-1);
+  flex: none;
+  padding: 0 var(--kb-space-2);
+  height: var(--kb-pill-height-dense);
+  border: 1px solid var(--kb-status-building-border);
+  border-radius: var(--kb-radius-full);
+  background: var(--kb-status-building-bg);
+  color: var(--kb-status-building-text);
+  font-size: var(--kb-size-caption);
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kb-space-3);
+  padding: var(--kb-space-3);
+  border-top: 1px solid var(--kb-divider-card);
+  background: var(--kb-bg-subtle);
+}
+
+.params {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--kb-space-4);
+  margin: 0;
+}
+
+.param {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kb-space-1);
+  min-width: 0;
+}
+
+.paramLabel {
+  font-size: var(--kb-size-caption);
+  line-height: var(--kb-leading-caption);
+  color: var(--kb-text-tertiary);
+}
+
+.paramValue {
+  margin: 0;
+  color: var(--kb-text-primary);
+  word-break: break-all;
+}
+
+.summaryText {
+  margin: 0;
+  font-size: var(--kb-size-body-sm);
+  line-height: var(--kb-leading-body-sm);
+  color: var(--kb-text-secondary);
+  white-space: pre-wrap;
+}
+
+.empty {
+  margin: 0;
+  font-size: var(--kb-size-body-sm);
+  line-height: var(--kb-leading-body-sm);
+  color: var(--kb-text-secondary);
+}
+
+.citations {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kb-space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.citation {
+  display: flex;
+  align-items: center;
+  gap: var(--kb-space-2);
+  min-height: var(--kb-control-sm);
+  padding: var(--kb-space-1) var(--kb-space-2);
+  border: 1px solid var(--kb-border-subtle);
+  border-radius: var(--kb-radius-xs);
+  background: var(--kb-bg-surface);
+}
+
+.citationIndex {
+  flex: none;
+  color: var(--kb-text-tertiary);
+}
+
+.citationFile {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--kb-size-body-sm);
+  line-height: var(--kb-leading-body-sm);
+  color: var(--kb-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.citationLoc {
+  flex: none;
+  color: var(--kb-text-tertiary);
+}
+
+/* Band tone is a supplement to the band's own word, never its only carrier. */
+.citationBand {
+  flex: none;
+  font-size: var(--kb-size-caption);
+  line-height: var(--kb-leading-caption);
+  color: var(--kb-text-secondary);
+}
+
+.citationBand[data-band='strong'] {
+  color: var(--kb-status-ready-text);
+}
+
+.citationScore {
+  flex: none;
+  color: var(--kb-text-primary);
+}

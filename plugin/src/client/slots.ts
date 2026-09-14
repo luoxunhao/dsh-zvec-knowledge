@@ -108,16 +108,65 @@ export interface KnowledgeSlotMap {
     scope: 'root'
     owner: MainPanelOwnerProps
   }
+  /**
+   * One tool call's view inside a turn, dispatched by wire tool name.
+   *
+   * Restated from `tool.call.toolview` in `dsh-client-ui-tool`'s contract. A
+   * `keyed` slot scoped to the session, with an open key domain: registering this
+   * plugin's own tool name claims a key nothing else occupies, so it is additive
+   * rather than a takeover.
+   */
+  'tool.call.toolview': {
+    kind: 'keyed'
+    scope: 'session'
+    owner: ToolCallOwnerProps
+  }
+}
+
+/**
+ * Owner share of an atomic tool view.
+ *
+ * Restated from `ToolCallOwnerProps`. Only the members this view reads are
+ * declared: `callId`, `toolName` and `block` (the frozen call node). The owner
+ * also passes `openFile`, `loadImage` and the standard selector hooks, which this
+ * view does not use — declaring them would be asserting a contract this plugin
+ * does not actually depend on.
+ */
+export interface ToolCallOwnerProps {
+  /** Tool call identity, stable across running and settled forms. */
+  callId: string
+  /** Wire tool name and keyed dispatch value. */
+  toolName: string
+  /**
+   * The frozen call node.
+   *
+   * A running call carries `type: 'tool-call'` with raw JSON `arguments`; a
+   * settled one carries the result `content` blocks. The view narrows this
+   * rather than asserting a shape, because a node it did not expect must not
+   * blank the turn.
+   */
+  block: {
+    /** Block discriminant. */
+    type?: string
+    /** Raw JSON arguments as the model produced them. */
+    arguments?: string
+    /** Settled content blocks, when the call has finished. */
+    content?: { type?: string, text?: string }[]
+    /** Whether the result is an error. */
+    isError?: boolean
+  }
+  /** Session workspace root, used for relative path summaries. */
+  cwd?: string | undefined
 }
 
 /** A slot key this plugin addresses. */
-export type KnowledgeSlotKey = keyof KnowledgeSlotMap
+export type KnowledgeSlotKey = 'sidebar.panellist' | 'main' | 'tool.call.toolview'
 
-/** Options for a `main` (keyed) registration. */
+/** Options for a `main` or `tool.call.toolview` (keyed) registration. */
 export interface KeyedRegisterOptions {
   /** Target slot key. */
-  name: 'main'
-  /** Dispatch key; the layout service selects this panel by it. */
+  name: 'main' | 'tool.call.toolview'
+  /** Dispatch key: the panel id, or the wire tool name. */
   key: string
 }
 
