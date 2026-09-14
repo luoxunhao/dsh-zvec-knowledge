@@ -45,6 +45,7 @@ import {
 } from '../store/strategy.ts'
 import { startBuild, type BuildLogLine, type BuildProgress, type EmbedFn } from '../store/build.ts'
 import type { IndexConfig } from '../store/collection.ts'
+import { admit, quotaState, type Quota, type QuotaState } from '../store/quota.ts'
 import { search, type SearchResult } from '../store/retrieval.ts'
 import { rmSync } from 'node:fs'
 
@@ -109,6 +110,14 @@ export interface OperationsOptions {
   embed?: EmbedFn
   /** Retrieval hit counter, for the overview's seven-day figure. */
   hitCounter?: HitCounter
+  /**
+   * Storage quota.
+   *
+   * Enforced here rather than in the interface, because the interface is not the
+   * only writer — the tool layer and any future caller go through these methods,
+   * so this is the one place a quota cannot be bypassed.
+   */
+  quota?: Quota
 }
 
 /** Tracks retrieval hits so the overview's seven-day figure is real, not a placeholder. */
@@ -148,6 +157,7 @@ export class KnowledgeOperations {
   private readonly stateDir: string
   private readonly embed: EmbedFn | undefined
   private readonly hitCounter: HitCounter
+  private readonly quota: Quota
 
   /**
    * @param options - workspace, state directory, embedding provider and counter.
@@ -157,11 +167,37 @@ export class KnowledgeOperations {
     this.stateDir = options.stateDir
     this.embed = options.embed
     this.hitCounter = options.hitCounter ?? createHitCounter()
+    this.quota = options.quota ?? { bytes: null, warnAt: 0.9 }
   }
 
   /** The resolved store root for this workspace. */
   get storeRoot(): string {
     return resolveStoreRoot(this.workspaceDir, this.stateDir)
+  }
+
+  /**
+   * The store's current quota state.
+   *
+   * Exposed so the interface can render the meter and the restricted state from
+   * the same measurement the enforcement uses — two measurements would eventually
+   * disagree, and the disagreement would look like a quota that fires at random.
+   * @returns the quota state.
+   */
+  usage(): QuotaState {
+    return quotaState(this.storeRoot, this.quota)
+  }
+
+  /**
+   * Measured usage for the sidebar card.
+   *
+   * Reports the configured limit alongside the figure so the card can show
+   * "used / limit" rather than a bare number, and `null` when unlimited — a
+   * different statement from a limit of zero.
+   * @returns bytes used and the configured limit.
+   */
+  storageUsage(): { bytes: number, quotaBytes: number | null } {
+    const state = this.usage()
+    return { bytes: state.used, quotaBytes: state.limit }
   }
 
   /**
@@ -262,6 +298,11 @@ export class KnowledgeOperations {
     if (values.text.trim() === '') {
       throw new Error('文档解析后没有文本内容，无法建立索引')
     }
+    // Admission is checked against the *stored text* rather than the source file
+    // size: the text is what occupies the store, and for a compressed source the
+    // two differ substantially in either direction.
+    const admission = admit(this.storeRoot, this.quota, Buffer.byteLength(values.text, 'utf8'), '上传该文档')
+    if (!admission.allowed) throw new Error(admission.reason ?? '存储配额不足')
     const record: DocumentRecord = {
       id: documentId(values.name),
       name: values.name,
@@ -369,6 +410,16 @@ export class KnowledgeOperations {
 
     const records = listDocuments(root, collectionId)
     if (records.length === 0) return { ok: false, chunks: 0, error: '该知识库还没有文档' }
+
+    // A build writes a whole snapshot, so admission is checked against its planned
+    // footprint rather than zero. Without this a rebuild could double a store that
+    // an upload had already been refused for — the quota would look unenforced at
+    // exactly the moment it matters most.
+    const plan = planBuild(records, strategy.chunking)
+    const projectedBytes = estimateCost(plan, strategy.index).vectorBytes
+      + records.reduce((sum, record) => sum + Buffer.byteLength(record.text, 'utf8'), 0)
+    const admission = admit(root, this.quota, projectedBytes, '重建该知识库的索引')
+    if (!admission.allowed) return { ok: false, chunks: 0, error: admission.reason ?? '存储配额不足' }
 
     const slot = inactiveSlot(meta)
     const running = startBuild({

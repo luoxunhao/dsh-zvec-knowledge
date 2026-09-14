@@ -34,6 +34,36 @@ export interface RetrievalConfig {
   minScore: number
 }
 
+/**
+ * Storage quota.
+ *
+ * The design spec calls for a restricted state (§8.2) that explains "限制来源与解除
+ * 路径" when storage runs out, and the issue list leaves the quota figure to the
+ * business side. Making it **configurable rather than invented** is what keeps
+ * that state honest: a deployment that has a quota states it, and the interface
+ * can then name the real limit instead of showing a plausible-looking constant.
+ *
+ * `bytes: null` means no quota is configured — a different statement from a quota
+ * of zero, and the interface distinguishes them.
+ */
+export interface QuotaConfig {
+  /**
+   * Maximum bytes a workspace's store may occupy, or `null` for unlimited.
+   *
+   * Enforced at both points that grow the store — accepting an upload and running
+   * a build — because a quota checked only on upload would let a rebuild double
+   * the footprint that an upload was refused for.
+   */
+  bytes: number | null
+  /**
+   * Fraction at which the interface reports the store as near its limit.
+   *
+   * A warning threshold is separate from the limit because a user refused at 100%
+   * has no chance to act; one warned at 90% does.
+   */
+  warnAt: number
+}
+
 /** Knowledge-base plugin configuration. */
 export interface Config {
   /**
@@ -46,6 +76,8 @@ export interface Config {
   chunking: ChunkingConfig
   /** Default retrieval knobs. */
   retrieval: RetrievalConfig
+  /** Storage quota; unlimited unless a deployment states one. */
+  quota: QuotaConfig
 }
 
 /** Schemastery schema for {@link Config}. */
@@ -60,6 +92,12 @@ export const Config: z<Config> = z.object({
   retrieval: z.object({
     topk: z.number().default(8),
     minScore: z.number().default(0.55),
+  }),
+  quota: z.object({
+    // `null` is a deliberate "no quota", so the schema accepts it explicitly
+    // rather than relying on the field being absent.
+    bytes: z.union([z.number(), z.const(null)]).default(null),
+    warnAt: z.number().default(0.9),
   }),
 })
 
@@ -105,5 +143,13 @@ export function assertValidConfig(config: Config): void {
   }
   if (config.stateDir.trim() === '') {
     throw new Error('stateDir must not be blank')
+  }
+  const { bytes, warnAt } = config.quota
+  if (bytes !== null && (!Number.isInteger(bytes) || bytes <= 0)) {
+    throw new Error(`quota.bytes must be a positive integer or null, received ${String(bytes)}`)
+  }
+  if (!(warnAt > 0 && warnAt <= 1)) {
+    // A warnAt above 1 would never fire; at or below 0 it would fire immediately.
+    throw new Error(`quota.warnAt must be within (0, 1], received ${String(warnAt)}`)
   }
 }

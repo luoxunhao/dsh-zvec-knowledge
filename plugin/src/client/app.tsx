@@ -80,6 +80,26 @@ export interface KnowledgeBasePort {
   listBuilds: () => Promise<BuildRecord[]>
   /** Measured storage usage. */
   getUsage: () => Promise<StorageUsage>
+  /**
+   * The store's quota state.
+   *
+   * Separate from `getUsage` because the two answer different questions: usage is
+   * a figure for the sidebar meter, while this says whether the store is near or
+   * over its limit — which drives the restricted state and the disabled actions.
+   * The host computes both from one measurement, so they cannot disagree.
+   */
+  getQuota?: () => Promise<{
+    /** Bytes used. */
+    used: number
+    /** Configured limit, or `null` when unlimited. */
+    limit: number | null
+    /** Used fraction, or `null` when unlimited. */
+    fraction: number | null
+    /** Whether the warning threshold has been crossed. */
+    nearLimit: boolean
+    /** Whether the limit has been reached. */
+    exceeded: boolean
+  }>
   /** Create a collection. */
   createCollection: (values: { name: string, collectionId: string, description: string }) => Promise<void>
   /** Delete a collection. */

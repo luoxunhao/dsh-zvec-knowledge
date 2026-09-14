@@ -177,6 +177,10 @@ function operationsFor(ctx: Context, config: Config): KnowledgeOperations {
     workspaceDir: workspace,
     stateDir: config.stateDir,
     ...(embeddingProvider === undefined ? {} : { embed: embeddingProvider }),
+    // The quota is deployment policy: absent from the config it is unlimited, and
+    // the interface then never shows a restricted state rather than showing one
+    // invented for the demo.
+    quota: config.quota,
   })
   operationsByWorkspace.set(workspace, created)
   return created

@@ -34,3 +34,13 @@
           # Below this normalized score a hit never reaches RAG generation
           # (design spec §6.4 兜底文案).
           minScore: 0.55
+        # Storage quota (design spec §8.2 受限态). `bytes: null` means unlimited,
+        # which is the default: the spec leaves the figure to the business side, so
+        # a deployment that has one states it here and the interface then names the
+        # real limit instead of a plausible-looking constant.
+        quota:
+          bytes: null
+          # Fraction at which the interface reports the store as near its limit.
+          # Separate from the limit because a user refused at 100% has no chance to
+          # act; one warned at 90% does.
+          warnAt: 0.9

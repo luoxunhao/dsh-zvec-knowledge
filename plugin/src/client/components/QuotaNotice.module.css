@@ -1,0 +1,72 @@
+/* QuotaNotice — design spec §8.2 (受限态：说明限制来源与解除路径). */
+
+.notice {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kb-space-2);
+  padding: var(--kb-space-3) var(--kb-space-4);
+  border: 1px solid var(--kb-status-building-border);
+  border-radius: var(--kb-radius-md);
+  background: var(--kb-status-building-bg);
+}
+
+/* Exceeded uses the danger pair, not the warning one: the two states ask for
+ * different responses, and colouring them alike would flatten that. */
+.exceeded {
+  border-color: var(--kb-status-failed-border);
+  background: var(--kb-status-failed-bg);
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: var(--kb-space-2);
+  margin: 0;
+  font-size: var(--kb-size-body-sm);
+  line-height: var(--kb-leading-body-sm);
+  font-weight: 600;
+  color: var(--kb-status-building-text);
+}
+
+.exceeded .head {
+  color: var(--kb-status-failed-text);
+}
+
+.blocked {
+  margin: 0;
+  font-size: var(--kb-size-body-sm);
+  line-height: var(--kb-leading-body-sm);
+  color: var(--kb-text-primary);
+}
+
+.detail {
+  margin: 0;
+  font-size: var(--kb-size-caption);
+  line-height: var(--kb-leading-caption);
+  color: var(--kb-text-secondary);
+}
+
+.meter {
+  display: flex;
+  max-width: var(--kb-doc-progress-width);
+}
+
+.figures {
+  margin: 0;
+  color: var(--kb-text-primary);
+}
+
+.remedy {
+  margin: 0;
+  font-size: var(--kb-size-caption);
+  line-height: var(--kb-leading-caption);
+  color: var(--kb-text-secondary);
+}
+
+.code {
+  padding: 0 var(--kb-space-1);
+  border-radius: var(--kb-radius-xs);
+  background: var(--kb-bg-subtle);
+  font-family: var(--kb-font-mono);
+  font-size: var(--kb-size-mono);
+}

@@ -86,6 +86,14 @@ export interface DocumentsPageProps {
   onRetry?: () => void
   /** Whether a collection is selected; intake is disabled without one. */
   collectionId?: string | null
+  /**
+   * Whether the store's quota currently blocks new uploads.
+   *
+   * Disables the drop zone, because the alternative — letting the user pick a file
+   * and then refusing it — spends their time to deliver information the store
+   * already had. The banner above the page carries the reason.
+   */
+  quotaBlocked?: boolean
 }
 
 /** Status filter options. */
@@ -172,6 +180,7 @@ export function validateUpload(file: { name: string, size: number }): string | n
  */
 export function DocumentsPage({
   documents, transport, onRemove, loading = false, error = null, onRetry, collectionId = null,
+  quotaBlocked = false,
 }: DocumentsPageProps): React.JSX.Element {
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState<string>('all')
@@ -324,13 +333,21 @@ export function DocumentsPage({
         onFiles={accept}
         accepted={ACCEPTED_EXTENSIONS}
         maxSizeLabel={MAX_UPLOAD_LABEL}
-        disabled={noCollection}
+        disabled={noCollection || quotaBlocked}
         uploadingCount={rows.filter(row => row.transfer === 'uploading' || row.transfer === 'queued').length}
       />
 
       {noCollection && (
         <p className={styles.notice} role="status">
           <Icon name="info" size={14} /> 请先在「总览」中选择一个知识库，再上传文档。
+        </p>
+      )}
+
+      {/* The quota's own explanation lives in the page banner above; this states
+          the consequence locally so the disabled zone is not mysterious. */}
+      {quotaBlocked && (
+        <p className={styles.notice} role="status">
+          <Icon name="alert" size={14} /> 存储配额不足，上传已暂停。删除不需要的文档即可恢复。
         </p>
       )}
 

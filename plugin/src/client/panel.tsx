@@ -36,6 +36,7 @@ import {
   type HostPreview, type HostCost, type HostModelOption, type HostQuantizerOption,
 } from './pages/BuildPage.tsx'
 import type { StageView, LogLine } from './components/BuildPipeline.tsx'
+import { QuotaNotice, type QuotaStateView } from './components/QuotaNotice.tsx'
 import styles from './KnowledgePanel.module.css'
 
 /** Options accepted by {@link KnowledgeBasePanel}. */
@@ -187,6 +188,10 @@ export function KnowledgeBasePanel({ state, port }: KnowledgeBasePanelProps): Re
   // Which collection the documents view is working against. Kept here rather
   // than in the documents page so switching views does not forget the choice.
   const [selectedCollection, setSelectedCollection] = useState<string | null>(null)
+  // The quota state drives the restricted banner and disables the two actions
+  // that would grow the store. Held here so the banner and the page agree.
+  const [quota, setQuota] = useState<QuotaStateView | null>(null)
+  const [quotaBlocked, setQuotaBlocked] = useState<string | null>(null)
 
   // ---- Build (KB-07) state ----
   const [chunking, setChunking] = useState<ChunkingDraft>(CHUNKING_FALLBACK)
@@ -224,6 +229,9 @@ export function KnowledgeBasePanel({ state, port }: KnowledgeBasePanelProps): Re
       setCollections(list)
       setBuilds(records)
       setUsage(measured)
+      // Quota is optional on the port so a host can wire collections before
+      // quotas; without it the restricted state simply never appears.
+      if (port.getQuota !== undefined) setQuota(await port.getQuota())
     } catch (cause) {
       // The failure reason is surfaced verbatim: §8.1's error-state rule forbids
       // showing only a code.
@@ -410,6 +418,13 @@ export function KnowledgeBasePanel({ state, port }: KnowledgeBasePanelProps): Re
       </nav>
 
       <div className={styles.body}>
+        {/* The restricted state sits above every view: a quota that blocks uploads
+            is a property of the store, not of one page, and a user who only sees
+            it after clicking upload has already wasted the attempt. */}
+        {quota !== null && (quota.exceeded || quota.nearLimit || quotaBlocked !== null) && (
+          <QuotaNotice state={quota} blocked={quotaBlocked} />
+        )}
+
         {view === 'overview' ? (
           <OverviewPage
             collections={overview}
@@ -435,8 +450,22 @@ export function KnowledgeBasePanel({ state, port }: KnowledgeBasePanelProps): Re
                     // Refresh from the host rather than appending locally: the
                     // host owns the record, and a local guess would drift from
                     // the stored status the moment a build changes it.
+                    //
+                    // A successful upload also means any quota refusal shown
+                    // earlier is stale, so it is cleared and the meter reloaded.
+                    setQuotaBlocked(null)
+                    void load()
                     void loadDocuments(selectedCollection)
                     return toPageDocument(host)
+                  })
+                  .catch((cause: unknown) => {
+                    // A quota refusal is a *state*, not a per-file error: showing it
+                    // in the banner (and disabling further intake) is more useful
+                    // than one row's error text, because the next file will be
+                    // refused identically.
+                    const message = String(cause instanceof Error ? cause.message : cause)
+                    if (/配额/.test(message)) setQuotaBlocked(message)
+                    throw cause
                   }),
             }}
             onRemove={id => {
@@ -448,6 +477,7 @@ export function KnowledgeBasePanel({ state, port }: KnowledgeBasePanelProps): Re
             error={error}
             onRetry={() => { void load() }}
             collectionId={selectedCollection}
+            quotaBlocked={quota?.exceeded === true || quotaBlocked !== null}
           />
         ) : view === 'build' ? (
           <BuildPage
