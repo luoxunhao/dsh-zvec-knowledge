@@ -50,7 +50,7 @@ import {
 } from '../store/strategy.ts'
 import { startBuild, type BuildLogLine, type BuildProgress, type EmbedFn } from '../store/build.ts'
 import {
-  cancelJob, disposeJobs, jobSnapshot, logPathFor, startJob,
+  awaitJobSettled, cancelJob, disposeJobs, jobSnapshot, logPathFor, startJob,
   type JobSnapshot,
 } from '../store/job.ts'
 import { EMBEDDING_DIMENSION, type IndexConfig } from '../store/collection.ts'
@@ -952,30 +952,37 @@ function toView(meta: SnapshotMeta, summary: ReturnType<typeof summarizeDocument
 }
 
 /**
- * Mark every document as built after a successful publish.
+ * Mark every document as built after a successful publish, with its chunk count.
  *
- * The chunk count is recorded per document only when the build indexed a single
- * document (the common case for a rebuild-after-upload); with several documents
- * the totals are known but the split is not, so each is marked built with its
- * own count left `null` rather than receiving a fabricated share.
+ * The per-document split comes from the build's own chunking plan, so the stored
+ * figure is what was actually written rather than a share computed afterwards.
+ *
+ * This previously recorded a count only when the build indexed a single document
+ * and wrote `null` otherwise, on the reasoning that the split was unknown. It was
+ * not unknown — the build had it and discarded it — and `null` is the 待构建
+ * value, so a collection with several documents displayed 待构建 against every row
+ * even though the whole of it had built successfully.
  * @param root - store root.
  * @param collectionId - collection identifier.
  * @param records - the documents that were built.
- * @param totalChunks - chunks published across all of them.
+ * @param chunksByDoc - chunks written per document id.
  * @param meta - metadata after publish.
  */
 function markPublished(
   root: string,
   collectionId: string,
   records: DocumentRecord[],
-  totalChunks: number,
+  chunksByDoc: Record<string, number>,
   meta: SnapshotMeta | null,
 ): void {
   const at = meta?.builtAt ?? new Date().toISOString()
   const updated = records.map(record => ({
     ...record,
     status: 'ready' as const,
-    chunks: records.length === 1 ? totalChunks : null,
+    // Falls back to the previously stored count when the build did not report one
+    // for this document (a document whose text was empty, say). Falling back to
+    // `null` instead would put the row back into 待构建 for no reason.
+    chunks: chunksByDoc[record.id] ?? record.chunks,
     builtAt: at,
   }))
   try {
@@ -996,6 +1003,11 @@ function markPublished(
  * document-status update are part of the build, not of the response. So this is
  * chained at launch time rather than driven by a poll.
  *
+ * It awaits the job's own settlement promise rather than polling the snapshot. The
+ * polling version left a window of up to one interval after the build finished in
+ * which the record still described the previous state — a reader in that window saw
+ * a completed build still marked 待构建, which is exactly the symptom this fixes.
+ *
  * Chapter two of the same rule: a *successful* build releases its staging slot's
  * handle, while a failed or cancelled one leaves the slot already discarded by
  * `startBuild`. Closing the successful one is what lets the next build recreate
@@ -1011,21 +1023,16 @@ async function afterJobSettles(
   slot: 'a' | 'b',
   records: DocumentRecord[],
 ): Promise<void> {
-  // Polls the job record rather than holding the build's own promise, because the
-  // promise is owned by the job module and this function only has the id.
-  for (;;) {
-    const snapshot = jobSnapshot(collectionId)
-    if (snapshot === null || snapshot.settledAt !== null) {
-      if (snapshot?.ok === true) {
-        // A published build moves every document to 已构建 with its real chunk
-        // count; a cancelled or failed one leaves them 待构建, because nothing was
-        // published.
-        markPublished(root, collectionId, records, snapshot.chunks, readMeta(root, collectionId))
-        releaseSlot(root, collectionId, slot)
-      }
-      return
-    }
-    await new Promise(resolve => setTimeout(resolve, 250))
+  await awaitJobSettled(collectionId)
+  const snapshot = jobSnapshot(collectionId)
+  if (snapshot?.ok === true) {
+    // A published build moves every document to 已构建 with its real chunk count; a
+    // cancelled or failed one leaves them 待构建, because nothing was published.
+    markPublished(
+      root, collectionId, records, snapshot.chunksByDoc,
+      readMeta(root, collectionId),
+    )
+    releaseSlot(root, collectionId, slot)
   }
 }
 

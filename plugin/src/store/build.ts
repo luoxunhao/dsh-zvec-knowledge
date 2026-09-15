@@ -143,6 +143,18 @@ export interface BuildResult {
   docs: number
   /** Chunks discarded for falling below the minimum size. */
   discarded: number
+  /**
+   * Chunks written per source document id.
+   *
+   * Reported because the split is already known here — `planned` holds one entry
+   * per document after the chunking stage — and discarding it left the caller
+   * unable to record a real count. With more than one document the caller wrote
+   * `null` for every row, and `null` is the 待构建 value, so a collection that had
+   * built perfectly displayed 待构建 against every document.
+   *
+   * Empty when nothing was published (failure or cancellation).
+   */
+  chunksByDoc: Record<string, number>
   /** Failure or cancellation reason, when `ok` is false. */
   error?: string
 }
@@ -284,7 +296,16 @@ export function startBuild(request: BuildRequest): RunningBuild {
       stages[STAGES.indexOf('publish')]!.state = 'done'
       log('success', `索引已发布：${total} 片 / ${documents.length} 篇`)
       emit()
-      return { ok: true, chunks: total, docs: documents.length, discarded }
+      return {
+        ok: true,
+        chunks: total,
+        docs: documents.length,
+        discarded,
+        // The per-document split, from the chunking stage's own plan. Reported
+        // rather than recomputed so the stored count cannot disagree with what was
+        // actually written.
+        chunksByDoc: Object.fromEntries(planned.map(item => [item.docId, item.chunks.length])),
+      }
     } catch (error) {
       // A failed build must not leave its staging slot locked: the engine holds
       // an exclusive lock per directory, so an unreleased handle would make the
@@ -296,7 +317,7 @@ export function startBuild(request: BuildRequest): RunningBuild {
       if (error instanceof BuildCancelled) return cancelled(processed, 0, discarded)
       const message = String(error instanceof Error ? error.message : error)
       log('error', message)
-      return { ok: false, chunks: 0, docs: 0, discarded: 0, error: message }
+      return { ok: false, chunks: 0, docs: 0, discarded: 0, chunksByDoc: {}, error: message }
     }
 
     /**
@@ -313,7 +334,8 @@ export function startBuild(request: BuildRequest): RunningBuild {
       releaseSlot(request.storeRoot, request.collectionId, request.slot)
       discardSlot(request.storeRoot, request.collectionId, request.slot)
       log('info', '构建已取消，检索仍返回上一次快照')
-      return { ok: false, chunks: written, docs, discarded: dropped, error: 'cancelled' }
+      // Empty: a cancelled build publishes nothing, so no document acquired a count.
+      return { ok: false, chunks: written, docs, discarded: dropped, chunksByDoc: {}, error: 'cancelled' }
     }
   })()
 

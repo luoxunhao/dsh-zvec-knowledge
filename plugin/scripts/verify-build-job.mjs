@@ -75,6 +75,13 @@ try {
     text: `# 第一章\n${'向量检索把文本映射为稠密向量，再用近邻搜索召回相关片段。'.repeat(80)}\n`
       + `# 第二章\n${'混合检索融合稠密向量与全文检索两路结果，用 RRF 重新排序。'.repeat(80)}\n`,
   })
+  // A second document is load-bearing for the chunk-count regression below: the
+  // defect only appeared when a collection held more than one, because that is when
+  // the publish step judged the per-document split to be unknown.
+  await ops.addDocument('kb_prod_2f8a', {
+    name: '术语表.md',
+    text: `# 术语\n${'分片指索引的最小检索单位；召回指从索引中取回候选片段的过程。'.repeat(60)}\n`,
+  })
 
   const strategy = {
     chunking: { mode: 'heading', chunkTokens: 512, overlapTokens: 64, minChunkTokens: 1, preserveCodeBlocks: true, splitTablesByRow: false },
@@ -129,6 +136,43 @@ try {
   const collections = await ops.listCollections()
   const built = collections.find(item => item.id === 'kb_prod_2f8a')
   check('job: the collection is marked built without a watcher', built?.builtAt !== null && built?.builtAt !== undefined, `builtAt=${built?.builtAt ?? 'null'}`)
+
+  // -------------------------------------------------------------------------
+  // 3b. Every document records a real chunk count, not the 待构建 marker
+  //
+  // This was a live defect: the publish step wrote `null` for each document
+  // whenever a collection held more than one, and `null` is the 待构建 value — so
+  // a collection that had built completely displayed 待构建 against every row. The
+  // count had been known all along; the build simply discarded it.
+  // -------------------------------------------------------------------------
+  const documents = await ops.listDocuments('kb_prod_2f8a')
+  check(
+    'chunks: every built document carries a real count, not null',
+    documents.length > 0 && documents.every(document => document.chunks !== null),
+    documents.map(document => `${document.name}=${document.chunks ?? 'null'}`).join(' '),
+  )
+  check(
+    'chunks: every built document reads as ready',
+    documents.every(document => document.status === 'ready'),
+    documents.map(document => `${document.name}:${document.status}`).join(' '),
+  )
+  check(
+    'chunks: the per-document counts sum to the collection total',
+    documents.reduce((sum, document) => sum + (document.chunks ?? 0), 0) === settled.chunks,
+    `${documents.reduce((sum, document) => sum + (document.chunks ?? 0), 0)} across documents vs ${settled.chunks} published`,
+  )
+  check(
+    'chunks: every document gets a non-zero count',
+    documents.every(document => (document.chunks ?? 0) > 0),
+    documents.map(document => `${document.name}=${document.chunks}`).join(' '),
+  )
+  // The reported failure is only reachable with more than one document, so the
+  // single-document case must not be the only one covered.
+  check(
+    'chunks: the regression case really has several documents',
+    documents.length > 1,
+    `${documents.length} documents, which is what made the old code write null`,
+  )
 
   // -------------------------------------------------------------------------
   // 4. A second build is refused rather than corrupting the first

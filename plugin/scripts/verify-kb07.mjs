@@ -347,14 +347,37 @@ function buildProps(overrides = {}) {
 
 // ---------------------------------------------------------------------------
 // 9. Predicate: chunk count is never fabricated
+//
+// The requirement is that a per-document count must be *true*, never invented. The
+// original implementation satisfied it by writing `null` whenever a collection had
+// more than one document, on the reasoning that the split was unknowable — but the
+// split was known (the chunking stage computes it) and `null` is the 待构建 value,
+// so a fully built collection displayed 待构建 against every row.
+//
+// So the check is now on the property rather than on that expression: the count
+// must come from the build's own per-document plan, and no arithmetic may divide
+// the collection total between documents.
 // ---------------------------------------------------------------------------
 {
   const page = readFileSync(join(ROOT, 'src', 'client', 'pages', 'BuildPage.tsx'), 'utf8')
-  // A build that published several documents cannot split the chunk total
-  // between them truthfully, so the host must leave the per-document count
-  // unknown rather than dividing it.
   const ops = readFileSync(join(ROOT, 'src', 'host', 'operations.ts'), 'utf8')
-  check('state: multi-document builds do not fabricate per-document counts', /records\.length === 1 \? totalChunks : null/.test(ops), 'per-document chunks left null when the split is unknown')
+  const build = readFileSync(join(ROOT, 'src', 'store', 'build.ts'), 'utf8')
+
+  check(
+    'state: the per-document count comes from the build plan, not a division',
+    /chunksByDoc/.test(build) && /item\.chunks\.length/.test(build),
+    'the chunking stage reports chunks per document, so the count is measured',
+  )
+  check(
+    'state: no per-document count is computed by dividing the total',
+    !/totalChunks\s*\/\s*records\.length|total\s*\/\s*documents\.length/.test(ops),
+    'a fabricated share is what the rule forbids, not a measured count',
+  )
+  check(
+    'state: every built document is recorded as ready with its count',
+    /status: 'ready' as const/.test(ops) && /chunks: chunksByDoc\[record\.id\]/.test(ops),
+    'the stored count is the one the build actually wrote',
+  )
   check('page: submit is blocked without documents', /hasDocuments/.test(page), 'a document-less collection cannot be built')
 }
 

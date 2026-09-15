@@ -95,6 +95,15 @@ export interface JobSnapshot {
   error: string | null
   /** Chunks published, once settled successfully. */
   chunks: number
+  /**
+   * Chunks published per source document id.
+   *
+   * Carried on the snapshot rather than read from the build's own promise, because
+   * the publishing path (`afterJobSettles`) only holds the collection id and
+   * observes the job by polling. Without it the document log had no per-document
+   * count to record and wrote `null` — the 待构建 value — for every row.
+   */
+  chunksByDoc: Record<string, number>
 }
 
 /** A running or settled build job. */
@@ -113,10 +122,22 @@ interface Job {
   error: string | null
   /** Chunks published. */
   chunks: number
+  /** Chunks published per source document id. */
+  chunksByDoc: Record<string, number>
   /** ISO-8601 start time. */
   startedAt: string
   /** ISO-8601 settle time. */
   settledAt: string | null
+  /**
+   * Resolves when the build has settled and this record is final.
+   *
+   * Exposed so a caller that must act on the outcome — publishing the snapshot,
+   * updating the document log — can await the exact moment instead of polling the
+   * snapshot. The earlier polling version left a gap of up to one poll interval
+   * after the build finished in which the record still described the previous
+   * state, and a reader in that window saw a completed build as 待构建.
+   */
+  settled: Promise<void>
   /** Cancels the underlying build. */
   cancel: () => void
   /** Absolute path of the collection's persisted log, when known. */
@@ -235,8 +256,10 @@ export function startJob(
     ok: false,
     error: null,
     chunks: 0,
+    chunksByDoc: {},
     startedAt: new Date().toISOString(),
     settledAt: null,
+    settled: Promise.resolve(),
     cancel: () => {},
     logPath,
   }
@@ -256,13 +279,17 @@ export function startJob(
   job.cancel = running.cancel
 
   // Settle the record off the request's stack: nothing awaits this, which is what
-  // makes the build independent of whoever started it.
-  void running.done.then(
+  // makes the build independent of whoever started it. `settled` is published so a
+  // caller that must act on the outcome can await this exact moment.
+  job.settled = running.done.then(
     (result) => {
       job.running = false
       job.ok = result.ok
       job.error = result.ok ? null : translateBuildError(result.error ?? '未知原因')
       job.chunks = result.chunks
+      // Recorded from the build's own per-document split, so the publishing path can
+      // write a real count per document.
+      job.chunksByDoc = result.chunksByDoc
       job.settledAt = new Date().toISOString()
       // A settled build's stages must not be left mid-`running`, or a page that
       // polls after completion shows a stage that is still "进行中" forever.
@@ -294,6 +321,27 @@ export function startJob(
   )
 
   return { started: true }
+}
+
+/**
+ * Await a collection's job settling.
+ *
+ * The exact-moment counterpart to {@link jobSnapshot}: a caller that must act on
+ * the outcome awaits this rather than polling. Polling left a window of up to one
+ * interval after the build finished in which the record still described the
+ * previous state, so a reader in that window saw a completed build as 待构建.
+ * @param collectionId - collection identifier.
+ * @returns a promise that resolves once the job is settled, or immediately when no
+ *   job is running.
+ */
+export async function awaitJobSettled(collectionId: string): Promise<void> {
+  // Loops because a rebuild can replace the entry between the read and the await;
+  // each iteration awaits one generation, and the check re-reads the table.
+  for (;;) {
+    const job = jobs.get(collectionId)
+    if (job === undefined || !job.running) return
+    await job.settled
+  }
 }
 
 /**
@@ -337,6 +385,7 @@ export function jobSnapshot(collectionId: string): JobSnapshot | null {
     settledAt: job.settledAt,
     error: job.error,
     chunks: job.chunks,
+    chunksByDoc: { ...job.chunksByDoc },
   }
 }
 
