@@ -729,6 +729,12 @@ export function KnowledgeBasePanel({ state, port }: KnowledgeBasePanelProps): Re
                 run: (query, options) => port.retrieve!(selectedCollection, query, options),
               },
             })}
+            {...(port?.retrievalSettings === undefined || port?.setRetrievalSettings === undefined || selectedCollection === null ? {} : {
+              settings: {
+                read: () => port.retrievalSettings!(selectedCollection),
+                save: retrieval => port.setRetrievalSettings!(selectedCollection, retrieval),
+              },
+            })}
           />
         ) : (
           <EmptyState

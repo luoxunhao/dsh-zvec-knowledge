@@ -50,6 +50,7 @@ import {
   type ChunkingConfig, type CostEstimate, type EmbeddingModel, type PreviewResult, type QuantizerOption,
 } from '../store/strategy.ts'
 import { startBuild, type BuildLogLine, type BuildProgress, type EmbedFn } from '../store/build.ts'
+import { updateRetrieval } from '../store/snapshot.ts'
 import { strategyEvidence as buildStrategyEvidence, type StrategyEvidence } from '../store/strategy-evidence.ts'
 import {
   awaitJobSettled, cancelJob, disposeJobs, jobSnapshot, logPathFor, startJob,
@@ -151,6 +152,14 @@ export interface OperationsOptions {
    * so this is the one place a quota cannot be bypassed.
    */
   quota?: Quota
+  /**
+   * The deployment's retrieval settings, used when a collection has none of its own.
+   *
+   * Defaults live here rather than being invented at call sites, so a collection
+   * with no stored settings and a caller that passes nothing still agree on one
+   * floor — the deployment config's — rather than each choosing its own.
+   */
+  retrievalDefaults?: { minScore: number, topk: number }
 }
 
 /** Tracks retrieval hits so the overview's seven-day figure is real, not a placeholder. */
@@ -193,6 +202,7 @@ export class KnowledgeOperations {
   private readonly embeddingModel: string | undefined
   private readonly hitCounter: HitCounter
   private readonly quota: Quota
+  private readonly retrievalDefaults: { minScore: number, topk: number }
   /**
    * Operations objects already built for a workspace, when the workspace is
    * resolved per call rather than pinned.
@@ -230,6 +240,7 @@ export class KnowledgeOperations {
     this.dimension = options.dimension ?? EMBEDDING_DIMENSION
     this.embeddingModel = options.embeddingModel
     this.hitCounter = options.hitCounter ?? createHitCounter()
+    this.retrievalDefaults = options.retrievalDefaults ?? { minScore: 0.55, topk: 8 }
     this.quota = options.quota ?? { bytes: null, warnAt: 0.9 }
   }
 
@@ -264,6 +275,7 @@ export class KnowledgeOperations {
       ...(this.embeddingModel === undefined ? {} : { embeddingModel: this.embeddingModel }),
       hitCounter: this.hitCounter,
       quota: this.quota,
+      retrievalDefaults: this.retrievalDefaults,
     })
     this.perWorkspace.set(workspace, created)
     return created
@@ -925,6 +937,51 @@ export class KnowledgeOperations {
    */
   cancelBuildIndex(collectionId: string): boolean {
     return cancelJob(collectionId)
+  }
+
+  /**
+   * The retrieval settings in force for a collection.
+   *
+   * Resolution order: the collection's own stored settings, then the deployment
+   * config's. Per-collection wins because the floor that is right depends on the
+   * embedding model, and the model is a property of the collection's schema — a
+   * deployment hosting two collections built by different models needs two floors,
+   * which one global value cannot express.
+   * @param collectionId - collection identifier.
+   * @returns the effective settings, with a flag saying where they came from.
+   */
+  retrievalSettings(collectionId: string): {
+    minScore: number
+    topk: number
+    source: 'collection' | 'deployment'
+  } {
+    const stored = readMeta(this.storeRoot, collectionId)?.retrieval ?? null
+    if (stored !== null) return { ...stored, source: 'collection' }
+    return { ...this.retrievalDefaults, source: 'deployment' }
+  }
+
+  /**
+   * Store retrieval settings for a collection, making them the ones the
+   * `dsh_kb_search` tool applies from the next call on.
+   *
+   * Takes effect immediately and needs no rebuild: the floor is applied at query
+   * time, so this is a metadata write rather than an index change — which is the
+   * whole reason it belongs in the interface rather than in a config file.
+   * @param collectionId - collection identifier.
+   * @param retrieval - the new floor and default hit count.
+   * @returns the stored settings, with their source.
+   */
+  async setRetrievalSettings(
+    collectionId: string,
+    retrieval: { minScore: number, topk: number },
+  ): Promise<{ minScore: number, topk: number, source: 'collection' }> {
+    const updated = await updateRetrieval(this.storeRoot, collectionId, retrieval)
+    // Narrowed from the write: `updateRetrieval` validates and stores both fields,
+    // so the result is present even though the metadata type keeps it optional for
+    // collections written before the field existed.
+    const stored = updated.retrieval
+    if (stored === null) throw new Error('检索设置写入未生效')
+    return { ...stored, source: 'collection' }
   }
 
   /**

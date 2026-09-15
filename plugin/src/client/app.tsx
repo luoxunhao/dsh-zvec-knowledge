@@ -134,6 +134,29 @@ export interface KnowledgeBasePort {
    * is the strategy that runs is.
    */
   strategyEvidence?: (collectionId: string, chunking: ChunkingDraft) => Promise<StrategyEvidenceView>
+  /**
+   * The retrieval settings in force for a collection.
+   *
+   * `source` distinguishes "this collection's own setting" from "the deployment
+   * default it falls back to", because editing the two means different things.
+   */
+  retrievalSettings?: (collectionId: string) => Promise<{
+    minScore: number
+    topk: number
+    source: 'collection' | 'deployment'
+  }>
+  /**
+   * Store retrieval settings for a collection, making them the ones the
+   * `dsh_kb_search` tool applies from its next call.
+   *
+   * Takes effect immediately — the floor is applied at query time, so this is a
+   * metadata write rather than an index change. That is the whole reason it
+   * belongs in the interface rather than in a config file.
+   */
+  setRetrievalSettings?: (
+    collectionId: string,
+    retrieval: { minScore: number, topk: number },
+  ) => Promise<{ minScore: number, topk: number, source: 'collection' }>
   /** The strategy a collection was last built with, for a pre-filled configurator. */
   storedStrategy?: (collectionId: string) => Promise<{ chunking: ChunkingDraft, index: IndexDraft } | null>
   /**

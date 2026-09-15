@@ -233,6 +233,7 @@ function createOptions(config: Config): {
   dimension?: number
   embeddingModel?: string
   quota: Config['quota']
+  retrievalDefaults: { minScore: number, topk: number }
 } {
   const provider = embeddingProvider ?? providerFromConfig(config)
   return {
@@ -246,6 +247,9 @@ function createOptions(config: Config): {
     // of 1024 against a schema built at 2560.
     ...(config.embedding === undefined ? {} : { embeddingModel: config.embedding.model }),
     quota: config.quota,
+    // The deployment's values are the default a collection falls back to, not the
+    // floor itself: each collection can override both in the interface.
+    retrievalDefaults: { minScore: config.retrieval.minScore, topk: config.retrieval.topk },
   }
 }
 

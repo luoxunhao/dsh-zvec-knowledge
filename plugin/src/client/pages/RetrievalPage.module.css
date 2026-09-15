@@ -74,6 +74,21 @@
   background: var(--kb-bg-surface);
 }
 
+.sectionTitle {
+  margin: 0;
+  font-size: var(--kb-size-body);
+  line-height: var(--kb-leading-body);
+  font-weight: 600;
+  color: var(--kb-text-primary);
+}
+
+.settingsHint {
+  margin: 0;
+  font-size: var(--kb-size-caption);
+  line-height: var(--kb-leading-caption);
+  color: var(--kb-text-tertiary);
+}
+
 /* `minmax(0, 1fr)` rather than a `minmax(Npx, 1fr)` auto-fit: a bare pixel minimum
  * is a size literal the token gate rightly rejects, and the fixed-column form with a
  * breakpoint is what the sibling pages use. */

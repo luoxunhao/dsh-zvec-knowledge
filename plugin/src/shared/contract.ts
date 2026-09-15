@@ -83,6 +83,8 @@ export const KB_API_METHODS = [
   'estimateCost',
   'storedStrategy',
   'strategyEvidence',
+  'retrievalSettings',
+  'setRetrievalSettings',
   'buildIndex',
   'buildStatus',
   'buildPlan',

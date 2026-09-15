@@ -28,6 +28,19 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { KnowledgeOperations } from './operations.ts'
 import { KB_SEARCH_TOOL } from '../shared/contract.ts'
 
+/**
+ * The slice of the operations contract the tool reads.
+ *
+ * Narrowed rather than taking the whole class so a test double can supply only
+ * what the tool touches, and so the optional `retrievalSettings` channel is
+ * visible here as optional — a host object without it falls back to the captured
+ * deployment floor instead of failing every call.
+ */
+export type SearchOperations = Pick<KnowledgeOperations, 'embedQuery' | 'search'> & {
+  /** Resolves the floor in force for one collection, when the host supports it. */
+  retrievalSettings?: (collectionId: string) => { minScore: number, topk: number, source: 'collection' | 'deployment' }
+}
+
 // The wire name is declared once in `shared/contract.ts` and re-exported here, so
 // the host registration and the client's tool-view cell cannot drift apart.
 export { KB_SEARCH_TOOL }
@@ -162,15 +175,20 @@ const SEARCH_CANCELLED_SENTINEL = '__kb_search_cancelled__'
  * `operations` is injected rather than imported so the tool has no ambient
  * dependency on a workspace: the caller resolves the store root per session, which
  * is the isolation dimension the persistence acceptance criterion is about.
+ *
+ * `minScore` is the *deployment default*, not the floor this tool applies: the
+ * effective value is resolved per call from the searched collection, so a floor
+ * tuned in the interface takes effect without a restart. The parameter stays
+ * because the registration still needs a default for a collection that has none.
  * @param operations - the knowledge-base operations to search through.
- * @param minScore - normalized floor; hits below it are counted, not returned.
+ * @param minScore - deployment-default floor, used when the collection has none of its own.
  * @param timeoutMs - budget for one search. Injectable so a test can exercise the
  *   expiry path without waiting the real {@link SEARCH_TIMEOUT_MS}; production
  *   callers omit it and get the constant.
  * @returns the registry-ready tool definition.
  */
 export function defineKbSearchTool(
-  operations: KnowledgeOperations,
+  operations: SearchOperations,
   minScore: number,
   timeoutMs: number = SEARCH_TIMEOUT_MS,
 ) {
@@ -316,7 +334,17 @@ export function defineKbSearchTool(
 
       try {
         const vector = await within(operations.embedQuery(query))
-        const result = await within(operations.search(collection, query, vector, topk, minScore))
+        // The floor is resolved per call rather than captured at registration: the
+        // deployment's config value is only a default, and the collection's own
+        // setting — editable in the interface — is the one in force. A fixed value
+        // here is how a threshold tuned in the UI stayed decorative.
+        //
+        // Optional on the operations contract so an older host object — a test
+        // double, a tool built before this channel existed — still works with the
+        // captured default rather than failing every call.
+        const effective = operations.retrievalSettings?.(collection)
+        const floor = effective?.minScore ?? minScore
+        const result = await within(operations.search(collection, query, vector, topk, floor))
         failureMode = result.mode
         const hits: ToolHit[] = result.hits.map(hit => ({
           file: hit.docName,

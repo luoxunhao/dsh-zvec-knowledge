@@ -29,7 +29,7 @@
  * @module dsh-zvec-knowledge/client/pages/RetrievalPage
  */
 
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Button } from '../components/Button.tsx'
 import { EmptyState } from '../components/EmptyState.tsx'
 import { Icon } from '../components/Icon.tsx'
@@ -82,6 +82,18 @@ export interface RetrievalPageProps {
      */
     run: (query: string, options: { topk: number, minScore: number, denseOnly: boolean }) => Promise<RetrievalView>
   }
+  /**
+   * Read and write the settings the conversation's `dsh_kb_search` tool applies.
+   *
+   * Omitted when the port has no settings channel, in which case the card shows
+   * nothing rather than an editor that cannot save.
+   */
+  settings?: {
+    /** Read the settings in force, with their source. */
+    read: () => Promise<{ minScore: number, topk: number, source: 'collection' | 'deployment' }>
+    /** Store new settings, making them the tool's from its next call. */
+    save: (retrieval: { minScore: number, topk: number }) => Promise<{ minScore: number, topk: number, source: 'collection' }>
+  }
 }
 
 /**
@@ -90,7 +102,7 @@ export interface RetrievalPageProps {
  * @returns the page.
  */
 export function RetrievalPage({
-  collectionId, hasSnapshot, transport,
+  collectionId, hasSnapshot, transport, settings,
 }: RetrievalPageProps): React.JSX.Element {
   const [query, setQuery] = useState('')
   // Defaults chosen for validation rather than for answering: a floor of 0 shows
@@ -102,6 +114,59 @@ export function RetrievalPage({
   const [result, setResult] = useState<RetrievalView | null>(null)
   const [running, setRunning] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // The settings the tool actually applies. Loaded from the host, editable here,
+  // and saved back so tuning the console tunes the conversation too.
+  const [effective, setEffective] = useState<{ minScore: number, topk: number, source: 'collection' | 'deployment' } | null>(null)
+  const [draftFloor, setDraftFloor] = useState<number | null>(null)
+  const [draftTopk, setDraftTopk] = useState<number | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [settingsError, setSettingsError] = useState<string | null>(null)
+  const [savedNotice, setSavedNotice] = useState<string | null>(null)
+
+  // Load the effective settings when the collection changes, and seed the draft
+  // from them. Re-read after a save so `source` reflects the stored state.
+  useEffect(() => {
+    const read = settings?.read
+    if (read === undefined || collectionId === null) {
+      setEffective(null)
+      return
+    }
+    let cancelled = false
+    void (async () => {
+      try {
+        const next = await read()
+        if (cancelled) return
+        setEffective(next)
+        setDraftFloor(next.minScore)
+        setDraftTopk(next.topk)
+      } catch (cause) {
+        if (!cancelled) setSettingsError(String(cause instanceof Error ? cause.message : cause))
+      }
+    })()
+    return () => { cancelled = true }
+  }, [settings, collectionId])
+
+  /** Store the draft as the collection's settings. */
+  const saveSettings = async (): Promise<void> => {
+    const save = settings?.save
+    if (save === undefined || collectionId === null || draftFloor === null || draftTopk === null) return
+    setSaving(true)
+    setSettingsError(null)
+    setSavedNotice(null)
+    try {
+      const stored = await save({ minScore: draftFloor, topk: draftTopk })
+      setEffective(stored)
+      // Stated rather than implied: the point of the control is that this changes
+      // what the conversation's tool does, and saying so closes the loop.
+      setSavedNotice(`已生效：会话中的 dsh_kb_search 现在使用下限 ${stored.minScore.toFixed(2)}。`)
+    } catch (cause) {
+      // The store's validation message names the range, so it is shown as-is.
+      setSettingsError(String(cause instanceof Error ? cause.message : cause))
+    } finally {
+      setSaving(false)
+    }
+  }
 
   /** Run the query. */
   const run = useCallback(async (): Promise<void> => {
@@ -162,6 +227,53 @@ export function RetrievalPage({
         {/* Left column (§6.4): the query card — parameters, input and the run
             action. Kept narrow so the hit list gets the room it needs. */}
         <div className={styles.column}>
+          {settings !== undefined && effective !== null && (
+            <section className={styles.controls} aria-label="会话检索设置">
+              <h4 className={styles.sectionTitle}>会话检索设置</h4>
+              <p className={styles.settingsHint}>
+                {effective.source === 'collection'
+                  ? '以下是本知识库的检索设置，会话中的 dsh_kb_search 按此过滤命中。'
+                  : '本知识库尚未单独设置，以下为部署默认值。修改后会保存为本知识库自己的设置。'}
+              </p>
+              <div className={styles.grid}>
+                <NumberField
+                  label="会话分数下限（minScore）"
+                  value={draftFloor ?? effective.minScore}
+                  onChange={setDraftFloor}
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  hint="低于此分数的命中不会返回给会话"
+                />
+                <NumberField
+                  label="会话返回条数（topk）"
+                  value={draftTopk ?? effective.topk}
+                  onChange={setDraftTopk}
+                  min={1}
+                  max={50}
+                  hint="工具每次默认返回的命中数上限"
+                />
+              </div>
+              <div className={styles.actions}>
+                <Button
+                  variant="primary"
+                  onClick={() => { void saveSettings() }}
+                  loading={saving}
+                  loadingLabel="保存中…"
+                  disabled={draftFloor === effective.minScore && draftTopk === effective.topk}
+                >
+                  保存并生效
+                </Button>
+                {savedNotice !== null && <span className={styles.timing}>{savedNotice}</span>}
+              </div>
+              {settingsError !== null && (
+                <p className={styles.error} role="alert">
+                  <Icon name="alert" size={14} /> {settingsError}
+                </p>
+              )}
+            </section>
+          )}
+
           <section className={styles.controls} aria-label="查询参数">
             <TextField
               label="查询内容"

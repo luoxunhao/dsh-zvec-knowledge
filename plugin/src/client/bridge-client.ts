@@ -204,6 +204,16 @@ export function createHostPort(): KnowledgeBasePort {
     strategyEvidence: (collectionId: string, chunking: ChunkingDraft): Promise<StrategyEvidenceView> =>
       call<StrategyEvidenceView>('strategyEvidence', { collectionId, chunking }),
 
+    retrievalSettings: (collectionId: string): Promise<{
+      minScore: number, topk: number, source: 'collection' | 'deployment'
+    }> => call('retrievalSettings', { collectionId }),
+
+    setRetrievalSettings: (
+      collectionId: string,
+      retrieval: { minScore: number, topk: number },
+    ): Promise<{ minScore: number, topk: number, source: 'collection' }> =>
+      call('setRetrievalSettings', { collectionId, retrieval }),
+
     // The host stores only the index half of the build strategy, so the chunking
     // half comes back as `null` and the caller keeps its current draft rather than
     // having defaults invented for it.

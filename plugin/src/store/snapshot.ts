@@ -85,6 +85,21 @@ export interface SnapshotMeta {
   chunks: number
   /** Documents in the active snapshot. */
   docs: number
+  /**
+   * Retrieval settings for this collection: the score floor the `dsh_kb_search`
+   * tool applies, and the default hit count.
+   *
+   * Per-collection rather than only in deployment configuration because the right
+   * floor depends on the embedding model — and the model is a property of this
+   * collection's schema. A deployment that swaps models would otherwise need a
+   * config edit and a restart to make its own index answerable, when the floor is
+   * exactly the thing the retrieval console exists to tune and verify.
+   *
+   * `null` for a collection written before this field existed; retrieval then
+   * falls back to the deployment config's value, which keeps an old store
+   * behaving exactly as before until someone chooses to change it.
+   */
+  retrieval: { minScore: number, topk: number } | null
 }
 
 /** Pointer and collection metadata file. */
@@ -142,7 +157,7 @@ export interface ServedCollection {
  * @param meta - collection metadata; `active` is forced to `null`.
  * @throws {Error} when the collection already exists.
  */
-export async function createCollection(storeRoot: string, meta: Omit<SnapshotMeta, 'active' | 'builtAt' | 'chunks' | 'docs' | 'chunking' | 'tokenizer'>): Promise<SnapshotMeta> {
+export async function createCollection(storeRoot: string, meta: Omit<SnapshotMeta, 'active' | 'builtAt' | 'chunks' | 'docs' | 'chunking' | 'tokenizer' | 'retrieval'>): Promise<SnapshotMeta> {
   const id = assertCollectionId(meta.id)
   const dir = collectionDir(storeRoot, id)
   return withFileLock(dir, () => {
@@ -151,7 +166,7 @@ export async function createCollection(storeRoot: string, meta: Omit<SnapshotMet
     }
     // `chunking` starts null: nothing has been built, so no parameters have been
     // used yet, and the first build always indexes everything regardless.
-    const created: SnapshotMeta = { ...meta, chunking: null, tokenizer: null, builtAt: null, active: null, chunks: 0, docs: 0 }
+    const created: SnapshotMeta = { ...meta, chunking: null, tokenizer: null, retrieval: null, builtAt: null, active: null, chunks: 0, docs: 0 }
     writeMeta(storeRoot, created)
     return created
   })
@@ -376,6 +391,42 @@ export async function renameCollection(storeRoot: string, id: string, name: stri
     const meta = readMeta(storeRoot, id)
     if (meta === null) throw new Error(`collection ${id} does not exist under ${storeRoot}`)
     const updated: SnapshotMeta = { ...meta, name }
+    writeMeta(storeRoot, updated)
+    return updated
+  })
+}
+
+/**
+ * Update a collection's retrieval settings.
+ *
+ * This is the UI's write path for the score floor and default hit count. The
+ * values are validated here as well as at the bridge because the store is the
+ * one place a malformed write would be irreversible: a floor of 3 would make the
+ * collection answer nothing, and nothing else would ever read the raw value to
+ * notice.
+ * @param storeRoot - absolute store root.
+ * @param id - collection identifier.
+ * @param retrieval - the new settings.
+ * @returns updated metadata.
+ * @throws {Error} when the collection does not exist or a value is out of range.
+ */
+export async function updateRetrieval(
+  storeRoot: string,
+  id: string,
+  retrieval: { minScore: number, topk: number },
+): Promise<SnapshotMeta> {
+  const { minScore, topk } = retrieval
+  if (!(minScore >= 0 && minScore <= 1)) {
+    throw new Error(`分数下限必须是 0 到 1 之间的数，收到 ${String(minScore)}`)
+  }
+  if (!(Number.isInteger(topk) && topk >= 1 && topk <= 50)) {
+    throw new Error(`返回条数必须是 1 到 50 之间的整数，收到 ${String(topk)}`)
+  }
+  const dir = collectionDir(storeRoot, assertCollectionId(id))
+  return withFileLock(dir, () => {
+    const meta = readMeta(storeRoot, id)
+    if (meta === null) throw new Error(`collection ${id} does not exist under ${storeRoot}`)
+    const updated: SnapshotMeta = { ...meta, retrieval: { minScore, topk } }
     writeMeta(storeRoot, updated)
     return updated
   })

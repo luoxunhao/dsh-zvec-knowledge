@@ -360,6 +360,26 @@ export async function dispatch(
       return { index, chunking: null }
     }
 
+    case 'retrievalSettings':
+      // Read the settings in force: the collection's own, or the deployment
+      // default when it has none. The `source` lets the page say which it is
+      // showing, because "the default" and "your setting" differ in what editing
+      // it means.
+      return operations.retrievalSettings(requireString(args.collectionId, 'collectionId'))
+
+    case 'setRetrievalSettings': {
+      const collectionId = requireString(args.collectionId, 'collectionId')
+      const retrieval = args.retrieval as { minScore?: unknown, topk?: unknown }
+      if (typeof retrieval?.minScore !== 'number' || typeof retrieval?.topk !== 'number') {
+        throw new Error('参数 retrieval 必须包含 minScore 与 topk')
+      }
+      // The store validates the ranges; the bridge only checks presence.
+      return operations.setRetrievalSettings(collectionId, {
+        minScore: retrieval.minScore,
+        topk: retrieval.topk,
+      })
+    }
+
     case 'buildIndex': {
       // Launch-and-return. The build is a host-side job (`store/job.ts`), so the
       // request that starts it is over as soon as it is running: progress is read
