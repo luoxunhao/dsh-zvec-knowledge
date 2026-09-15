@@ -84,6 +84,7 @@ export {
 export { formatBytes } from './components/StorageUsageCard.tsx'
 export { formatCount } from './components/CollectionCard.tsx'
 export { KnowledgeBasePanel } from './panel.tsx'
+export { RetrievalPage, type RetrievalPageProps } from './pages/RetrievalPage.tsx'
 export {
   KNOWLEDGE_LABEL, KNOWLEDGE_ORDER, KNOWLEDGE_PANEL_KEY, KNOWLEDGE_SIDEBAR_ID,
   type MainPanelId,
@@ -110,8 +111,15 @@ export const inject: string[] = ['slots']
  */
 const panelState = createPanelState()
 
-/** Which view inside the knowledge panel is showing. */
-export type KnowledgeView = 'overview' | 'documents' | 'build' | 'retrieval' | 'rag' | 'settings'
+/**
+ * Which view inside the knowledge panel is showing.
+ *
+ * `rag` is absent rather than merely hidden: KB-09's revised scope places RAG
+ * answering in the dsh conversation, so the panel has no Q&A surface to select.
+ * `retrieval` is present and is a different thing — a diagnostic console for
+ * judging chunking and recall, which generates no answer.
+ */
+export type KnowledgeView = 'overview' | 'documents' | 'build' | 'retrieval' | 'settings'
 
 /** Observable selection shared by the panel's own shell and its sidebar row. */
 export interface PanelState {

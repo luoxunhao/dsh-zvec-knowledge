@@ -1,0 +1,263 @@
+/* RetrievalPage — the diagnostic console (design spec §6.4).
+ *
+ * §6.4 puts the controls and the hit list side by side: 「左侧查询卡包含参数胶囊
+ * （topk 与阈值）、查询输入框与命中结果列表」. So the page is a header, then a
+ * two-column grid — query controls on the left, health summary and hits on the
+ * right. That also keeps a long hit list from pushing the controls out of reach
+ * while tuning, which is the whole activity on this page. */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kb-space-5);
+  /* The two-column token: hit cards must show a full chunk's text, which the
+   * single-column width made cramped. */
+  max-width: var(--kb-split-max-width);
+  min-width: 0;
+}
+
+/* An explicit track pair rather than `auto-fit`: the left column is a form and the
+ * right one is prose, so they should not be equally wide. The left track holds at
+ * least `--kb-split-column-min`; below that the pair folds to one column. */
+.columns {
+  display: grid;
+  grid-template-columns: minmax(var(--kb-split-column-min), 1fr) minmax(0, 2fr);
+  gap: var(--kb-space-5);
+  align-items: start;
+  min-width: 0;
+}
+
+.column {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kb-space-4);
+  min-width: 0;
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--kb-space-4);
+  flex-wrap: wrap;
+}
+
+.headerText {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kb-space-1);
+  min-width: 0;
+}
+
+.title {
+  margin: 0;
+  font-size: var(--kb-size-title);
+  line-height: var(--kb-leading-title);
+  font-weight: 600;
+  color: var(--kb-text-primary);
+}
+
+.description {
+  margin: 0;
+  font-size: var(--kb-size-body-sm);
+  line-height: var(--kb-leading-body-sm);
+  color: var(--kb-text-secondary);
+}
+
+.controls {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kb-space-3);
+  padding: var(--kb-space-4);
+  border: 1px solid var(--kb-border-subtle);
+  border-radius: var(--kb-radius-lg);
+  background: var(--kb-bg-surface);
+}
+
+/* `minmax(0, 1fr)` rather than a `minmax(Npx, 1fr)` auto-fit: a bare pixel minimum
+ * is a size literal the token gate rightly rejects, and the fixed-column form with a
+ * breakpoint is what the sibling pages use. */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--kb-space-3);
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: var(--kb-space-3);
+  flex-wrap: wrap;
+}
+
+.timing {
+  font-size: var(--kb-size-caption);
+  color: var(--kb-text-tertiary);
+}
+
+.error {
+  display: flex;
+  align-items: center;
+  gap: var(--kb-space-2);
+  margin: 0;
+  padding: var(--kb-space-3) var(--kb-space-4);
+  border: 1px solid var(--kb-status-failed-border);
+  border-radius: var(--kb-radius-md);
+  background: var(--kb-status-failed-bg);
+  color: var(--kb-status-failed-text);
+  font-size: var(--kb-size-body-sm);
+  line-height: var(--kb-leading-body-sm);
+}
+
+.health {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kb-space-3);
+  padding: var(--kb-space-4);
+  border: 1px solid var(--kb-border-subtle);
+  border-radius: var(--kb-radius-lg);
+  background: var(--kb-bg-subtle);
+}
+
+.healthGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--kb-space-3);
+  margin: 0;
+}
+
+.healthItem {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kb-space-1);
+  margin: 0;
+}
+
+.healthLabel {
+  margin: 0;
+  font-size: var(--kb-size-caption);
+  line-height: var(--kb-leading-caption);
+  color: var(--kb-text-tertiary);
+}
+
+.healthValue {
+  margin: 0;
+  font-size: var(--kb-size-title);
+  line-height: var(--kb-leading-title);
+  font-weight: 600;
+  color: var(--kb-text-primary);
+}
+
+.hint {
+  display: flex;
+  align-items: center;
+  gap: var(--kb-space-2);
+  margin: 0;
+  font-size: var(--kb-size-body-sm);
+  line-height: var(--kb-leading-body-sm);
+  color: var(--kb-text-secondary);
+}
+
+.hits {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kb-space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hit {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kb-space-2);
+  padding: var(--kb-space-4);
+  border: 1px solid var(--kb-border-subtle);
+  border-radius: var(--kb-radius-lg);
+  background: var(--kb-bg-surface);
+}
+
+/* The head row mirrors the hit's identity/score fields; `min-width: 0` on the
+ * name is what lets a long file name truncate instead of pushing the score off. */
+.hitHead {
+  display: flex;
+  align-items: center;
+  gap: var(--kb-space-3);
+  flex-wrap: wrap;
+}
+
+.hitRank {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--kb-control-sm);
+  height: var(--kb-control-sm);
+  border-radius: var(--kb-radius-sm);
+  background: var(--kb-bg-subtle);
+  color: var(--kb-text-secondary);
+  font-size: var(--kb-size-caption);
+}
+
+.hitName {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--kb-size-body-sm);
+  line-height: var(--kb-leading-body-sm);
+  font-weight: 600;
+  color: var(--kb-text-primary);
+}
+
+.hitOrdinal,
+.hitRange {
+  flex: none;
+  font-size: var(--kb-size-caption);
+  color: var(--kb-text-tertiary);
+}
+
+.hitScore {
+  flex: none;
+  font-size: var(--kb-size-body-sm);
+  font-weight: 600;
+  color: var(--kb-text-primary);
+}
+
+/* The full chunk text. `pre-wrap` rather than `pre` so a long line wraps instead
+ * of forcing a horizontal scroll, and the max-height keeps one large chunk from
+ * pushing the remaining hits out of reach. */
+.hitText {
+  margin: 0;
+  padding: var(--kb-space-3);
+  max-height: var(--kb-log-max-height);
+  overflow: auto;
+  border-radius: var(--kb-radius-sm);
+  background: var(--kb-bg-subtle);
+  color: var(--kb-text-secondary);
+  font-family: var(--kb-font-mono);
+  font-size: var(--kb-size-caption);
+  line-height: var(--kb-leading-caption);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* The compact breakpoint folds the page's two columns into one, and the parameter
+ * and health grids with them, so a narrow main column stacks instead of squeezing.
+ * 720px is the ladder's own value and cannot come from a token: `@media` rejects
+ * `var()`.
+ *
+ * The column fold is stated here as well as in the `minmax(var(--kb-split-column-min))`
+ * track: the explicit breakpoint is what guarantees a single column once the main
+ * column itself is narrow, rather than relying on the track minimum alone. */
+@media (max-width: 720px) {
+  .columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .grid,
+  .healthGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

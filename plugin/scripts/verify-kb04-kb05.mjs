@@ -131,9 +131,26 @@ const shellCss = read('shell/AppShell.module.css')
   const hasAriaCurrent = /aria-current=\{active === item\.id \? 'page' : undefined\}/.test(shellTsx)
   check('KB-04 nav: selection marked with aria-current', hasAriaCurrent, 'aria-current="page" is set from a single active id')
 
-  // Six items, per §6.1.
+  // Five items: KB-09's revision removed the plugin's Q&A surface (RAG runs in the
+  // dsh conversation) but restored 检索验证, which is a diagnostic console for
+  // judging chunking and recall rather than a second place to ask questions.
+  // The count is asserted so the nav cannot silently grow a destination with
+  // nothing behind it.
   const itemCount = (shellTsx.match(/id: '[a-z]+', label:/g) ?? []).length
-  check('KB-04 nav: six destinations', itemCount === 6, `${itemCount} items in NAV_ITEMS`)
+  check('KB-04 nav: five destinations after the KB-09 revisions', itemCount === 5, `${itemCount} items in NAV_ITEMS`)
+  // Scoped to the NAV_ITEMS array itself: the surrounding comment legitimately
+  // names the removed destination to explain why it is gone.
+  const navArray = shellTsx.match(/export const NAV_ITEMS = \[[\s\S]*?\] as const/)?.[0] ?? ''
+  check(
+    'KB-04 nav: no Q&A destination survives',
+    navArray !== '' && !/RAG 问答/.test(navArray),
+    'RAG answering is served by the dsh conversation, not by a second panel',
+  )
+  check(
+    'KB-04 nav: the retrieval console is reachable',
+    /检索验证/.test(navArray),
+    'judging chunking and recall needs its own destination',
+  )
 
   // The selected treatment must come from tokens, not literals, and must differ
   // between light and dark per §7.5.

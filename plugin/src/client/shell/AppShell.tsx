@@ -24,13 +24,19 @@ import { SearchField } from '../components/SearchField.tsx'
 import { StorageUsageCard, type StorageUsage } from '../components/StorageUsageCard.tsx'
 import styles from './AppShell.module.css'
 
-/** The six primary navigation destinations, in spec order. */
+/**
+ * The primary navigation destinations, in spec order.
+ *
+ * RAG 问答 is omitted per KB-09's revised scope: RAG lives in the dsh conversation,
+ * so a nav entry pointing at a second Q&A surface would be a destination with
+ * nothing behind it. 检索测试 is present — it validates chunking and recall, which
+ * is a different job from answering.
+ */
 export const NAV_ITEMS = [
   { id: 'overview', label: '知识库总览', icon: 'collection' },
   { id: 'documents', label: '文档接入', icon: 'file' },
   { id: 'build', label: '索引构建', icon: 'layers' },
-  { id: 'retrieval', label: '检索测试', icon: 'search' },
-  { id: 'rag', label: 'RAG 问答', icon: 'sparkles' },
+  { id: 'retrieval', label: '检索验证', icon: 'search' },
   { id: 'settings', label: '设置', icon: 'settings' },
 ] as const
 

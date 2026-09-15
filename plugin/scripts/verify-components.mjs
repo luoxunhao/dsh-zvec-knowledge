@@ -126,6 +126,7 @@ const TIERS = new Map([
   ['ChunkPreview.module.css', { tier: 'container', why: 'preview panel; it reports rows and totals, no control of its own' }],
   ['CostEstimate.module.css', { tier: 'container', why: 'estimate readout; purely descriptive' }],
   ['BuildPage.module.css', { tier: 'container', why: 'page layout for the strategy configurator; the fields inside carry their own states' }],
+  ['RetrievalPage.module.css', { tier: 'container', why: 'diagnostic console layout: query form, health summary and hit cards; the field, switch and button inside carry their own states' }],
   ['SearchToolView.module.css', { tier: 'container', why: 'in-turn tool call card; its expand toggle is a button inside and the citation rows are markers' }],
   ['QuotaNotice.module.css', { tier: 'container', why: 'restricted-state banner; it reports the quota and names the remedy, and its meter is a marker' }],
   ['CreateCollectionDialog.module.css', { tier: 'container', why: 'dialog frame; its close control and fields carry their own states' }],
