@@ -93,17 +93,6 @@ export const QUANTIZER_OPTIONS: readonly QuantizerOption[] = [
   { value: 'none', label: '不量化', tradeoff: '不压缩，存储占用最高，召回最好' },
 ]
 
-/** Hybrid retrieval weights, summing to 1 (§5.6). */
-export interface HybridWeights {
-  /** Weight of the dense vector pass. */
-  dense: number
-  /** Weight of the full-text pass. */
-  fullText: number
-}
-
-/** Default hybrid weights: dense-leaning, since the corpus is prose. */
-export const HYBRID_DEFAULTS: HybridWeights = { dense: 0.6, fullText: 0.4 }
-
 /** One row of the chunk preview. */
 export interface PreviewRow {
   /** Ordinal within its document. */
@@ -276,23 +265,6 @@ export function validateChunking(config: ChunkingConfig): string | null {
   if (config.minChunkTokens < 0) return '最小分片不能为负'
   if (config.minChunkTokens > config.chunkTokens) {
     return `最小分片（${config.minChunkTokens}）不能大于分片长度（${config.chunkTokens}），否则所有分片都会被丢弃`
-  }
-  return null
-}
-
-/**
- * Validate hybrid retrieval weights.
- * @param weights - the weights.
- * @returns `null` when acceptable, otherwise the reason.
- */
-export function validateWeights(weights: HybridWeights): string | null {
-  if (!(weights.dense >= 0 && weights.dense <= 1)) return '稠密权重必须在 0 到 1 之间'
-  if (!(weights.fullText >= 0 && weights.fullText <= 1)) return '全文权重必须在 0 到 1 之间'
-  // The spec fixes the sum at 1: the fusion is a weighted blend, and weights that
-  // do not sum to 1 would silently rescale every score.
-  const sum = weights.dense + weights.fullText
-  if (Math.abs(sum - 1) > 1e-6) {
-    return `稠密与全文权重之和必须为 1，当前为 ${Number(sum.toFixed(2))}`
   }
   return null
 }

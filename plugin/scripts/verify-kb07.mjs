@@ -162,11 +162,12 @@ function buildProps(overrides = {}) {
   check('validation: the rejection names both values', minBad !== null && minBad.includes('200') && minBad.includes('100'), minBad ?? '-')
   check('validation: a sound config passes', strategy.validateChunking(strategy.CHUNKING_DEFAULTS) === null, 'defaults accepted')
 
-  // Weights must sum to 1: the fusion is a blend, and a different sum would
-  // silently rescale every score.
-  const weightsBad = strategy.validateWeights({ dense: 0.6, fullText: 0.6 })
-  check('validation: weights must sum to 1', weightsBad !== null && weightsBad.includes('之和必须为 1'), weightsBad ?? '(accepted!)')
-  check('validation: default weights pass', strategy.validateWeights({ dense: 0.6, fullText: 0.4 }) === null, '0.6 + 0.4')
+  // The hybrid weights control was removed (KB-FIX-02): the engine fuses with
+  // RRF, a rank fusion that accepts no weights, so there was nothing for a
+  // weight to configure. A control that gates submission while having no effect
+  // on results is worse than a missing one. This asserts the removal is total —
+  // neither the validator, the defaults, nor the draft field may come back.
+  check('weights: the dead weights API is gone', strategy.validateWeights === undefined && strategy.HYBRID_DEFAULTS === undefined, 'no validateWeights / HYBRID_DEFAULTS')
 
   // Index bounds.
   check('validation: M out of range is rejected', strategy.validateIndex({ ...strategy.INDEX_DEFAULTS, m: 2 }) !== null, 'M=2 rejected')

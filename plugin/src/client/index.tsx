@@ -70,7 +70,7 @@ export {
   type BuildPipelineProps, type LogLine, type StageId, type StageState, type StageView,
 } from './components/BuildPipeline.tsx'
 export {
-  BuildPage, validateChunkingDraft, validateWeightsDraft,
+  BuildPage, validateChunkingDraft,
   type BuildPageProps, type ChunkingDraft, type IndexDraft,
   type HostPreview, type HostCost, type HostModelOption, type HostQuantizerOption,
 } from './pages/BuildPage.tsx'

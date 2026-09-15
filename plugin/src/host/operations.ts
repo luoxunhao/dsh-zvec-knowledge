@@ -45,8 +45,8 @@ import { extractVerbatim, extractionSupport } from '../store/extract.ts'
 import { writeFileStreamed } from '../store/atomic.ts'
 import {
   CHUNKING_DEFAULTS, INDEX_DEFAULTS, estimateCost, planBuild, storedIndex,
-  validateChunking, validateIndex, validateWeights,
-  type ChunkingConfig, type CostEstimate, type EmbeddingModel, type HybridWeights, type PreviewResult,
+  validateChunking, validateIndex,
+  type ChunkingConfig, type CostEstimate, type EmbeddingModel, type PreviewResult,
 } from '../store/strategy.ts'
 import { startBuild, type BuildLogLine, type BuildProgress, type EmbedFn } from '../store/build.ts'
 import {
@@ -1200,5 +1200,5 @@ export function discardStaging(storeRoot: string, collectionId: string, slot: 'a
   markActive(storeRoot, collectionId, slot)
 }
 
-export type { ChunkingConfig, EmbeddingModel, HybridWeights, IndexConfig, PreviewResult, CostEstimate }
-export { CHUNKING_DEFAULTS, INDEX_DEFAULTS, validateWeights }
+export type { ChunkingConfig, EmbeddingModel, IndexConfig, PreviewResult, CostEstimate }
+export { CHUNKING_DEFAULTS, INDEX_DEFAULTS }

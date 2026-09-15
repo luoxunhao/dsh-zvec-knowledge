@@ -58,10 +58,6 @@ export interface IndexDraft {
   efConstruction: number
   /** Quantizer. */
   quantize: 'INT8' | 'INT4' | 'FP16' | 'none'
-  /** Dense weight in the hybrid blend. */
-  denseWeight: number
-  /** Full-text weight in the hybrid blend. */
-  fullTextWeight: number
 }
 
 /** Preview data as the host reports it. */
@@ -215,19 +211,6 @@ export function validateChunkingDraft(draft: ChunkingDraft): string | null {
 }
 
 /**
- * Validate the hybrid weights.
- * @param draft - the index draft.
- * @returns `null` when acceptable, otherwise the reason.
- */
-export function validateWeightsDraft(draft: IndexDraft): string | null {
-  const sum = draft.denseWeight + draft.fullTextWeight
-  if (Math.abs(sum - 1) > 1e-6) {
-    return `稠密与全文权重之和必须为 1，当前为 ${Number(sum.toFixed(2))}`
-  }
-  return null
-}
-
-/**
  * Render the index-build page.
  * @param props - drafts, host data and callbacks.
  * @returns the page.
@@ -246,7 +229,6 @@ export function BuildPage({
   // full rebuild anyway when the parameters no longer allow reuse.
   const [mode, setMode] = useState<'incremental' | 'full'>('incremental')
   const chunkingError = useMemo(() => validateChunkingDraft(chunking), [chunking])
-  const weightsError = useMemo(() => validateWeightsDraft(index), [index])
   const model = models.find(item => item.id === index.model)
 
   // Whether the host will actually build incrementally. Asked rather than assumed:
@@ -267,24 +249,6 @@ export function BuildPage({
     onIndexChange({ ...index, ...patch })
   }, [index, onIndexChange])
 
-  /**
-   * Move one weight and rebalance the other.
-   *
-   * The pair must sum to 1, so editing one necessarily moves the other; letting
-   * the user drive them independently would mean the invalid state is reachable
-   * and the submit button would have to be disabled, which is a worse experience
-   * for a constraint with only one degree of freedom.
-   * @param key - which weight is being edited.
-   * @param value - the new weight.
-   */
-  const setWeight = (key: 'denseWeight' | 'fullTextWeight', value: number): void => {
-    const clamped = Math.max(0, Math.min(1, value))
-    const other = Number((1 - clamped).toFixed(2))
-    patchIndex(key === 'denseWeight'
-      ? { denseWeight: clamped, fullTextWeight: other }
-      : { fullTextWeight: clamped, denseWeight: other })
-  }
-
   if (collectionId === null) {
     return (
       <EmptyState
@@ -295,7 +259,7 @@ export function BuildPage({
     )
   }
 
-  const submitDisabled = running || chunkingError !== null || weightsError !== null || !hasDocuments
+  const submitDisabled = running || chunkingError !== null || !hasDocuments
 
   return (
     <div className={styles.page}>
@@ -473,33 +437,22 @@ export function BuildPage({
           />
         </div>
 
-          <div className={styles.weights}>
-            <span className={styles.fieldLabel}>混合检索权重</span>
-            <div className={styles.grid}>
-              <NumberField
-                label="稠密向量"
-                value={index.denseWeight}
-                onChange={value => setWeight('denseWeight', value)}
-                min={0}
-                max={1}
-                step={0.05}
-              />
-              <NumberField
-                label="全文检索"
-                value={index.fullTextWeight}
-                onChange={value => setWeight('fullTextWeight', value)}
-                min={0}
-                max={1}
-                step={0.05}
-              />
-            </div>
-            <p className={styles.hint}>两者之和固定为 1，融合方式固定为 RRF</p>
-            {weightsError !== null && (
-              <p className={styles.error} role="alert">
-                <Icon name="alert" size={14} /> {weightsError}
-              </p>
-            )}
-          </div>
+        {/*
+          The hybrid weights control used to sit here. It is gone because it did
+          nothing: the pair was validated (must sum to 1), stored in the draft and
+          rendered as two number fields, but never reached `IndexConfig`, was never
+          persisted, and was never read by `search()` — which fuses with the
+          engine's own RRF, a ranker that takes no weights at all.
+
+          A control that gates submission while having no effect on results is
+          worse than a missing one: it advertises a capability the plugin does not
+          have. Measured, RRF also ranks the ground-truth chunk better than the
+          engine's weighted ranker (mean position 0.67 vs 5.50 over six queries,
+          with one query losing its correct hit entirely under weighting), so
+          wiring the weights up would have made retrieval worse. The spec's §5.6
+          weight row is therefore recorded as not applicable to RRF fusion rather
+          than implemented.
+        */}
           </section>
 
           {/* 4. Cost estimate — in the same column as the configuration it

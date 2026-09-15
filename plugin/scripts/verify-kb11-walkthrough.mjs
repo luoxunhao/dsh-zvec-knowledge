@@ -245,10 +245,11 @@ const readAbs = absolute => readFileSync(absolute, 'utf8')
   const documents = await import(new URL('../lib/store/documents.js', import.meta.url).href)
   const { assertValidConfig } = await import(new URL('../lib/config.js', import.meta.url).href)
 
+  // The `weights != 1` case is gone with the control itself (KB-FIX-02): RRF
+  // fusion takes no weights, so there is no weight constraint to state.
   const validations = [
     { what: 'overlap >= chunk', message: strategy.validateChunking({ ...strategy.CHUNKING_DEFAULTS, chunkTokens: 128, overlapTokens: 128 }) },
     { what: 'min > chunk', message: strategy.validateChunking({ ...strategy.CHUNKING_DEFAULTS, chunkTokens: 100, overlapTokens: 10, minChunkTokens: 200 }) },
-    { what: 'weights != 1', message: strategy.validateWeights({ dense: 0.6, fullText: 0.6 }) },
     { what: 'M out of range', message: strategy.validateIndex({ ...strategy.INDEX_DEFAULTS, m: 2 }) },
     { what: 'bad extension', message: documents.validateUpload('a.exe', 100) },
     { what: 'no extension', message: documents.validateUpload('noext', 100) },

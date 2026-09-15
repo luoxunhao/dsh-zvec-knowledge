@@ -108,8 +108,6 @@ const INDEX_FALLBACK: IndexDraft = {
   m: 32,
   efConstruction: 200,
   quantize: 'INT8',
-  denseWeight: 0.6,
-  fullTextWeight: 0.4,
 }
 
 /** The four stages before any build has run. Labels are mandatory (§5.3). */

@@ -19,7 +19,16 @@
  * documents actually are. Using it as `match_score` would produce scores that do
  * not mean what the spec's four confidence bands assume, so the fused result
  * keeps its rank order but each hit's `match_score` is taken from that hit's own
- * dense distance.
+ * dense distance. A hit the full-text pass contributed on its own has no dense
+ * distance, and therefore no similarity to report: it takes
+ * {@link FTS_ONLY_SCORE} instead.
+ *
+ * **This rule is enforced in one place and nowhere else.** An earlier revision
+ * honoured it for dense-correlated hits and then, on the fallback path, fed the
+ * *fused rank score* into `1 - s`. Because RRF scores are ~0.015, every
+ * full-text-only hit came out at ~0.985 and was stamped `strong`; the matching
+ * chunk scored below unrelated ones and the whole band spanned 0.004. There is
+ * now deliberately no arithmetic fallback to get wrong — see {@link search}.
  *
  * @module dsh-zvec-knowledge/store/retrieval
  */
@@ -31,7 +40,6 @@ import {
   chunkRowFromDoc, confidenceBand, toMatchScore,
   type ChunkRow, type ConfidenceBand,
 } from './collection.ts'
-
 /** One retrieval hit, as the tool and the UI both consume it. */
 export interface SearchHit {
   /** Source document id. */
@@ -76,6 +84,22 @@ export interface SearchResult {
 }
 
 /**
+ * Score assigned to a hit that only the full-text pass produced.
+ *
+ * Such a hit has no vector evidence: the query never came near it in embedding
+ * space, and the only reason it is in the list is that its text shares tokens
+ * with the query. That is weak evidence — a lexical coincidence at least as
+ * often as a real match — so it must not be scored as if a vector had agreed.
+ *
+ * The value is deliberately *below* the default 0.55 floor, so an fts-only hit
+ * is reported only when a deployment lowers the floor on purpose. Anything
+ * higher would let a keyword coincidence outrank a genuine semantic match, which
+ * is exactly the failure this constant replaces: the previous `1 - fusedScore`
+ * fallback produced ~0.985 for every one of them.
+ */
+export const FTS_ONLY_SCORE = 0.2
+
+/**
  * Run retrieval against an open collection.
  *
  * When `text` is present both passes run and the engine fuses them with RRF;
@@ -96,11 +120,16 @@ export function search(collection: ZVecCollection, request: SearchRequest, minSc
   })
 
   /**
-   * Dense distance per hit id. The fused list arrives without comparable scores,
-   * so each hit's own dense distance is what becomes its `match_score`.
+   * Dense similarity per hit id — the *only* source of `match_score`.
+   *
+   * This is the whole scoring contract: a hit is scored by how close its own
+   * vector is to the query. Nothing else may produce a score, because every
+   * other quantity the engine returns (the RRF fused rank, a weighted fused
+   * value) is a *ranking* number whose magnitude depends on the fusion
+   * constants, not on how relevant the document is.
    */
-  const denseScore = new Map<string, number>()
-  for (const doc of dense) denseScore.set(doc.id, toMatchScore(doc.score))
+  const denseSimilarity = new Map<string, number>()
+  for (const doc of dense) denseSimilarity.set(doc.id, toMatchScore(doc.score))
 
   let fused: ZVecDoc[] = dense
   let mode: SearchResult['mode'] = 'dense'
@@ -123,21 +152,52 @@ export function search(collection: ZVecCollection, request: SearchRequest, minSc
     }
   }
 
-  const hits: SearchHit[] = []
+  /**
+   * Score and filter in one pass, then take the best `topk`.
+   *
+   * Two rules, both of which the previous version broke:
+   *
+   * 1. **`match_score` comes from the dense pass or not at all.** A hit that
+   *    only the full-text pass produced has no vector evidence, so it is scored
+   *    by {@link FTS_ONLY_SCORE} — a fixed, explicitly low value — rather than by
+   *    `1 - fusedScore`. That fallback was silently catastrophic: the fused score
+   *    is an RRF rank sum of order 0.015, so `1 - 0.015 = 0.985` stamped *every*
+   *    full-text hit `strong` regardless of quality, with the whole band spanning
+   *    0.984–0.988 and the genuinely matching chunk scoring *below* unrelated
+   *    ones. A rank score is not a similarity and must never be read as one.
+   *
+   * 2. **The floor is applied before the cap, and the two are counted apart.**
+   *    The previous loop counted every skipped hit as `belowFloor` and broke at
+   *    `topk` mid-scan, so a run could return fewer hits than `topk` while
+   *    blaming the threshold, and fts-only hits could occupy the whole budget and
+   *    evict real vector matches entirely.
+   *
+   * Order is preserved from the fused list (the engine's ranking is what decides
+   * relevance order); only the *score* is normalised here.
+   */
+  const scored: { row: ChunkRow, matchScore: number }[] = []
   let belowFloor = 0
+  const seen = new Set<string>()
   for (const doc of fused) {
     const row = chunkRowFromDoc(doc)
     if (row === null) continue
-    // A full-text-only hit has no dense distance, so fall back to its fused
-    // rank-derived value; it still needs a bounded normalized score.
-    const matchScore = denseScore.get(doc.id) ?? toMatchScore(doc.score)
+    // The fused list can repeat an id across sub-queries; a hit is one hit.
+    if (seen.has(row.id)) continue
+    seen.add(row.id)
+    const matchScore = denseSimilarity.get(doc.id) ?? FTS_ONLY_SCORE
     if (matchScore < minScore) {
       belowFloor += 1
       continue
     }
-    hits.push({ ...toHit(row, matchScore) })
-    if (hits.length >= request.topk) break
+    scored.push({ row, matchScore })
   }
+
+  // The cap is applied after the floor, so `topk` counts *returned* hits and
+  // anything dropped here was dropped by the cap — not by the threshold, which
+  // is why it is not added to `belowFloor`.
+  const hits: SearchHit[] = scored
+    .slice(0, request.topk)
+    .map(({ row, matchScore }) => toHit(row, matchScore))
 
   return { hits, mode, belowFloor }
 }
