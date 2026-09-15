@@ -708,7 +708,15 @@ export class KnowledgeOperations {
       return { possible: false, reason: '索引参数已变更，需要全量重建' }
     }
 
-    if (meta.chunking === null) {
+    // `== null` rather than `=== null`: a collection written before the field
+    // existed has **no** `chunking` key at all, so `readMeta` yields `undefined`
+    // and a `=== null` guard does not fire. Execution then reached `sameChunking`,
+    // which reads `config.mode` on it and threw
+    // "Cannot read properties of undefined (reading 'mode')" — surfacing in the
+    // panel as a failed build plan, which disables every build control because the
+    // page cannot say whether an incremental build is allowed. Both absent and
+    // null mean the same thing here: the parameters are not known.
+    if (meta.chunking == null) {
       return { possible: false, reason: '无法确认上次构建使用的切分参数，为安全起见全量重建' }
     }
     if (!sameChunking(meta.chunking, chunking)) {
@@ -1301,11 +1309,19 @@ function reclaimStaleSlot(root: string, collectionId: string): void {
  * caller's value are built independently, so key order is not something either can
  * promise, and a text comparison would report a spurious change — forcing a full
  * rebuild of every document for no reason.
+ *
+ * A missing side is **not** equal. That direction is the safe one: an unreadable
+ * stored value means the current parameters cannot be proven to match, and
+ * reporting "changed" costs a full rebuild while reporting "same" would reuse
+ * chunks cut with parameters nobody can name. Callers should check the stored side
+ * before calling, but tolerating its absence here is what stops a malformed
+ * metadata file from throwing out of a read-only viability question.
  * @param left - one configuration.
  * @param right - the other.
  * @returns whether they describe the same chunking.
  */
-function sameChunking(left: ChunkingConfig, right: ChunkingConfig): boolean {
+function sameChunking(left: ChunkingConfig | null | undefined, right: ChunkingConfig): boolean {
+  if (left == null || right == null) return false
   return left.mode === right.mode
     && left.chunkTokens === right.chunkTokens
     && left.overlapTokens === right.overlapTokens

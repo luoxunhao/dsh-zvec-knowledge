@@ -492,6 +492,58 @@ check(
 )
 
 // ---------------------------------------------------------------------------
+// 13. A collection whose metadata predates a field must not crash the panel
+// ---------------------------------------------------------------------------
+
+// `incrementalViability` guarded with `meta.chunking === null`, but a collection
+// written before the field existed has **no** `chunking` key, so `readMeta` yields
+// `undefined` and the guard did not fire. Execution reached `sameChunking`, which
+// read `.mode` on it and threw "Cannot read properties of undefined (reading
+// 'mode')" — surfacing as a failed build-plan query, which disables every build
+// control because the page cannot say whether an incremental build is allowed.
+//
+// This is the live state of a real collection, so the case is not hypothetical.
+const legacyRoot = join(ROOT, 'tmp', 'fix-legacy-meta')
+rmSync(legacyRoot, { recursive: true, force: true })
+mkdirSync(join(legacyRoot, '.dsh-kb-zvec', 'kb_legacy_0001'), { recursive: true })
+// Metadata with no `chunking` and no `tokenizer`, as a pre-fix build wrote it.
+writeFileSync(
+  join(legacyRoot, '.dsh-kb-zvec', 'kb_legacy_0001', 'meta.json'),
+  JSON.stringify({
+    id: 'kb_legacy_0001', name: 'legacy', description: 'd',
+    createdAt: '2026-01-01T00:00:00.000Z', builtAt: '2026-01-01T00:00:00.000Z',
+    index: { kind: 'HNSW', m: 32, efConstruction: 200, quantize: 'INT8' },
+    active: 'a', chunks: 1, docs: 1,
+  }, null, 2),
+)
+
+const legacyOps = new KnowledgeOperations({ workspaceDir: legacyRoot, stateDir: '.dsh-kb-zvec' })
+const legacyChunking = {
+  mode: 'heading', chunkTokens: 1024, overlapTokens: 128, minChunkTokens: 64,
+  preserveCodeBlocks: true, splitTablesByRow: false,
+}
+let legacyResult
+let legacyThrew = null
+try {
+  legacyResult = legacyOps.incrementalViability(
+    'kb_legacy_0001', legacyChunking, { kind: 'HNSW', m: 32, efConstruction: 200, quantize: 'INT8' },
+  )
+} catch (error) {
+  legacyThrew = String(error instanceof Error ? error.message : error)
+}
+check(
+  'legacy: a metadata file without a chunking key does not throw',
+  legacyThrew === null,
+  legacyThrew === null ? `returned possible=${legacyResult.possible}` : `THREW "${legacyThrew}"`,
+)
+check(
+  'legacy: the unknown-parameters answer forces the safe full rebuild',
+  legacyThrew === null && legacyResult.possible === false,
+  legacyResult === undefined ? '(no result)' : String(legacyResult.reason),
+)
+legacyOps.dispose()
+
+// ---------------------------------------------------------------------------
 
 console.log('')
 for (const line of passes) console.log(`  PASS  ${line}`)

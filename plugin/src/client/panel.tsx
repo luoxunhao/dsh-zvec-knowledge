@@ -359,7 +359,13 @@ export function KnowledgeBasePanel({ state, port }: KnowledgeBasePanelProps): Re
         const stored = await port.storedStrategy(selectedCollection)
         if (cancelled || stored === null) return
         setChunking(stored.chunking)
-        setIndex(stored.index)
+        // Merge rather than replace. The host stores only the engine-facing half of
+        // the index config (kind/M/efConstruction/quantizer) — `model` is a
+        // client-side selector value it never persists. Assigning `stored.index`
+        // wholesale therefore set `model` to undefined, leaving the model selector
+        // with a value that matches none of its options. Keeping the current draft's
+        // `model` preserves the id the selector was seeded with.
+        setIndex(current => ({ ...current, ...stored.index }))
       } catch {
         // A missing stored strategy is not an error: the defaults are valid, and
         // surfacing a failure here would block a first build.
