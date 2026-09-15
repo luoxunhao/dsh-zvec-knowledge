@@ -108,7 +108,7 @@ export function BuildPipeline({
         // who sees old results mid-rebuild reads it as data corruption.
         <p className={styles.notice} role="status">
           <Icon name="info" size={14} />
-          重建进行中：检索工具与问答仍返回上一次索引快照，构建完成后自动切换到新索引。
+          重建进行中：会话中的 dsh_kb_search 仍返回上一次索引快照，构建完成后自动切换到新索引。
         </p>
       )}
 
