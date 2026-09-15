@@ -227,6 +227,50 @@ check(
 )
 
 // ---------------------------------------------------------------------------
+// 6. Definitions that existed twice must exist once (S1, S10)
+// ---------------------------------------------------------------------------
+
+// `confidenceBand` was an identical four-branch cascade in both the store and the
+// tool, while the tool's comment claimed the thresholds "are stated once here".
+// `QUANTIZER_OPTIONS` was likewise duplicated between host and client, so the
+// spec-mandated compression/recall copy could be corrected in one and not the
+// other — and the user reads the client's.
+const { readFileSync: readSync, readdirSync: readDirSync, statSync: statSync2 } = await import('node:fs')
+
+/** Collect .ts/.tsx sources recursively. */
+function sourcesUnder(dir) {
+  const out = []
+  for (const entry of readDirSync(dir)) {
+    const full = join(dir, entry)
+    if (statSync2(full).isDirectory()) out.push(...sourcesUnder(full))
+    else if (/\.tsx?$/.test(entry)) out.push(full)
+  }
+  return out
+}
+const allSources = [...sourcesUnder(join(ROOT, 'src', 'store')), ...sourcesUnder(join(ROOT, 'src', 'host')), ...clientFiles]
+const bandDefinitions = allSources.filter(file => /function confidenceBand|const confidenceBand/.test(readSync(file, 'utf8')))
+check(
+  'S1: confidenceBand is defined exactly once',
+  bandDefinitions.length === 1,
+  `${bandDefinitions.length} definition(s): ${bandDefinitions.map(f => f.split(/[\\/]/).pop()).join(', ')}`,
+)
+
+const quantizerDefinitions = allSources.filter(file => /^const QUANTIZER_OPTIONS/m.test(readSync(file, 'utf8')))
+check(
+  'S10: the quantizer option copy has one source',
+  quantizerDefinitions.length <= 1,
+  `${quantizerDefinitions.length} definition(s): ${quantizerDefinitions.map(f => f.split(/[\\/]/).pop()).join(', ') || '(host only)'}`,
+)
+
+const { confidenceBand: bandFromStore } = await import(new URL('../lib/store/collection.js', import.meta.url).href)
+const { confidenceBand: bandFromTool } = await import(new URL('../lib/host/search-tool.js', import.meta.url).href)
+check(
+  'S1: the tool and the store agree on every band boundary',
+  bandFromStore === bandFromTool,
+  bandFromStore === bandFromTool ? 'same function instance' : 'the two have drifted apart',
+)
+
+// ---------------------------------------------------------------------------
 
 console.log('')
 for (const line of passes) console.log(`  PASS  ${line}`)

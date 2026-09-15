@@ -223,6 +223,10 @@ export function createHostPort(): KnowledgeBasePort {
       return await call<{ dimension: number, model: string | null, metric: string }>('getEmbeddingInfo', {})
     },
 
+    quantizerOptions: async (): Promise<{ value: string, label: string, tradeoff: string }[]> => {
+      return await call<{ value: string, label: string, tradeoff: string }[]>('getQuantizerOptions', {})
+    },
+
     // Submit-and-poll. The host runs the build as a job of its own, so this call
     // resolves as soon as the job is launched and the panel polls `buildStatus`
     // for the real stages, counts and log lines. The previous revision held the

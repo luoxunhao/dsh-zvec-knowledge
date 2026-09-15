@@ -139,7 +139,10 @@ export function seatVectors(
  * @param config - endpoint configuration.
  * @param onWarn - sink for non-fatal protocol notes (a provider without `index`).
  * @returns the embedding provider.
- * @throws {EmbeddingError} when the API key environment variable is unset.
+ * @throws {EmbeddingError} when `apiKeyEnv` names a variable that is unset or
+ * empty. A **blank** `apiKeyEnv` means the endpoint needs no authentication, so
+ * no throw occurs — the previous wording claimed an unset key always threw, which
+ * the blank default could never reach.
  */
 export function createEmbeddingProvider(
   config: EmbeddingConfig,

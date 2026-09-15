@@ -143,6 +143,14 @@ export interface KnowledgeBasePort {
    */
   embeddingInfo?: () => Promise<{ dimension: number, model: string | null, metric: string }>
   /**
+   * The quantizer choices and their trade-off copy (§5.6).
+   *
+   * Served from the host so the compression/recall wording has one source; the
+   * client previously carried an identical copy, which could be corrected on the
+   * host without the user-visible one changing.
+   */
+  quantizerOptions?: () => Promise<{ value: string, label: string, tradeoff: string }[]>
+  /**
    * Launch the index build.
    *
    * **Returns as soon as the build is started, not when it finishes.** The build

@@ -44,9 +44,9 @@ import {
 import { extractVerbatim, extractionSupport } from '../store/extract.ts'
 import { writeFileStreamed } from '../store/atomic.ts'
 import {
-  CHUNKING_DEFAULTS, INDEX_DEFAULTS, estimateCost, planBuild, storedIndex,
+  CHUNKING_DEFAULTS, INDEX_DEFAULTS, QUANTIZER_OPTIONS, estimateCost, planBuild, storedIndex,
   validateChunking, validateIndex,
-  type ChunkingConfig, type CostEstimate, type EmbeddingModel, type PreviewResult,
+  type ChunkingConfig, type CostEstimate, type EmbeddingModel, type PreviewResult, type QuantizerOption,
 } from '../store/strategy.ts'
 import { startBuild, type BuildLogLine, type BuildProgress, type EmbedFn } from '../store/build.ts'
 import {
@@ -645,6 +645,21 @@ export class KnowledgeOperations {
       model: this.embeddingModel ?? null,
       metric: 'cosine',
     }
+  }
+
+  /**
+   * The quantizer choices, with the copy the spec requires for each.
+   *
+   * Served from here so the trade-off text has one source. It previously existed
+   * twice — here and as a client-side constant — which is how the client came to
+   * display a compression claim the engine does not honour while the host's own
+   * copy could have been corrected independently. §5.6 requires the option text to
+   * name both the compression ratio and the recall loss, so a divergence between
+   * the two copies is a user-visible correctness problem, not a cosmetic one.
+   * @returns quantizer options in display order.
+   */
+  quantizerOptions(): readonly QuantizerOption[] {
+    return QUANTIZER_OPTIONS
   }
 
   /**

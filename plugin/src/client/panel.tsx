@@ -162,13 +162,14 @@ function modelOptions(info: { dimension: number, model: string | null } | null):
   }]
 }
 
-/** Quantizer options, each stating the compression/recall trade-off (§5.6). */
-const QUANTIZER_OPTIONS: HostQuantizerOption[] = [
-  { value: 'INT8', label: 'INT8', tradeoff: '相对 FP32 压缩 4×，召回损失小，推荐默认' },
-  { value: 'INT4', label: 'INT4', tradeoff: '相对 FP32 压缩 8×，召回损失明显增大' },
-  { value: 'FP16', label: 'FP16', tradeoff: '相对 FP32 压缩 2×，召回损失极小' },
-  { value: 'none', label: '不量化', tradeoff: '不压缩，存储占用最高，召回最好' },
-]
+/**
+ * Quantizer options come from the host (`quantizerOptions`), not from a local
+ * copy. The trade-off copy is the spec's §5.6 requirement and a user-visible
+ * claim, so a second copy here — which existed and had already drifted in
+ * meaning from the engine's real behaviour — could be corrected host-side without
+ * the one the user reads changing.
+ */
+const QUANTIZER_FALLBACK: HostQuantizerOption[] = []
 
 /**
  * Project a host document into the page's shape.
@@ -315,9 +316,20 @@ export function KnowledgeBasePanel({ state, port }: KnowledgeBasePanelProps): Re
   // width is a property of the schema the host creates, and a client-side constant
   // here is exactly how the configurator displayed 1024 against a 2560 schema.
   const [embedding, setEmbedding] = useState<{ dimension: number, model: string | null, metric: string } | null>(null)
+  const [quantizers, setQuantizers] = useState<HostQuantizerOption[]>(QUANTIZER_FALLBACK)
   useEffect(() => {
     let cancelled = false
     const load = async (): Promise<void> => {
+      // Both grids describe the deployment, so they are fetched together.
+      if (port?.quantizerOptions !== undefined) {
+        try {
+          const options = await port.quantizerOptions()
+          if (!cancelled) setQuantizers(options as HostQuantizerOption[])
+        } catch {
+          // Leave the list empty: the selector then offers nothing rather than
+          // invented trade-off text the engine may not honour.
+        }
+      }
       if (port?.embeddingInfo === undefined) return
       try {
         const info = await port.embeddingInfo()
@@ -646,7 +658,7 @@ export function KnowledgeBasePanel({ state, port }: KnowledgeBasePanelProps): Re
             previewError={previewError}
             cost={cost}
             models={modelOptions(embedding)}
-            quantizers={QUANTIZER_OPTIONS}
+            quantizers={quantizers}
             stages={stages}
             processed={processed}
             total={total}

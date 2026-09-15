@@ -301,6 +301,11 @@ export async function dispatch(
       // client-side, so a 2560 deployment displayed 1024.
       return operations.embeddingInfo()
 
+    case 'getQuantizerOptions':
+      // §5.6 requires each option to state its compression ratio and recall loss.
+      // Served rather than duplicated client-side so the copy has one source.
+      return operations.quantizerOptions()
+
     case 'getQuota':
       return operations.usage()
 

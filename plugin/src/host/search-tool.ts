@@ -38,24 +38,17 @@ export const DEFAULT_TOPK = 8
 /** Hard ceiling on `topk`, so one call cannot pull an unbounded result set. */
 export const MAX_TOPK = 50
 
-/** Confidence bands, from the design spec §3.4. */
-export type ConfidenceBand = 'strong' | 'relevant' | 'fair' | 'low'
-
 /**
- * Classify a normalized score into the spec's four bands.
+ * Confidence bands, from the design spec §3.4.
  *
- * Thresholds are the spec's: ≥0.85 strong, 0.70–0.85 relevant, 0.55–0.70 fair,
- * below 0.55 low. They are stated once here and the interface renders whatever
- * this returns, so the two cannot drift into different bands for one score.
- * @param matchScore - normalized score in [0, 1].
- * @returns the band.
+ * Re-exported from the store rather than redefined. It previously existed twice —
+ * an identical four-branch cascade here and in `store/collection.ts` — while this
+ * file's comment claimed the thresholds "are stated once here". They were not, so
+ * changing the spec's boundaries in one place would have left the tool describing
+ * a hit with one band while the page rendered another for the same score.
  */
-export function confidenceBand(matchScore: number): ConfidenceBand {
-  if (matchScore >= 0.85) return 'strong'
-  if (matchScore >= 0.70) return 'relevant'
-  if (matchScore >= 0.55) return 'fair'
-  return 'low'
-}
+export { confidenceBand, type ConfidenceBand } from '../store/collection.ts'
+import type { ConfidenceBand } from '../store/collection.ts'
 
 /**
  * Render the stable, compact text a model reads for a hit list.
