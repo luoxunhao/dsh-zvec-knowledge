@@ -36,7 +36,7 @@
 import type { ZVecCollection, ZVecDoc } from '@zvec/zvec'
 import { ZVecIndexType } from '@zvec/zvec'
 import {
-  FIELD_TEXT, VECTOR_FIELD, documentFilter,
+  FIELD_DOC_ID, FIELD_TEXT, VECTOR_FIELD, documentFilter,
   chunkRowFromDoc, confidenceBand, toMatchScore,
   type ChunkRow, type ConfidenceBand,
 } from './collection.ts'
@@ -221,6 +221,18 @@ function toHit(row: ChunkRow, matchScore: number): SearchHit {
 }
 
 /**
+ * Upper bound on a counting query's result set.
+ *
+ * The engine has no count-by-filter call, so a count is a query with the filter
+ * bound. This is deliberately far above any realistic per-document chunk count
+ * (a 32 MB document at the default chunk size produces on the order of 10^4), but
+ * it is a real ceiling: a document exceeding it would be reported as holding this
+ * many chunks. Stated rather than hidden, because a silently truncated count looks
+ * exactly like a correct one.
+ */
+const MAX_COUNT_HITS = 1_000_000
+
+/**
  * Run a dense-only search, for callers that have no query text.
  * @param collection - open engine handle.
  * @param vector - query vector.
@@ -240,16 +252,23 @@ export function searchDense(
 /**
  * Count chunks whose `doc_id` matches, used by the document list.
  *
- * Runs a scalar-only query rather than walking the collection: an inverted index
- * on `doc_id` makes this a lookup, and a walk would load every vector in the
- * collection to answer a count.
+ * A filtered query with `outputFields: ['doc_id']` rather than an unfiltered one:
+ * the inverted index on `doc_id` turns the filter into a lookup, and naming the
+ * single scalar field keeps the chunk text off the wire. The previous version
+ * selected every field to answer a count, which is the walk its own comment said it
+ * avoided — and it also counted by materialising rows and projecting each one
+ * through `chunkRowFromDoc`, so a malformed row would have been silently dropped
+ * from the total rather than reported.
  * @param collection - open engine handle.
  * @param docId - source document id.
  * @returns number of chunks belonging to the document.
  */
 export function countChunksForDocument(collection: ZVecCollection, docId: string): number {
-  const hits = collection.querySync({ filter: documentFilter(docId), topk: 100000 })
-  return hits.filter(doc => chunkRowFromDoc(doc) !== null).length
+  return collection.querySync({
+    filter: documentFilter(docId),
+    topk: MAX_COUNT_HITS,
+    outputFields: [FIELD_DOC_ID],
+  }).length
 }
 
 /**

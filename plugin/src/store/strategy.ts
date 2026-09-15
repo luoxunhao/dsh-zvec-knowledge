@@ -273,18 +273,28 @@ export function estimateCost(plan: PreviewResult, index: IndexConfig, dimension:
  *
  * The overlap rule is the one the spec calls out explicitly. It is checked here
  * rather than only in the widget because the widget is not the only caller.
+ *
+ * **Order matters, and this order is deliberate.** Checking `overlap >= chunk`
+ * first meant that lowering the chunk size below the *default* overlap reported
+ * "重叠长度（128）必须小于分片长度（64）" — naming the wrong parameter, because
+ * the user had not touched the overlap at all. The genuinely broken relation in
+ * that configuration is `minChunkTokens > chunkTokens`, so the checks that depend
+ * only on the field the user changed come first, and the cross-field overlap rule
+ * last. Each violation then names the parameter actually at fault.
  * @param config - chunking configuration.
  * @returns `null` when acceptable, otherwise the reason.
  */
 export function validateChunking(config: ChunkingConfig): string | null {
   if (config.chunkTokens <= 0) return '分片长度必须大于 0'
   if (config.overlapTokens < 0) return '重叠长度不能为负'
-  if (config.overlapTokens >= config.chunkTokens) {
-    return `重叠长度（${config.overlapTokens}）必须小于分片长度（${config.chunkTokens}），否则切分无法终止`
-  }
   if (config.minChunkTokens < 0) return '最小分片不能为负'
   if (config.minChunkTokens > config.chunkTokens) {
     return `最小分片（${config.minChunkTokens}）不能大于分片长度（${config.chunkTokens}），否则所有分片都会被丢弃`
+  }
+  // Last, because it compares two fields and would otherwise be blamed for a
+  // configuration whose real problem is one of the relations above.
+  if (config.overlapTokens >= config.chunkTokens) {
+    return `重叠长度（${config.overlapTokens}）必须小于分片长度（${config.chunkTokens}），否则切分无法终止`
   }
   return null
 }

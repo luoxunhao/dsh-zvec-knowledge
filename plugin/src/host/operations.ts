@@ -54,7 +54,7 @@ import {
   awaitJobSettled, cancelJob, disposeJobs, jobSnapshot, logPathFor, startJob,
   type JobSnapshot,
 } from '../store/job.ts'
-import { EMBEDDING_DIMENSION, TOKENIZER_NAME, type IndexConfig } from '../store/collection.ts'
+import { EMBEDDING_DIMENSION, TOKENIZER_NAME, documentFilter, type IndexConfig } from '../store/collection.ts'
 import { admit, quotaState, type Quota, type QuotaState } from '../store/quota.ts'
 import { search, type SearchResult } from '../store/retrieval.ts'
 import { rmSync } from 'node:fs'
@@ -558,7 +558,12 @@ export class KnowledgeOperations {
     try {
       withServed(root, collectionId, handle => {
         if (handle === null) return
-        handle.deleteByFilterSync(`doc_id = '${id.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`)
+        // Through `documentFilter` rather than an inline template. The id is
+        // user-controlled (it derives from an uploaded file name), so the escaping
+        // here is load-bearing: a hand-copied version that drifted from the shared
+        // one would end the string literal early and let a crafted file name change
+        // what the delete expression matches.
+        handle.deleteByFilterSync(documentFilter(id))
       })
     } catch {
       // The snapshot may not exist yet; the record removal is what mattered.

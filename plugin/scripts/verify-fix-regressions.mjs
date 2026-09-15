@@ -437,6 +437,61 @@ for (const option of QUANTIZER_OPTIONS) {
 }
 
 // ---------------------------------------------------------------------------
+// 10. Validation must name the parameter actually at fault (P3)
+// ---------------------------------------------------------------------------
+
+// With the default 128 overlap, lowering the chunk size to 64 reported
+// "重叠长度（128）必须小于分片长度（64）" — naming the overlap, which the user had
+// not touched. The genuinely broken relation is minChunkTokens > chunkTokens.
+const { validateChunking } = await import(new URL('../lib/store/strategy.js', import.meta.url).href)
+
+const masked = validateChunking({
+  mode: 'heading', chunkTokens: 64, overlapTokens: 128, minChunkTokens: 200,
+  preserveCodeBlocks: true, splitTablesByRow: false,
+})
+check(
+  'P3: the min>chunk violation is reported, not masked by the overlap rule',
+  masked !== null && /最小分片/.test(masked),
+  String(masked),
+)
+
+const overlapOnly = validateChunking({
+  mode: 'heading', chunkTokens: 64, overlapTokens: 128, minChunkTokens: 8,
+  preserveCodeBlocks: true, splitTablesByRow: false,
+})
+check(
+  'P3: a genuine overlap violation is still reported',
+  overlapOnly !== null && /重叠长度/.test(overlapOnly),
+  String(overlapOnly),
+)
+
+// ---------------------------------------------------------------------------
+// 11. Dead forwarding code must not accumulate (S4)
+// ---------------------------------------------------------------------------
+
+// `documentChunkFilter` was a pure pass-through to `documentFilter` with no
+// callers, leaving three names for one filter builder.
+const buildSource = readSync(join(ROOT, 'src', 'store', 'build.ts'), 'utf8')
+check(
+  'S4: the uncalled filter pass-through is gone',
+  !/documentChunkFilter/.test(buildSource),
+  /documentChunkFilter/.test(buildSource) ? 'still present' : 'removed',
+)
+
+// ---------------------------------------------------------------------------
+// 12. Counting must not select fields it does not read (S8)
+// ---------------------------------------------------------------------------
+
+// countChunksForDocument selected every field to answer a count, which is the
+// "walk that loads every vector" its own comment claimed to avoid.
+const retrievalSource = readSync(join(ROOT, 'src', 'store', 'retrieval.ts'), 'utf8')
+check(
+  'S8: the per-document count names the single field it reads',
+  /outputFields:\s*\[FIELD_DOC_ID\]/.test(retrievalSource),
+  /outputFields/.test(retrievalSource) ? 'outputFields present' : 'count still selects every field',
+)
+
+// ---------------------------------------------------------------------------
 
 console.log('')
 for (const line of passes) console.log(`  PASS  ${line}`)

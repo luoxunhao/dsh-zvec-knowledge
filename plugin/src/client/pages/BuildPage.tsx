@@ -196,16 +196,20 @@ const INDEX_OPTIONS = [
  * Validate the chunking draft's relational rules.
  *
  * Checked here as well as on the host because the message has to appear next to
- * the field the user is editing, not only after a round trip.
+ * the field the user is editing, not only after a round trip. The two agree on
+ * order as well as on wording: checking `overlap >= chunk` first reported the
+ * overlap as the problem when the user had only lowered the chunk size, naming a
+ * parameter they had not touched. Rules about a single field come first; the
+ * cross-field overlap rule comes last.
  * @param draft - the chunking draft.
  * @returns `null` when acceptable, otherwise the reason.
  */
 export function validateChunkingDraft(draft: ChunkingDraft): string | null {
-  if (draft.overlapTokens >= draft.chunkTokens) {
-    return `重叠长度（${draft.overlapTokens}）必须小于分片长度（${draft.chunkTokens}），否则切分无法终止`
-  }
   if (draft.minChunkTokens > draft.chunkTokens) {
     return `最小分片（${draft.minChunkTokens}）不能大于分片长度（${draft.chunkTokens}），否则所有分片都会被丢弃`
+  }
+  if (draft.overlapTokens >= draft.chunkTokens) {
+    return `重叠长度（${draft.overlapTokens}）必须小于分片长度（${draft.chunkTokens}），否则切分无法终止`
   }
   return null
 }

@@ -524,15 +524,5 @@ function countChunks(handle: ZVecCollection): number {
   }
 }
 
-/**
- * Filter expression matching one document's chunks, re-exported so a caller does
- * not reach into the collection module for it.
- * @param docId - source document id.
- * @returns filter expression matching that document's chunks.
- */
-export function documentChunkFilter(docId: string): string {
-  return documentFilter(docId)
-}
-
 /** Field names the build writes, re-exported for the verification path. */
 export { FIELD_DOC_ID, FIELD_TEXT, VECTOR_FIELD, chunkRowFromDoc }
