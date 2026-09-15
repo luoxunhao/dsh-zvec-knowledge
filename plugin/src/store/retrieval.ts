@@ -81,6 +81,17 @@ export interface SearchResult {
   mode: 'hybrid' | 'dense'
   /** Hits dropped because they fell below the configured floor. */
   belowFloor: number
+  /**
+   * Hits the full-text pass produced that carry no vector evidence, whether
+   * returned or filtered.
+   *
+   * These score at {@link FTS_ONLY_SCORE}, so any meaningful floor removes them —
+   * but an exact token match is deterministic evidence a similarity score cannot
+   * contradict. Reporting the count lets a caller recognise "the query named a
+   * term that exists, and the threshold may be hiding it", which a bare
+   * `belowFloor` cannot express.
+   */
+  ftsOnlyHits: number
 }
 
 /**
@@ -177,6 +188,7 @@ export function search(collection: ZVecCollection, request: SearchRequest, minSc
    */
   const scored: { row: ChunkRow, matchScore: number }[] = []
   let belowFloor = 0
+  let ftsOnlyHits = 0
   const seen = new Set<string>()
   for (const doc of fused) {
     const row = chunkRowFromDoc(doc)
@@ -185,6 +197,7 @@ export function search(collection: ZVecCollection, request: SearchRequest, minSc
     if (seen.has(row.id)) continue
     seen.add(row.id)
     const matchScore = denseSimilarity.get(doc.id) ?? FTS_ONLY_SCORE
+    if (matchScore === FTS_ONLY_SCORE) ftsOnlyHits += 1
     if (matchScore < minScore) {
       belowFloor += 1
       continue
@@ -199,7 +212,7 @@ export function search(collection: ZVecCollection, request: SearchRequest, minSc
     .slice(0, request.topk)
     .map(({ row, matchScore }) => toHit(row, matchScore))
 
-  return { hits, mode, belowFloor }
+  return { hits, mode, belowFloor, ftsOnlyHits }
 }
 
 /**

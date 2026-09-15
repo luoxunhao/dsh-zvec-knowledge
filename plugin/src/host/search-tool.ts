@@ -39,6 +39,13 @@ import { KB_SEARCH_TOOL } from '../shared/contract.ts'
 export type SearchOperations = Pick<KnowledgeOperations, 'embedQuery' | 'search'> & {
   /** Resolves the floor in force for one collection, when the host supports it. */
   retrievalSettings?: (collectionId: string) => { minScore: number, topk: number, source: 'collection' | 'deployment' }
+  /**
+   * Lists the collections a caller may choose from, for the discovery path.
+   *
+   * Optional so an existing test double keeps working: a tool double that never
+   * omits `collection` never reaches it.
+   */
+  discoverCollections?: () => Promise<{ id: string, name: string, builtAt: string | null }[]>
 }
 
 // The wire name is declared once in `shared/contract.ts` and re-exported here, so
@@ -132,19 +139,37 @@ export interface ToolOutput {
   /** Whether the search itself succeeded. A false value still carries a usable message. */
   ok: boolean
   /** Machine-readable failure kind, absent on success. */
-  reason?: 'empty_result' | 'collection_not_found' | 'invalid_argument' | 'timeout' | 'cancelled' | 'internal_error'
+  reason?: 'empty_result' | 'collection_not_found' | 'invalid_argument' | 'timeout' | 'cancelled' | 'internal_error' | 'discovery_needed'
   /** One-line summary a model can act on. */
   summary: string
-  /** The collection searched. */
-  collection: string
+  /** The collection searched, when one was. */
+  collection?: string
   /** The query, echoed. */
-  query: string
+  query?: string
   /** Which passes ran. */
   mode: 'hybrid' | 'dense'
   /** Hits, best first. */
   hits: ToolHit[]
   /** Hits dropped by the score floor. */
   below_floor: number
+  /**
+   * Hits the full-text pass produced that have no vector evidence.
+   *
+   * These are scored at the fixed {@link FTS_ONLY_SCORE}, which any meaningful
+   * floor filters — so a query that is a proper name can lose its *exact* match
+   * to the threshold while the dense pass scores the same chunk poorly. Reporting
+   * the count lets the model recognise "a lower floor may surface exact matches"
+   * instead of reading the miss as absence.
+   */
+  fts_only_hits: number
+  /**
+   * The collections available, present on `discovery_needed` instead of hits.
+   *
+   * `collection` is optional on the input precisely because the model cannot guess
+   * a `kb_<domain>_<hex>` id; this is what it chooses from, carrying the built
+   * state so it avoids one that would answer nothing.
+   */
+  collections?: { id: string, name: string, built: boolean }[]
 }
 
 /** Bounds on the tool's cooperative timeout. */
@@ -192,6 +217,191 @@ export function defineKbSearchTool(
   minScore: number,
   timeoutMs: number = SEARCH_TIMEOUT_MS,
 ) {
+  /**
+   * The tool's body, named so the discovery path can re-enter it with a resolved
+   * collection id. A method could close over `this`, but the DSL owns how
+   * `execute` is invoked and a named closure does not depend on that binding
+   * surviving.
+   * @param args - the call's arguments.
+   * @param exec - the caller's execution context.
+   * @returns the tool's output.
+   */
+  const runTool = async (
+    args: { query?: string, collection?: string, topk?: number },
+    exec: { signal: AbortSignal },
+  ): Promise<ToolOutput> => {
+    const query = args.query ?? ''
+    const collection = args.collection ?? null
+    const topk = Math.min(Math.max(args.topk ?? DEFAULT_TOPK, 1), MAX_TOPK)
+
+    /** Build a failure value with a usable message. */
+    const fail = (
+      reason: ToolOutput['reason'],
+      summary: string,
+      mode: ToolOutput['mode'] = 'dense',
+    ): ToolOutput => ({
+      ok: false,
+      ...(reason === undefined ? {} : { reason }),
+      summary,
+      ...(collection === null ? {} : { collection }),
+      ...(query === '' ? {} : { query }),
+      mode,
+      hits: [],
+      below_floor: 0,
+      fts_only_hits: 0,
+    })
+
+    if (query.trim() === '') {
+      return fail('invalid_argument', 'query 不能为空，请给出要检索的自然语言问题。')
+    }
+
+    // Discovery: with no collection named, the tool answers "which collections
+    // exist" rather than failing. A model cannot guess a kb_<domain>_<hex> id, so
+    // the failure mode this replaces (`collection_not_found`) gave it nothing to
+    // correct with. One *built* collection is searched directly — the single-
+    // collection deployment is the common case and needs no extra round trip —
+    // while several present their list, with built state, for the model to choose
+    // from.
+    if (collection === null) {
+      const listed = await operations.discoverCollections?.() ?? []
+      // One built collection is the unambiguous target: re-enter with it named. One
+      // *unbuilt* collection is not, because searching it would answer nothing —
+      // the model is told that instead of receiving empty hits it cannot
+      // distinguish from absence.
+      if (listed.length === 1 && listed[0]?.builtAt !== null) {
+        const only = listed[0] as { id: string }
+        return runTool({ ...args, collection: only.id }, exec)
+      }
+      const summary = listed.length === 0
+        ? '当前没有知识库。请先在知识库页面创建并上传文档。'
+        : `当前有 ${listed.length} 个知识库，请指定要检索的集合：`
+            + listed.map(item => `${item.id}（${item.name}${item.builtAt !== null ? '，已构建' : '，未构建'}）`).join(' / ')
+            + '。'
+      return {
+        ok: false,
+        reason: 'discovery_needed',
+        summary,
+        query,
+        mode: 'dense',
+        hits: [],
+        below_floor: 0,
+        fts_only_hits: 0,
+        collections: listed.map(item => ({ id: item.id, name: item.name, built: item.builtAt !== null })),
+      }
+    }
+
+    // The embedder is what turns the query into a vector; without one the tool
+    // says so rather than failing obscurely deeper in the stack.
+    if (operations.embedQuery === undefined) {
+      return fail('internal_error', '宿主未提供嵌入模型，无法执行向量检索。')
+    }
+
+    // Cooperative cancellation plus a hard budget. Observing `exec.signal` is
+    // only half the job: an embedding provider that ignores the signal (they
+    // mostly take no signal at all) would leave the await pending forever and
+    // the timeout would never fire. So each awaited step is also raced against
+    // the budget, which is what makes the timeout a real bound rather than a
+    // flag that is checked once the work has already finished.
+    //
+    // The two are tracked with **separate** sentinels. They previously shared one
+    // controller, so a caller-initiated abort was reported as
+    // `reason='timeout'` with the text "检索超时（超过 15 秒）" — at 0 ms, for a
+    // call nobody had waited on. That is a misdiagnosis an operator acts on, so
+    // the outcomes are distinct: the model gets `timeout` only when the budget
+    // actually expired, and `cancelled` when the caller withdrew.
+    const budget = new AbortController()
+    const timer = setTimeout(() => budget.abort(), timeoutMs)
+
+    /** Reject as soon as the budget expires, with the budget's own sentinel. */
+    const expired = new Promise<never>((_resolve, reject) => {
+      budget.signal.addEventListener('abort', () => reject(new Error(SEARCH_TIMEOUT_SENTINEL)), { once: true })
+    })
+    /**
+     * Reject as soon as the caller aborts, with a distinct sentinel.
+     *
+     * A caller that has already withdrawn must be recognised immediately rather
+     * than after the first await, which is why the already-aborted case is
+     * checked here as well as listened for.
+     */
+    const withdrawn = new Promise<never>((_resolve, reject) => {
+      const onAbort = (): void => reject(new Error(SEARCH_CANCELLED_SENTINEL))
+      if (exec.signal.aborted) onAbort()
+      else exec.signal.addEventListener('abort', onAbort, { once: true })
+    })
+    /** Race one step against both outcomes. */
+    const within = <T>(work: Promise<T>): Promise<T> => Promise.race([work, expired, withdrawn])
+
+    // `mode` is reported on failures too, so a caller that timed out mid-hybrid
+    // is not told the search was dense-only. It is widened once the real mode is
+    // known, and stays 'dense' only for a failure that happened before retrieval.
+    let failureMode: ToolOutput['mode'] = 'dense'
+
+    try {
+      const vector = await within(operations.embedQuery(query))
+      // The floor is resolved per call rather than captured at registration: the
+      // deployment's config value is only a default, and the collection's own
+      // setting — editable in the interface — is the one in force. A fixed value
+      // here is how a threshold tuned in the UI stayed decorative.
+      //
+      // Optional on the operations contract so an older host object — a test
+      // double, a tool built before this channel existed — still works with the
+      // captured default rather than failing every call.
+      const effective = operations.retrievalSettings?.(collection)
+      const floor = effective?.minScore ?? minScore
+      const result = await within(operations.search(collection, query, vector, topk, floor))
+      failureMode = result.mode
+      const hits: ToolHit[] = result.hits.map(hit => ({
+        file: hit.docName,
+        doc_id: hit.docId,
+        ordinal: hit.ordinal,
+        char_start: hit.charStart,
+        char_end: hit.charEnd,
+        text: hit.text,
+        match_score: Number(hit.matchScore.toFixed(4)),
+        band: hit.band,
+      }))
+      const summary = renderHits(result.hits, query, collection, result.mode, result.belowFloor)
+      return {
+        // An empty result is a successful call that found nothing: `ok` is false
+        // so a caller can branch on it, while the summary stays actionable.
+        ok: hits.length > 0,
+        ...(hits.length > 0 ? {} : { reason: 'empty_result' as const }),
+        summary,
+        collection,
+        query,
+        mode: result.mode,
+        hits,
+        below_floor: result.belowFloor,
+        // The full-text pass's solo findings, which any meaningful floor filters.
+        // Reported because they are the case "the query named a term that exists"
+        // — a bare empty_result reads as absence, and this is the number that says
+        // a lower floor may surface the exact match.
+        fts_only_hits: result.ftsOnlyHits,
+      }
+    } catch (error) {
+      const message = String(error instanceof Error ? error.message : error)
+      // The budget's own sentinel, distinguished from a store error so the two
+      // do not both read as "检索失败".
+      if (message === SEARCH_TIMEOUT_SENTINEL) {
+        return fail('timeout', `检索超时（超过 ${timeoutMs / 1000} 秒）。可缩小 topk 或稍后重试。`, failureMode)
+      }
+      // The caller withdrew. Reported as such rather than as a timeout: the two
+      // need different responses, and telling an operator a call took 15 seconds
+      // when it was cancelled at 0 ms sends them looking in the wrong place.
+      if (message === SEARCH_CANCELLED_SENTINEL) {
+        return fail('cancelled', '检索已取消。', failureMode)
+      }
+      // A missing collection is the one failure worth naming precisely: it is
+      // the difference between "you typed the id wrong" and "something broke".
+      if (/不存在|does not exist|not exist/i.test(message)) {
+        return fail('collection_not_found', `知识库 ${collection} 不存在。请用正确的集合标识，或先在知识库页面创建它。`, failureMode)
+      }
+      return fail('internal_error', `检索失败：${message}`, failureMode)
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+
   return defineTool({
     name: KB_SEARCH_TOOL,
     description: [
@@ -199,17 +409,19 @@ export function defineKbSearchTool(
       '',
       '何时调用：当用户的问题可能由已上传到知识库的文档回答时；或需要在回答前核实事实、给出引用来源时。',
       '必要前置条件：目标知识库必须已上传文档并至少成功构建过一次索引；未构建的知识库没有可检索的快照。',
-      '入参：query（自然语言查询）、collection（集合标识，形如 kb_prod_2f8a）、topk（可选，返回条数上限，默认 8）。',
+      'collection 参数：可省略。省略时只有一个已构建的知识库会直接检索它；有多个会返回知识库清单（含 id、名称、构建状态），你从中选一个再次调用。',
+      '入参：query（自然语言查询）、collection（可选，集合标识，形如 kb_prod_2f8a）、topk（可选，返回条数上限，默认 8）。',
       '出参：hits 数组，每项含 file / doc_id / ordinal / char_start / char_end / text / match_score / band；'
-        + 'match_score 为 0 到 1 的归一化分数，越大越相关；band 为 strong / relevant / fair / low 四档。',
+        + 'match_score 为 0 到 1 的归一化分数，越大越相关；band 为 strong / relevant / fair / low 四档。'
+        + 'fts_only_hits 是仅有全文精确匹配、无向量证据的命中数——这类命中分数固定很低，若查询是专有名词且结果为空，可建议用户降低阈值。',
       '失败语义：不抛异常。空结果、知识库不存在、参数非法、超时、已取消都会返回 ok=false 与可读的 summary，'
         + '其中空结果同时给出 below_floor（低于阈值被过滤的条数），便于判断是"确实没有"还是"阈值过高"；'
-        + 'reason 区分 timeout（预算耗尽）与 cancelled（调用方撤回）。',
+        + 'reason 区分 timeout（预算耗尽）与 cancelled（调用方撤回）；discovery_needed 表示需要先指定 collection。',
       '副作用：无。只读取知识库，不写入、不修改任何数据。',
     ].join('\n'),
     parameters: {
       query: { type: 'string', required: true, description: '自然语言查询语句' },
-      collection: { type: 'string', required: true, description: '知识库集合标识，形如 kb_prod_2f8a' },
+      collection: { type: 'string', description: '知识库集合标识，形如 kb_prod_2f8a。省略时：只有一个已构建的知识库则直接检索它；有多个则返回清单供你选择' },
       topk: { type: 'integer', description: `返回条数上限，默认 ${DEFAULT_TOPK}，最大 ${MAX_TOPK}` },
     },
     output: {
@@ -228,6 +440,19 @@ export function defineKbSearchTool(
           query: { type: 'string' },
           mode: { type: 'string' },
           below_floor: { type: 'integer' },
+          fts_only_hits: { type: 'integer' },
+          collections: {
+            type: 'array',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                id: { type: 'string' },
+                name: { type: 'string' },
+                built: { type: 'boolean' },
+              },
+            },
+          },
           hits: {
             type: 'array',
             items: {
@@ -261,136 +486,6 @@ export function defineKbSearchTool(
         ok: value.ok ?? false,
       }),
     },
-    async execute(args, exec): Promise<ToolOutput> {
-      const query = args.query
-      const collection = args.collection
-      const topk = Math.min(Math.max(args.topk ?? DEFAULT_TOPK, 1), MAX_TOPK)
-
-      /** Build a failure value with a usable message. */
-      const fail = (
-        reason: ToolOutput['reason'],
-        summary: string,
-        mode: ToolOutput['mode'] = 'dense',
-      ): ToolOutput => ({
-        ok: false,
-        ...(reason === undefined ? {} : { reason }),
-        summary,
-        collection,
-        query,
-        mode,
-        hits: [],
-        below_floor: 0,
-      })
-
-      if (query.trim() === '') {
-        return fail('invalid_argument', 'query 不能为空，请给出要检索的自然语言问题。')
-      }
-
-      // The embedder is what turns the query into a vector; without one the tool
-      // says so rather than failing obscurely deeper in the stack.
-      if (operations.embedQuery === undefined) {
-        return fail('internal_error', '宿主未提供嵌入模型，无法执行向量检索。')
-      }
-
-      // Cooperative cancellation plus a hard budget. Observing `exec.signal` is
-      // only half the job: an embedding provider that ignores the signal (they
-      // mostly take no signal at all) would leave the await pending forever and
-      // the timeout would never fire. So each awaited step is also raced against
-      // the budget, which is what makes the timeout a real bound rather than a
-      // flag that is checked once the work has already finished.
-      //
-      // The two are tracked with **separate** sentinels. They previously shared one
-      // controller, so a caller-initiated abort was reported as
-      // `reason='timeout'` with the text "检索超时（超过 15 秒）" — at 0 ms, for a
-      // call nobody had waited on. That is a misdiagnosis an operator acts on, so
-      // the outcomes are distinct: the model gets `timeout` only when the budget
-      // actually expired, and `cancelled` when the caller withdrew.
-      const budget = new AbortController()
-      const timer = setTimeout(() => budget.abort(), timeoutMs)
-
-      /** Reject as soon as the budget expires, with the budget's own sentinel. */
-      const expired = new Promise<never>((_resolve, reject) => {
-        budget.signal.addEventListener('abort', () => reject(new Error(SEARCH_TIMEOUT_SENTINEL)), { once: true })
-      })
-      /**
-       * Reject as soon as the caller aborts, with a distinct sentinel.
-       *
-       * A caller that has already withdrawn must be recognised immediately rather
-       * than after the first await, which is why the already-aborted case is
-       * checked here as well as listened for.
-       */
-      const withdrawn = new Promise<never>((_resolve, reject) => {
-        const onAbort = (): void => reject(new Error(SEARCH_CANCELLED_SENTINEL))
-        if (exec.signal.aborted) onAbort()
-        else exec.signal.addEventListener('abort', onAbort, { once: true })
-      })
-      /** Race one step against both outcomes. */
-      const within = <T>(work: Promise<T>): Promise<T> => Promise.race([work, expired, withdrawn])
-
-      // `mode` is reported on failures too, so a caller that timed out mid-hybrid
-      // is not told the search was dense-only. It is widened once the real mode is
-      // known, and stays 'dense' only for a failure that happened before retrieval.
-      let failureMode: ToolOutput['mode'] = 'dense'
-
-      try {
-        const vector = await within(operations.embedQuery(query))
-        // The floor is resolved per call rather than captured at registration: the
-        // deployment's config value is only a default, and the collection's own
-        // setting — editable in the interface — is the one in force. A fixed value
-        // here is how a threshold tuned in the UI stayed decorative.
-        //
-        // Optional on the operations contract so an older host object — a test
-        // double, a tool built before this channel existed — still works with the
-        // captured default rather than failing every call.
-        const effective = operations.retrievalSettings?.(collection)
-        const floor = effective?.minScore ?? minScore
-        const result = await within(operations.search(collection, query, vector, topk, floor))
-        failureMode = result.mode
-        const hits: ToolHit[] = result.hits.map(hit => ({
-          file: hit.docName,
-          doc_id: hit.docId,
-          ordinal: hit.ordinal,
-          char_start: hit.charStart,
-          char_end: hit.charEnd,
-          text: hit.text,
-          match_score: Number(hit.matchScore.toFixed(4)),
-          band: hit.band,
-        }))
-        const summary = renderHits(result.hits, query, collection, result.mode, result.belowFloor)
-        return {
-          // An empty result is a successful call that found nothing: `ok` is false
-          // so a caller can branch on it, while the summary stays actionable.
-          ok: hits.length > 0,
-          ...(hits.length > 0 ? {} : { reason: 'empty_result' as const }),
-          summary,
-          collection,
-          query,
-          mode: result.mode,
-          hits,
-          below_floor: result.belowFloor,
-        }
-      } catch (error) {
-        const message = String(error instanceof Error ? error.message : error)
-        // The budget's own sentinel, distinguished from a store error so the two
-        // do not both read as "检索失败".
-        if (message === SEARCH_TIMEOUT_SENTINEL) {
-          return fail('timeout', `检索超时（超过 ${timeoutMs / 1000} 秒）。可缩小 topk 或稍后重试。`, failureMode)
-        }
-        // The caller withdrew. Reported as such rather than as a timeout: the two
-        // need different responses, and telling an operator a call took 15 seconds
-        // when it was cancelled at 0 ms sends them looking in the wrong place.
-        if (message === SEARCH_CANCELLED_SENTINEL) {
-          return fail('cancelled', '检索已取消。', failureMode)
-        }
-        // A missing collection is the one failure worth naming precisely: it is
-        // the difference between "you typed the id wrong" and "something broke".
-        if (/不存在|does not exist|not exist/i.test(message)) {
-          return fail('collection_not_found', `知识库 ${collection} 不存在。请用正确的集合标识，或先在知识库页面创建它。`, failureMode)
-        }
-        return fail('internal_error', `检索失败：${message}`, failureMode)
-      } finally {
-        clearTimeout(timer)
-      }
-    },
+    execute: runTool,
   })
 }

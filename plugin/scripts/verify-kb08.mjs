@@ -77,7 +77,11 @@ function toolWith(overrides = {}, minScore = 0.55, timeoutMs = undefined) {
   check('tool: parameters are exactly query/collection/topk', JSON.stringify(params) === JSON.stringify(['collection', 'query', 'topk']), params.join(', '))
   const required = tool.parameters.required ?? []
   check('tool: query is required', required.includes('query'), `required=[${required.join(', ')}]`)
-  check('tool: collection is required', required.includes('collection'), `required=[${required.join(', ')}]`)
+  // collection became optional when discovery was added: a model cannot guess a
+  // kb_<domain>_<hex> id, and the omission path returns the collection list for
+  // it to choose from. Asserted optional so the old hard requirement cannot
+  // silently return — it was the single-collection dead end.
+  check('tool: collection is optional (discovery covers the omission)', !required.includes('collection'), `required=[${required.join(', ')}]`)
   check('tool: topk is optional', !required.includes('topk'), `required=[${required.join(', ')}]`)
   check('tool: topk is an integer', tool.parameters.properties.topk.type === 'integer', tool.parameters.properties.topk.type)
   check('tool: every parameter carries a description', Object.values(tool.parameters.properties).every(property => typeof property.description === 'string' && property.description.length > 0), 'all three described')
@@ -107,8 +111,11 @@ function toolWith(overrides = {}, minScore = 0.55, timeoutMs = undefined) {
 {
   const schema = toolWith().output.schema
   const top = Object.keys(schema.properties).sort()
-  const expectedTop = ['below_floor', 'collection', 'hits', 'mode', 'ok', 'query', 'reason', 'summary']
-  check('output: top-level fields match the spec', JSON.stringify(top) === JSON.stringify(expectedTop), top.join(', '))
+  // The spec's eight fields, plus the two the discovery path added:
+  // `fts_only_hits` reports full-text-only hits the floor filtered, and
+  // `collections` is the discovery list returned when no collection was named.
+  const expectedTop = ['below_floor', 'collection', 'collections', 'fts_only_hits', 'hits', 'mode', 'ok', 'query', 'reason', 'summary']
+  check('output: top-level fields match the spec plus discovery', JSON.stringify(top) === JSON.stringify(expectedTop), top.join(', '))
 
   const hit = Object.keys(schema.properties.hits.items.properties).sort()
   const expectedHit = ['band', 'char_end', 'char_start', 'doc_id', 'file', 'match_score', 'ordinal', 'text']

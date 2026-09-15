@@ -319,6 +319,21 @@ export class KnowledgeOperations {
   }
 
   /**
+   * List every collection with its statistics, in the model-readable form the
+   * search tool's discovery path returns.
+   *
+   * This is the tool's answer to "which collections exist": a model asked to
+   * search without a collection id cannot guess `kb_agentbook_5eed`, and a
+   * `collection_not_found` gives it nothing to correct with. The list carries the
+   * built state so the model can also avoid a collection that would answer
+   * nothing.
+   * @returns collections, newest first.
+   */
+  async discoverCollections(): Promise<CollectionView[]> {
+    return this.listCollections()
+  }
+
+  /**
    * List every collection with its statistics.
    * @returns collections, newest first.
    */
@@ -1002,7 +1017,7 @@ export class KnowledgeOperations {
     vector: Float32Array | number[],
     topk: number,
     minScore: number,
-  ): Promise<{ hits: HitView[], mode: 'hybrid' | 'dense', belowFloor: number }> {
+  ): Promise<{ hits: HitView[], mode: 'hybrid' | 'dense', belowFloor: number, ftsOnlyHits: number }> {
     const self = this.bound()
     const root = self.storeRoot
     if (readMeta(root, collectionId) === null) {
@@ -1010,13 +1025,14 @@ export class KnowledgeOperations {
     }
     const names = new Map(listDocuments(root, collectionId).map(record => [record.id, record.name]))
     const result: SearchResult = withServed(root, collectionId, handle => {
-      if (handle === null) return { hits: [], mode: 'dense' as const, belowFloor: 0 }
+      if (handle === null) return { hits: [], mode: 'dense' as const, belowFloor: 0, ftsOnlyHits: 0 }
       return search(handle, { vector, text: query, topk }, minScore)
     })
     self.hitCounter.record(collectionId, result.hits.length)
     return {
       mode: result.mode,
       belowFloor: result.belowFloor,
+      ftsOnlyHits: result.ftsOnlyHits,
       hits: result.hits.map(hit => ({
         docId: hit.docId,
         docName: names.get(hit.docId) ?? hit.docId,
@@ -1110,7 +1126,7 @@ export class KnowledgeOperations {
     const result: SearchResult = withServed(root, collectionId, handle => {
       // A dense-only run is how a caller separates the two recall paths: if dense
       // alone misses and hybrid finds it, the full-text index is carrying the query.
-      if (handle === null) return { hits: [], mode: 'dense' as const, belowFloor: 0 }
+      if (handle === null) return { hits: [], mode: 'dense' as const, belowFloor: 0, ftsOnlyHits: 0 }
       return search(handle, {
         vector,
         ...(options.denseOnly === true ? {} : { text: query }),
@@ -1178,6 +1194,25 @@ export class KnowledgeOperations {
         return 0
       }
     })
+  }
+
+  /**
+   * Run one function against a collection's served snapshot handle.
+   *
+   * Exposed for the acceptance suites' direct store probes, which need the engine
+   * handle itself rather than an operations result — pinning a candidate window to
+   * exercise the full-text-only scoring path is not expressible through the
+   * normal search call. The lease is released when the function returns, so a
+   * probe cannot leak the directory lock.
+   * @param collectionId - collection identifier.
+   * @param fn - receives the handle, or `null` when nothing is built.
+   * @returns whatever `fn` returns.
+   */
+  withServedHandle<T>(
+    collectionId: string,
+    fn: (handle: import('@zvec/zvec').ZVecCollection | null) => T,
+  ): T {
+    return withServed(this.storeRoot, collectionId, handle => fn(handle))
   }
 
   /**

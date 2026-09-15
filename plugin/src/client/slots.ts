@@ -121,6 +121,32 @@ export interface KnowledgeSlotMap {
     scope: 'session'
     owner: ToolCallOwnerProps
   }
+  /**
+   * Compact controls before the composer submit action — the row the shipped
+   * permission selector sits in.
+   *
+   * Restated from `dsh-client-ui-conversation`'s slot contract. A `list` scoped
+   * to the session with an owner share of `{ locked: boolean }`: a fresh id adds
+   * an entry beside the shipped ones, which is what makes a button additive
+   * rather than a takeover.
+   */
+  'conversation.input.right': {
+    kind: 'list'
+    scope: 'session'
+    owner: ComposerControlOwnerProps
+  }
+}
+
+/**
+ * Owner share of a composer input control.
+ *
+ * Restated from `InputControlOwnerProps` in the conversation slot contract. The
+ * composer is the only member: it is true while it refuses interaction, which is
+ * the one condition under which a control in this row must disable itself.
+ */
+export interface ComposerControlOwnerProps {
+  /** Whether the composer currently refuses interaction. */
+  locked: boolean
 }
 
 /**
@@ -160,7 +186,7 @@ export interface ToolCallOwnerProps {
 }
 
 /** A slot key this plugin addresses. */
-export type KnowledgeSlotKey = 'sidebar.panellist' | 'main' | 'tool.call.toolview'
+export type KnowledgeSlotKey = 'sidebar.panellist' | 'main' | 'tool.call.toolview' | 'conversation.input.right'
 
 /** Options for a `main` or `tool.call.toolview` (keyed) registration. */
 export interface KeyedRegisterOptions {
@@ -168,6 +194,20 @@ export interface KeyedRegisterOptions {
   name: 'main' | 'tool.call.toolview'
   /** Dispatch key: the panel id, or the wire tool name. */
   key: string
+}
+
+/**
+ * Options for a `conversation.input.right` (list) registration.
+ *
+ * Distinct from {@link ListRegisterOptions} because the two list slots have
+ * different owner shares — the sidebar resolves a label, the composer hands down
+ * a lock flag — and a shared interface would make one of them lie.
+ */
+export interface ComposerControlRegisterOptions {
+  /** Target slot key. */
+  name: 'conversation.input.right'
+  /** The entry's cell id; a fresh id adds it beside the shipped controls. */
+  id: string
 }
 
 /** Options for a `sidebar.panellist` (list) registration. */
@@ -198,7 +238,7 @@ export interface SlotRegistry {
    * @returns a disposer removing the contribution.
    */
   register(
-    options: KeyedRegisterOptions | ListRegisterOptions,
+    options: KeyedRegisterOptions | ListRegisterOptions | ComposerControlRegisterOptions,
     component: (props: never) => ReactNode,
   ): () => void
   /**

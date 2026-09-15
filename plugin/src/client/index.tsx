@@ -28,6 +28,8 @@ import './styles/base.css'
 import { KnowledgeBasePanel } from './panel.tsx'
 import { createHostPort } from './bridge-client.ts'
 import { SearchToolView, type SearchToolViewProps } from './SearchToolView.tsx'
+import { KbButton } from './composer/KbButton.tsx'
+import { createKbTriggerSource, triggerRegistryOf, KB_TRIGGER_SOURCE } from './kb-trigger.tsx'
 import {
   KNOWLEDGE_LABEL, KNOWLEDGE_ORDER, KNOWLEDGE_PANEL_KEY, KNOWLEDGE_SIDEBAR_ID,
 } from './panel-id.ts'
@@ -98,7 +100,7 @@ export {
  * absent. Declaring it keeps the fiber pending until the registry exists rather
  * than silently doing nothing.
  */
-export const inject: string[] = ['slots']
+export const inject: string[] = ['slots', 'inputTriggers']
 
 /**
  * The panel store, shared between the sidebar row and the main panel.
@@ -201,15 +203,57 @@ export function apply(ctx: ClientContext): void {
       ),
     ))
 
+    // The @ trigger source: `@` completion over knowledge bases, and the menu the
+    // composer button opens. One source serves both entrances, so the two cannot
+    // present different lists. The registry is read structurally: the trigger
+    // pipeline is a host plugin whose types this client may not import (see
+    // kb-trigger.tsx), and its absence — a harness without it — only disables the
+    // entrances, never the panel.
+    let disposeTrigger: (() => void) | undefined
+    const triggers = triggerRegistryOf(ctx)
+    if (triggers !== undefined) {
+      disposeTrigger = triggers.registerSource(createKbTriggerSource(port))
+    }
+
+    // The composer button. A list entry beside the shipped input controls; it
+    // opens the same trigger menu, so it needs no picker of its own.
+    const disposeButton = ctx.slots.inject('conversation.input.right', () => ctx.slots.register(
+      { name: 'conversation.input.right', id: 'kb-zvec-knowledge' },
+      (owner: { locked: boolean }) => (
+        <KbButton
+          locked={owner.locked}
+          onOpen={() => {
+            if (triggers === undefined) return
+            // Routed through the trigger pipeline, which owns the menu: the
+            // shipped command button opens its menu the same way. The synthetic
+            // hit sits at the end of the current draft, which is where the chip
+            // lands.
+            const editor = document.querySelector<HTMLTextAreaElement>('textarea')
+            const draft = editor?.value ?? ''
+            const end = draft.length
+            triggers.toggleSource(KB_TRIGGER_SOURCE, {
+              trigger: '@',
+              query: '',
+              quoted: false,
+              position: draft.trim() === '' ? 'leading' : 'inline',
+              span: { start: end, end, draftRev: 0 },
+            })
+          }}
+        />
+      ),
+    ))
+
     return () => {
       // The panel is disposed first: with the row gone, nothing can select a
       // panel that is no longer registered. The tool view goes last because it is
       // the surface a live turn is most likely to be rendering.
       disposePanel()
       disposeRow()
+      disposeButton()
+      disposeTrigger?.()
       disposeToolView()
     }
-  }, 'zvec-knowledge: sidebar entry, main panel and retrieval tool view')
+  }, 'zvec-knowledge: sidebar entry, main panel, composer control and retrieval tool view')
 
   // Stylesheet presence marker. It gives the browser half one observable,
   // disposable effect, which is what makes its lifecycle testable, and later

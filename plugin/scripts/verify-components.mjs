@@ -108,6 +108,7 @@ const TIERS = new Map([
   ['SegmentedControl.module.css', { tier: 'interactive', why: 'in-view switcher' }],
   ['Tabs.module.css', { tier: 'interactive', why: 'region switcher' }],
   ['UploadDropzone.module.css', { tier: 'interactive', why: 'drop zone; it is a button, which is what makes it keyboard reachable' }],
+  ['KbButton.module.css', { tier: 'interactive', why: 'composer control; it opens the knowledge-base menu and takes hover/focus/disabled states' }],
   ['StatusPill.module.css', { tier: 'marker', why: 'lifecycle state marker; it reports, it does not act' }],
   ['Tag.module.css', { tier: 'marker', why: 'classification marker; removal goes through an IconButton' }],
   ['CountBadge.module.css', { tier: 'marker', why: 'numeric marker with no interaction of its own' }],

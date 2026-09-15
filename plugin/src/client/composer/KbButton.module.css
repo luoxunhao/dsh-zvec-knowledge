@@ -1,0 +1,52 @@
+/* KbButton — the composer's knowledge-base control.
+ *
+ * Sized to the row it joins: the shipped input controls are compact, icon-plus-
+ * label at the control height, so this reads as one more of them rather than as
+ * a foreign element. Disabled state comes from the slot's owner (the composer's
+ * own lock), not from any local condition — the button has no reason to be
+ * disabled when the composer is live. */
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--kb-space-1);
+  height: var(--kb-control-sm);
+  padding: 0 var(--kb-space-2);
+  border: 1px solid transparent;
+  border-radius: var(--kb-radius-sm);
+  background: transparent;
+  color: var(--kb-text-secondary);
+  font-size: var(--kb-size-caption);
+  line-height: var(--kb-leading-caption);
+  cursor: pointer;
+}
+
+.button:hover:not(:disabled) {
+  background: var(--kb-bg-hover);
+  color: var(--kb-text-primary);
+}
+
+.button:focus-visible {
+  outline: var(--kb-outline-focus);
+  outline-offset: 1px;
+}
+
+.button:disabled {
+  color: var(--kb-text-disabled);
+  cursor: not-allowed;
+}
+
+/* The interactive-tier state set is declared even where the button cannot reach
+ * it today: `loading` is reserved for a future remote fetch (the menu data is
+ * fetched by the pipeline, so today this never mounts busy), and declaring the
+ * rule here is what keeps the five-state contract enforceable per stylesheet
+ * instead of per call site. */
+.loading,
+.loading:disabled {
+  color: var(--kb-text-tertiary);
+  cursor: progress;
+}
+
+.label {
+  white-space: nowrap;
+}
