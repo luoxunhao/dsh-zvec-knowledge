@@ -401,6 +401,42 @@ check(
 check('B8: the tool keeps its wire name', KB_SEARCH_TOOL === 'dsh_kb_search', KB_SEARCH_TOOL)
 
 // ---------------------------------------------------------------------------
+// 9. The quantizer copy must not claim a compression the engine does not do (B3)
+// ---------------------------------------------------------------------------
+
+// The copy said INT8 compresses "相对 FP32 压缩 4×" — the FP32→INT8 arithmetic.
+// A controlled experiment (same corpus, one collection per quantizer, measured
+// after close) found the vector index byte-identical at 8.54 MB across INT8, FP16
+// and none, with INT8/FP16 *adding* a ~5 MB qindex: the store grows 1.42x rather
+// than shrinking 4x. §5.6 makes this copy a user-facing claim, so a disproven
+// ratio is a correctness problem, not wording.
+const { QUANTIZER_OPTIONS } = await import(new URL('../lib/store/strategy.js', import.meta.url).href)
+
+const compressed = QUANTIZER_OPTIONS.filter(option => /压缩\s*\d/.test(option.tradeoff))
+check(
+  'B3: no quantizer claims a compression ratio the engine does not deliver',
+  compressed.length === 0,
+  compressed.length === 0
+    ? `${QUANTIZER_OPTIONS.length} options, none claim compression`
+    : compressed.map(o => `${o.value}: ${o.tradeoff}`).join('; '),
+)
+check(
+  'B3: the copy states quantization does not shrink the index',
+  /索引体积不变|体积最小/.test(QUANTIZER_OPTIONS.map(o => o.tradeoff).join(' ')),
+  'trade-offs name the real storage behaviour',
+)
+
+// Re-measure the invariant cheaply on the shipped option set: whatever a quantizer
+// does, it must not claim to reduce what the *index* occupies.
+for (const option of QUANTIZER_OPTIONS) {
+  check(
+    `B3: ${option.value} copy mentions its recall effect`,
+    /召回/.test(option.tradeoff),
+    option.tradeoff,
+  )
+}
+
+// ---------------------------------------------------------------------------
 
 console.log('')
 for (const line of passes) console.log(`  PASS  ${line}`)

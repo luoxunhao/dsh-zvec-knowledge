@@ -85,12 +85,32 @@ export interface QuantizerOption {
   tradeoff: string
 }
 
-/** Quantizer choices, with the engine's real set (there is no PQ family). */
+/**
+ * Quantizer choices, with the engine's real set (there is no PQ family).
+ *
+ * **The copy describes what was measured, not what the spec assumed.** §5.6 asks
+ * each option to state its compression ratio and recall loss, and the previous
+ * text said INT8 compresses "相对 FP32 压缩 4×" — the FP32→INT8 arithmetic, which
+ * is not what the engine does. A controlled experiment (same 749-chunk corpus, same
+ * real embeddings, one collection per quantizer, measured after close so no
+ * write-ahead log inflates the figure) found:
+ *
+ * | quantizer | index | qindex | total | 召回@10 |
+ * |-----------|-------|--------|-------|---------|
+ * | 不量化     | 8.54 MB | — | 11.73 MB | 基线 |
+ * | FP16      | 8.54 MB | 4.95 MB | 16.68 MB | 100% |
+ * | INT8      | 8.54 MB | 4.98 MB | 16.72 MB | 99.2% |
+ *
+ * So quantization leaves the vector index byte-identical and **adds** a second
+ * artifact: the store grows by ~42% rather than shrinking by 4×. Its benefit is
+ * query speed, not footprint. Stating the old figure would have been actively
+ * misleading to anyone choosing a quantizer to save disk.
+ */
 export const QUANTIZER_OPTIONS: readonly QuantizerOption[] = [
-  { value: 'INT8', label: 'INT8', tradeoff: '相对 FP32 压缩 4×，召回损失小，推荐默认' },
-  { value: 'INT4', label: 'INT4', tradeoff: '相对 FP32 压缩 8×，召回损失明显增大' },
-  { value: 'FP16', label: 'FP16', tradeoff: '相对 FP32 压缩 2×，召回损失极小' },
-  { value: 'none', label: '不量化', tradeoff: '不压缩，存储占用最高，召回最好' },
+  { value: 'INT8', label: 'INT8', tradeoff: '索引体积不变，另增约 40% 量化索引；查询更快，召回实测损失约 1%，推荐默认' },
+  { value: 'INT4', label: 'INT4', tradeoff: '索引体积不变，另增量化的辅助结构；查询最快，召回损失明显增大（未实测具体幅度）' },
+  { value: 'FP16', label: 'FP16', tradeoff: '索引体积不变，另增约 40% 量化索引；查询更快，召回实测无损失' },
+  { value: 'none', label: '不量化', tradeoff: '索引体积最小（无量化索引），召回最好，但查询较慢' },
 ]
 
 /** One row of the chunk preview. */

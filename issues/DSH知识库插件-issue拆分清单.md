@@ -605,7 +605,8 @@ list 条目的 `id` **就是**它要打开的主面板 key —— 两者取同�
 | # | 规范假设 | 实测结论 | 影响的 issue | 处置 |
 |---|----------|----------|--------------|------|
 | 1 | 命中分数由 zvec 距离归一化得到（§3.4 表述正确） | `querySync` 返回的 `score` 是**距离**（越小越相似），列表已按距离升序；查询向量等于某文档得 0，正交得 1 | KB-08、KB-09 | 规范化必须实现为 `matchScore = clamp(1 - distance)`，而非对原值 clamp。方向读反会把最差命中排在最前，并让全部命中越过 0.55 阈值 |
-| 2 | 量化器「PQ-INT8（压缩 4×）」 | `ZVecQuantizeType` 只有 `FP16 / INT8 / INT4`，**不存在 PQ**；另有 RaBitQ 索引族 `HNSW_RABITQ` / `IVF_RABITQ` | KB-07 | 配置器选项与默认值改为 `INT8`；「压缩 4×」对应 FP32→INT8 的 4 倍压缩。若要用 RaBitQ，它属于索引类型而非量化器，UI 归属需重新划分 |
+| 2 | 量化器「PQ-INT8（压缩 4×）」 | `ZVecQuantizeType` 只有 `FP16 / INT8 / INT4`，**不存在 PQ**；另有 RaBitQ 索引族 `HNSW_RABITQ` / `IVF_RABITQ`。**二次修订（v1.1.3，KB-FIX-10）**：受控实验推翻了「压缩 4×」这一半——见下 #2b | KB-07 | 配置器选项与默认值改为 `INT8`。若要用 RaBitQ，它属于索引类型而非量化器，UI 归属需重新划分 |
+| 2b | 「INT8 相对 FP32 压缩 4×」（本条原为推测的 FP32→INT8 算术） | **实测（同一 749 分片语料，同一真实嵌入，三种量化器各建一集合，close 后测量以排除 WAL）**：`embedding.index` 在 INT8/FP16/不量化下**均为 8.54 MB（逐字节相同）**；INT8/FP16 额外产生 `qindex` 4.98/4.95 MB。总计 16.72 / 16.68 / **11.73** MB → 量化使存储**增大 1.42×**，而非缩小。召回@10：INT8 **99.2%**、FP16 100%、不量化 基线 | KB-07 | 量化器**不压缩向量索引**，其收益是查询速度；文案已按实测改写，禁用「压缩 N×」表述 |
 | 3 | 索引类型 HNSW / IVF / DiskANN | `ZVecIndexType` 实际含 `HNSW` / `IVF` / `FLAT` / `HNSW_RABITQ` / `DISKANN` / `IVF_RABITQ` / `INVERT` / `FTS` | KB-07 | 分段控件至少覆盖 HNSW / IVF / DiskANN；两个 RaBitQ 变体是否对用户暴露待业务确认 |
 | 4 | 距离度量默认 cosine（§5.6） | HNSW / IVF / DiskANN / FLAT 的 `metricType` **默认值均为 IP（内积）** | KB-07、KB-10 | 必须按索引显式设置 `COSINE`，否则分数尺度与 0.55 阈值全部失准 |
 | 5 | 集合可反复按建库方式打开 | `ZVecCreateAndOpen(path, schema)` 要求 `path` **不存在**；重开既有集合必须走 `ZVecOpen(path)`，且不接收 schema | KB-05、KB-10 | 集合打开分两条路径（新建 / 重开），实现需按存在性分派；schema 随集合持久化，不随打开传入 |
