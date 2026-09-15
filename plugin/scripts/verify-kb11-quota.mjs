@@ -187,9 +187,8 @@ function fakeEmbed(text) {
       index: { kind: 'HNSW', m: 32, efConstruction: 200, quantize: 'INT8' },
     },
     { onProgress: () => {}, onLog: () => {} },
-    new AbortController().signal,
   )
-  check('live: a build is refused too, not just an upload', !build.ok, `ok=${build.ok}`)
+  check('live: a build is refused too, not just an upload', !build.ok && !build.started, `ok=${build.ok} started=${build.started}`)
   check('live: the build refusal explains the quota', /配额/.test(build.error ?? ''), build.error ?? '(no error)')
 
   ops.dispose()

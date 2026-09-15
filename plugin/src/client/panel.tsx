@@ -19,7 +19,7 @@
  * @module dsh-zvec-knowledge/client/panel
  */
 
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { OverviewPage, type BuildRecord, type OverviewCollection } from './pages/OverviewPage.tsx'
 import { CreateCollectionDialog } from './dialogs/CreateCollectionDialog.tsx'
 import { EmptyState } from './components/EmptyState.tsx'
@@ -30,6 +30,7 @@ import type { StatusKind } from './components/StatusPill.tsx'
 import type { KnowledgeBasePort, HostCollection, HostDocument } from './app.tsx'
 import type { PanelState, KnowledgeView } from './index.tsx'
 import { DocumentsPage, type PageDocument } from './pages/DocumentsPage.tsx'
+import { RetrievalPage } from './pages/RetrievalPage.tsx'
 import {
   BuildPage,
   type BuildPageProps, type ChunkingDraft, type IndexDraft,
@@ -52,13 +53,26 @@ export interface KnowledgeBasePanelProps {
   port?: KnowledgeBasePort
 }
 
-/** Sub-navigation destinations inside the panel. */
+/**
+ * Sub-navigation destinations inside the panel.
+ *
+ * 问答 is deliberately absent: KB-09's revised scope puts RAG in the dsh
+ * conversation, where the model calls `dsh_kb_search` and answers with citations,
+ * so a second Q&A panel here would be a duplicate UI with its own citation
+ * rendering and state.
+ *
+ * 检索 is present and is *not* that removed Q&A surface. It is a diagnostic
+ * console that judges the plugin's own artifacts — whether chunking produced
+ * sensible units and whether vector recall works — which the conversation's tool
+ * block cannot show, because it renders only what one query happened to match and
+ * applies the score floor silently. KB-09's closing note anticipated exactly this
+ * gap.
+ */
 const VIEWS: { value: KnowledgeView, label: string }[] = [
   { value: 'overview', label: '总览' },
   { value: 'documents', label: '文档' },
   { value: 'build', label: '索引' },
-  { value: 'retrieval', label: '检索' },
-  { value: 'rag', label: '问答' },
+  { value: 'retrieval', label: '检索验证' },
   { value: 'settings', label: '设置' },
 ]
 
@@ -107,7 +121,17 @@ const INITIAL_STAGES: StageView[] = [
 ]
 
 /** Views whose page is not part of this slice. */
-const PENDING_VIEWS: KnowledgeView[] = ['retrieval', 'rag', 'settings']
+const PENDING_VIEWS: KnowledgeView[] = ['settings']
+
+/**
+ * Poll interval while a build runs, in milliseconds.
+ *
+ * The host owns the build, so the page's only job is to observe it. A build takes
+ * minutes and each poll is a small JSON read, so this trades a little latency for
+ * far less request traffic than a tight loop would add to a host that is busy
+ * embedding.
+ */
+const BUILD_POLL_MS = 1200
 
 /**
  * Embedding model options.
@@ -209,7 +233,6 @@ export function KnowledgeBasePanel({ state, port }: KnowledgeBasePanelProps): Re
   // Whether retrieval is currently served from a previous snapshot: true from
   // the moment a build starts until it publishes.
   const [servingPrevious, setServingPrevious] = useState(false)
-  const buildController = useRef<AbortController | null>(null)
 
   // Mirror the shared selection in both directions: the sidebar row can change
   // it, and the in-panel tabs change it here.
@@ -326,53 +349,107 @@ export function KnowledgeBasePanel({ state, port }: KnowledgeBasePanelProps): Re
     return () => { cancelled = true }
   }, [port, selectedCollection, chunking, index])
 
-  /** Run the index build. */
+  /**
+   * Run the index build.
+   *
+   * Submission and observation are separate: this launches the host-side job and
+   * returns, and the polling effect below reports progress. That split is what lets
+   * the user leave the page — the build is the host's, not this component's.
+   */
   const submitBuild = async (): Promise<void> => {
     if (port?.buildIndex === undefined || selectedCollection === null) return
-    const controller = new AbortController()
-    buildController.current = controller
-    setBuilding(true)
     setBuildError(null)
-    setLog([])
-    setProcessed(0)
-    setTotal(0)
-    setFraction(0)
-    setStages(INITIAL_STAGES)
-    // Retrieval keeps serving the previous snapshot for the whole build; the
-    // interface says so rather than leaving the user to infer it (§5.3).
-    setServingPrevious(true)
+    // The previous run's log is cleared only once the host has accepted the new
+    // one, so a rejected submit does not blank the failure the user is reading.
     try {
-      const result = await port.buildIndex(
-        selectedCollection,
-        { chunking, index },
-        {
-          onProgress: next => {
-            setStages(next.stages)
-            setProcessed(next.processed)
-            setTotal(next.total)
-            setFraction(next.fraction)
-          },
-          onLog: line => setLog(previous => [...previous, line]),
-        },
-        controller.signal,
-      )
-      if (!result.ok) setBuildError(result.error ?? '构建未完成')
-      // Refresh either way: a cancelled build still changed the active documents'
-      // status, and a successful one changed the collection's chunk count.
-      await load()
-      await loadDocuments(selectedCollection)
+      const launched = await port.buildIndex(selectedCollection, { chunking, index })
+      if (!launched.started) {
+        setBuildError(launched.error ?? '构建未能启动')
+        return
+      }
+      setBuilding(true)
+      setLog([])
+      setProcessed(0)
+      setTotal(0)
+      setFraction(0)
+      setStages(INITIAL_STAGES)
+      setServingPrevious(true)
+      // Poll immediately rather than waiting for the first interval: the job's
+      // opening log lines are already available, and a one-second blank panel
+      // reads as a failed submit.
+      await pollOnce()
     } catch (cause) {
       setBuildError(String(cause instanceof Error ? cause.message : cause))
-    } finally {
-      setBuilding(false)
-      setServingPrevious(false)
-      buildController.current = null
     }
   }
 
+  /** Read the job's current state once and mirror it into the page. */
+  const pollOnce = useCallback(async (): Promise<void> => {
+    const readStatus = port?.buildStatus
+    if (readStatus === undefined || selectedCollection === null) return
+    const snapshot = await readStatus(selectedCollection)
+    if (snapshot === null) return
+    setStages(snapshot.stages)
+    setProcessed(snapshot.processed)
+    setTotal(snapshot.total)
+    setFraction(snapshot.fraction)
+    setLog(snapshot.log)
+    setBuilding(snapshot.running)
+    setBuildError(snapshot.settledAt !== null && !snapshot.ok ? snapshot.error : null)
+    // Retrieval reads the previous snapshot until the job publishes; the notice
+    // clears exactly when the build settles.
+    setServingPrevious(snapshot.running)
+    if (!snapshot.running) {
+      // A settled job changed either the collection's chunk count or the documents'
+      // statuses, so the page's data is refreshed once here rather than per poll.
+      await load()
+      await loadDocuments(selectedCollection)
+    }
+  }, [port, selectedCollection])
+
+  // Poll while a build is running. The interval is deliberately modest: a build
+  // takes minutes, the poll is cheap, and a tighter loop would only add request
+  // traffic to a host that is busy embedding.
+  useEffect(() => {
+    if (!building) return
+    const timer = setInterval(() => { void pollOnce() }, BUILD_POLL_MS)
+    return () => { clearInterval(timer) }
+  }, [building, pollOnce])
+
+  // Pick up a build that is already running (typically one started before this page
+  // was opened, or before a refresh), so the panel shows it instead of an idle
+  // configurator the user might submit over the top of.
+  useEffect(() => {
+    const readStatus = port?.buildStatus
+    if (readStatus === undefined || selectedCollection === null) return
+    let cancelled = false
+    const attach = async (): Promise<void> => {
+      try {
+        const snapshot = await readStatus(selectedCollection)
+        if (cancelled || snapshot === null) return
+        if (snapshot.running) setBuilding(true)
+        setStages(snapshot.stages)
+        setProcessed(snapshot.processed)
+        setTotal(snapshot.total)
+        setFraction(snapshot.fraction)
+        setLog(snapshot.log)
+        if (snapshot.settledAt !== null && !snapshot.ok) setBuildError(snapshot.error)
+      } catch {
+        // Attaching is opportunistic: a host that cannot answer leaves the page
+        // usable for a new build rather than showing an unrelated error.
+      }
+    }
+    void attach()
+    return () => { cancelled = true }
+  }, [port, selectedCollection])
+
   /** Cancel the running build. */
   const cancelBuild = (): void => {
-    buildController.current?.abort()
+    const cancel = port?.cancelBuild
+    if (cancel === undefined || selectedCollection === null) return
+    // The host is the authority on cancellation: the next poll reflects the
+    // settled state, so nothing is assumed here.
+    void cancel(selectedCollection).catch(() => { /* the poll reports it */ })
   }
 
   /** Switch view through the shared holder so the sidebar row follows. */
@@ -508,12 +585,25 @@ export function KnowledgeBasePanel({ state, port }: KnowledgeBasePanelProps): Re
               setIndex(INDEX_FALLBACK)
             }}
           />
+        ) : view === 'retrieval' ? (
+          <RetrievalPage
+            collectionId={selectedCollection}
+            // A collection with no published snapshot has nothing to search, and the
+            // page says so rather than rendering an empty result that looks like a
+            // recall failure.
+            hasSnapshot={collections.find(item => item.id === selectedCollection)?.builtAt != null}
+            {...(port?.retrieve === undefined || selectedCollection === null ? {} : {
+              transport: {
+                run: (query, options) => port.retrieve!(selectedCollection, query, options),
+              },
+            })}
+          />
         ) : (
           <EmptyState
-            icon={view === 'retrieval' ? 'search' : 'info'}
+            icon="info"
             title={`${VIEWS.find(item => item.value === view)?.label ?? view} 尚未实现`}
             description={PENDING_VIEWS.includes(view)
-              ? '该页面属于后续 issue 的范围（KB-08 起），当前版本交付总览、文档接入与索引构建。'
+              ? '设置页属于后续 issue 的范围。问答不在此处提供：请在 dsh 会话中直接提问，模型会调用 dsh_kb_search 并给出带引用的回答。'
               : '该页面尚未实现。'}
             action={<Button variant="secondary" onClick={() => changeView('overview')}>返回总览</Button>}
           />

@@ -134,20 +134,109 @@ export interface KnowledgeBasePort {
   /** The strategy a collection was last built with, for a pre-filled configurator. */
   storedStrategy?: (collectionId: string) => Promise<{ chunking: ChunkingDraft, index: IndexDraft } | null>
   /**
-   * Run the index build.
+   * Launch the index build.
    *
-   * Progress, log lines and cancellation all flow through the callbacks, because
-   * the build is a long task that must remain observable and interruptible.
+   * **Returns as soon as the build is started, not when it finishes.** The build
+   * runs as a host-side job, so it survives this page navigating away, switching
+   * panels or being refreshed. Callers observe it through {@link buildStatus} and
+   * stop it with {@link cancelBuild}.
+   *
+   * An earlier revision ran the build *inside* this call and aborted it when the
+   * browser connection closed, which forced the user to sit on the build page and
+   * left a stale engine handle behind on every interruption.
    */
   buildIndex?: (
     collectionId: string,
     strategy: { chunking: ChunkingDraft, index: IndexDraft },
-    handlers: {
-      onProgress: (progress: { stages: StageView[], processed: number, total: number, fraction: number }) => void
-      onLog: (line: LogLine) => void
-    },
-    signal: AbortSignal,
-  ) => Promise<{ ok: boolean, chunks: number, error?: string }>
+  ) => Promise<{ ok: boolean, started: boolean, error?: string }>
+  /**
+   * One collection's running or last build job.
+   *
+   * `null` means no build has run since the host started — a normal state for a
+   * freshly opened page, distinct from a build that failed.
+   */
+  buildStatus?: (collectionId: string) => Promise<BuildJobView | null>
+  /** Cancel a running build. */
+  cancelBuild?: (collectionId: string) => Promise<{ cancelled: boolean }>
+  /**
+   * Run a retrieval for the diagnostic console.
+   *
+   * Deliberately separate from the tool the model calls: this one embeds the query
+   * itself, takes the score floor as a parameter, and reports timing plus the served
+   * snapshot. Those are what let a check distinguish "the index does not recall
+   * this" from "the threshold filtered it", which the conversation's tool block
+   * cannot show because it applies its floor silently.
+   */
+  retrieve?: (
+    collectionId: string,
+    query: string,
+    options: { topk?: number, minScore?: number, denseOnly?: boolean },
+  ) => Promise<RetrievalView>
+}
+
+/** One diagnostic retrieval result, as the host reports it. */
+export interface RetrievalView {
+  /** Hits, best first. */
+  hits: {
+    /** Source document id. */
+    docId: string
+    /** Source file name, resolved for display. */
+    docName: string
+    /** Chunk ordinal within the document. */
+    ordinal: number
+    /** Character range within the source, for locating the chunk. */
+    charStart: number
+    /** End character offset. */
+    charEnd: number
+    /** The chunk's full text — not a snippet: judging a chunk needs all of it. */
+    text: string
+    /** Normalized relevance in [0, 1]. */
+    matchScore: number
+    /** Confidence band derived from the score. */
+    band: 'strong' | 'relevant' | 'fair' | 'low'
+  }[]
+  /** Which passes actually ran. */
+  mode: 'hybrid' | 'dense'
+  /** Hits dropped by the floor — visible only here. */
+  belowFloor: number
+  /** Query embedding time in milliseconds. */
+  embeddedMs: number
+  /** Engine search time in milliseconds. */
+  searchedMs: number
+  /** Snapshot slot currently served, so a result is attributable to one build. */
+  activeSlot: string | null
+  /** Chunks in the served snapshot. */
+  chunks: number
+  /** Last successful build time, ISO-8601, or `null`. */
+  builtAt: string | null
+}
+
+/** One build job as the host reports it. */
+export interface BuildJobView {
+  /** Collection the job belongs to. */
+  collectionId: string
+  /** Whether the build is still running. */
+  running: boolean
+  /** Whether the build finished successfully. */
+  ok: boolean
+  /** Stages in pipeline order. */
+  stages: StageView[]
+  /** Items processed. */
+  processed: number
+  /** Total items; `0` until known. */
+  total: number
+  /** Fraction in [0, 1]. */
+  fraction: number
+  /** Log lines, oldest first. */
+  log: LogLine[]
+  /** ISO-8601 start time. */
+  startedAt: string
+  /** ISO-8601 settle time, or `null` while running. */
+  settledAt: string | null
+  /** Failure reason, when the job failed. */
+  error: string | null
+  /** Chunks published, once settled successfully. */
+  chunks: number
 }
 
 /** Options accepted by {@link KnowledgeBaseApp}. */
@@ -161,13 +250,12 @@ const PAGE_TITLES: Record<NavId, string> = {
   overview: '知识库',
   documents: '文档接入',
   build: '索引构建',
-  retrieval: '检索测试',
-  rag: 'RAG 问答',
+  retrieval: '检索验证',
   settings: '设置',
 }
 
 /** Destinations whose page is not part of this slice. */
-const PENDING_PAGES: NavId[] = ['documents', 'build', 'retrieval', 'rag', 'settings']
+const PENDING_PAGES: NavId[] = ['documents', 'build', 'settings']
 
 /** Human labels for lifecycle states. */
 const STATUS_LABELS: Record<StatusKind, string> = {

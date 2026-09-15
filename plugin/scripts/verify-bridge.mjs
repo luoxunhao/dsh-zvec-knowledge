@@ -53,6 +53,7 @@ const clientIndex = read('src/client/index.tsx')
 const transport = read('src/client/bridge-client.ts')
 const contract = read('src/shared/contract.ts')
 const hostIndex = read('src/index.ts')
+const panel = read('src/client/panel.tsx')
 
 // ---------------------------------------------------------------------------
 // 1. The channel exists end to end
@@ -173,7 +174,62 @@ check(
 )
 
 // ---------------------------------------------------------------------------
-// 4. The client bundle stays within the module table
+// 4. The build outlives the page that started it
+//
+// The original defect: the build ran *inside* the request that started it, and
+// the route wired `req.on('close')` to an abort controller. Navigating away,
+// switching panels or refreshing therefore cancelled the work, and the page could
+// never show real progress because one request returns one response. These checks
+// exist so that regression cannot come back unnoticed — the previous suite passed
+// with all of it in place.
+// ---------------------------------------------------------------------------
+{
+  const job = read('src/store/job.ts')
+  check(
+    'build: the job table exists and owns the build',
+    /startJob/.test(job) && /jobSnapshot/.test(job) && /cancelJob/.test(job),
+    'builds are launched into a process-side job table',
+  )
+  check(
+    'build: a request is no longer the build\'s lifetime',
+    !/req\.on\('close'[\s\S]{0,200}buildIndex/.test(bridge)
+      && /The request's lifetime deliberately does NOT govern/.test(bridge),
+    'the route launches the build and returns instead of holding the request open',
+  )
+  check(
+    'build: the bridge exposes status and cancel as separate calls',
+    /case 'buildStatus'/.test(bridge) && /case 'cancelBuild'/.test(bridge),
+    'progress is polled and cancellation is explicit, so neither is tied to a request',
+  )
+  check(
+    'build: both new methods are declared in the shared contract',
+    /'buildStatus'/.test(contract) && /'cancelBuild'/.test(contract),
+    'the two halves cannot drift on the method names',
+  )
+  check(
+    'build: the client polls for real progress rather than faking it',
+    /buildStatus/.test(transport) && /BUILD_POLL_MS/.test(panel),
+    'the panel polls the host job, so the stage/percentage are the host\'s own numbers',
+  )
+  check(
+    'build: a page reopened mid-build reattaches to the running job',
+    /const attach/.test(panel) && /snapshot\.running/.test(panel),
+    'an already-running build is picked up on mount instead of showing an idle form',
+  )
+  check(
+    'build: a stale engine handle is translated into an actionable message',
+    /collection is closed/i.test(job) && /重启 DSH/.test(job),
+    'the engine\'s bare "Collection is closed" is replaced with a cause and a next step',
+  )
+  check(
+    'build: the job table is disposed with the fiber',
+    /disposeJobs/.test(hostIndex),
+    'a hot reload cancels running builds rather than leaking them',
+  )
+}
+
+// ---------------------------------------------------------------------------
+// 5. The client bundle stays within the module table
 // ---------------------------------------------------------------------------
 {
   const bundlePath = join(ROOT, 'lib', 'client.js')

@@ -21,6 +21,7 @@
 
 import { readdirSync } from 'node:fs'
 import { isAbsolute } from 'node:path'
+import { performance } from 'node:perf_hooks'
 import { resolveStoreRoot } from '../store/paths.ts'
 import {
   createCollection as createSnapshotCollection,
@@ -48,6 +49,10 @@ import {
   type ChunkingConfig, type CostEstimate, type EmbeddingModel, type HybridWeights, type PreviewResult,
 } from '../store/strategy.ts'
 import { startBuild, type BuildLogLine, type BuildProgress, type EmbedFn } from '../store/build.ts'
+import {
+  cancelJob, disposeJobs, jobSnapshot, logPathFor, startJob,
+  type JobSnapshot,
+} from '../store/job.ts'
 import { EMBEDDING_DIMENSION, type IndexConfig } from '../store/collection.ts'
 import { admit, quotaState, type Quota, type QuotaState } from '../store/quota.ts'
 import { search, type SearchResult } from '../store/retrieval.ts'
@@ -189,6 +194,21 @@ export class KnowledgeOperations {
    * one workspace would still contend for one engine lock.
    */
   private readonly perWorkspace = new Map<string, KnowledgeOperations>()
+
+  /**
+   * The most recent build plan, keyed by collection and chunking config.
+   *
+   * The configurator calls `previewChunks` and `estimateCost` back to back on
+   * every parameter change, and both need the same chunking pass. Without this the
+   * corpus is chunked twice per edit — measured at ~28 ms each on a 1.2 MB
+   * collection, so ~19 s before the chunker itself was fixed. Holding one entry
+   * per collection is enough because the two calls differ only in the index
+   * config, and the plan does not depend on it.
+   *
+   * Invalidated whenever the document set changes, since a plan is a property of
+   * the corpus as well as of the config.
+   */
+  private readonly planCache = new Map<string, { key: string, plan: PreviewResult }>()
 
   /**
    * @param options - workspace, state directory, embedding provider and counter.
@@ -543,7 +563,28 @@ export class KnowledgeOperations {
   async previewChunks(collectionId: string, chunking: ChunkingConfig): Promise<PreviewResult> {
     const reason = validateChunking(chunking)
     if (reason !== null) throw new Error(reason)
-    return planBuild(listDocuments(this.storeRoot, collectionId), chunking)
+    return this.planFor(collectionId, chunking)
+  }
+
+  /**
+   * The build plan for a collection and chunking config, chunked at most once.
+   *
+   * Shared by {@link previewChunks} and {@link estimateCost} because the two are
+   * called together and need the same pass; the cache key includes the document
+   * count and the newest upload time so an added or removed document invalidates
+   * it without the store having to notify anyone.
+   * @param collectionId - collection identifier.
+   * @param chunking - chunking configuration.
+   * @returns the preview rows and summary.
+   */
+  private planFor(collectionId: string, chunking: ChunkingConfig): PreviewResult {
+    const documents = listDocuments(this.storeRoot, collectionId)
+    const key = `${documents.length}|${documents[documents.length - 1]?.uploadedAt ?? ''}|${JSON.stringify(chunking)}`
+    const cached = this.planCache.get(collectionId)
+    if (cached !== undefined && cached.key === key) return cached.plan
+    const plan = planBuild(documents, chunking)
+    this.planCache.set(collectionId, { key, plan })
+    return plan
   }
 
   /**
@@ -555,6 +596,8 @@ export class KnowledgeOperations {
    */
   async estimateCost(collectionId: string, chunking: ChunkingConfig, index: IndexConfig): Promise<CostEstimate> {
     const self = this.bound()
+    // Reuses the preview's chunking pass rather than re-chunking: the two calls
+    // arrive together from the configurator, and the plan is independent of `index`.
     const plan = await self.previewChunks(collectionId, chunking)
     return estimateCost(plan, index, self.dimension)
   }
@@ -569,16 +612,21 @@ export class KnowledgeOperations {
   }
 
   /**
-   * Run the index build into the inactive snapshot slot.
+   * Start an index build into the inactive snapshot slot.
+   *
+   * **This returns as soon as the build is launched, not when it finishes.** The
+   * build runs as a host-side job (see `store/job.ts`), so its lifetime is not
+   * tied to the HTTP request that started it: a page that navigates away, switches
+   * to another panel or is refreshed no longer cancels the work. The caller polls
+   * {@link buildStatus} for progress and {@link cancelBuildIndex} to stop it.
    *
    * The build target is always the slot that is *not* being served, which is what
    * makes "retrieval keeps answering from the previous snapshot" true rather than
    * aspirational. On success the pointer flips atomically.
    * @param collectionId - collection identifier.
    * @param strategy - chunking and index configuration.
-   * @param handlers - progress and log callbacks.
-   * @param signal - aborts the build.
-   * @returns the outcome.
+   * @param handlers - progress and log callbacks, retained for the job's lifetime.
+   * @returns the launch outcome; `ok` means "started", not "finished".
    */
   async buildIndex(
     collectionId: string,
@@ -587,8 +635,7 @@ export class KnowledgeOperations {
       onProgress: (progress: BuildProgress) => void
       onLog: (line: BuildLogLine) => void
     },
-    signal: AbortSignal,
-  ): Promise<{ ok: boolean, chunks: number, error?: string }> {
+  ): Promise<{ ok: boolean, started: boolean, chunks: number, error?: string }> {
     // One binding for the whole build. A build spans many awaits and writes a
     // snapshot, several slot pointers and a document log: resolving the workspace
     // again midway could publish a snapshot into a different store than the one it
@@ -596,19 +643,19 @@ export class KnowledgeOperations {
     const self = this.bound()
     const embed = self.embed
     if (embed === undefined) {
-      return { ok: false, chunks: 0, error: '宿主未提供嵌入模型，无法构建索引' }
+      return { ok: false, started: false, chunks: 0, error: '宿主未提供嵌入模型，无法构建索引' }
     }
     const chunkingReason = validateChunking(strategy.chunking)
-    if (chunkingReason !== null) return { ok: false, chunks: 0, error: chunkingReason }
+    if (chunkingReason !== null) return { ok: false, started: false, chunks: 0, error: chunkingReason }
     const indexReason = validateIndex(strategy.index)
-    if (indexReason !== null) return { ok: false, chunks: 0, error: indexReason }
+    if (indexReason !== null) return { ok: false, started: false, chunks: 0, error: indexReason }
 
     const root = self.storeRoot
     const meta = readMeta(root, collectionId)
-    if (meta === null) return { ok: false, chunks: 0, error: `知识库 ${collectionId} 不存在` }
+    if (meta === null) return { ok: false, started: false, chunks: 0, error: `知识库 ${collectionId} 不存在` }
 
     const records = listDocuments(root, collectionId)
-    if (records.length === 0) return { ok: false, chunks: 0, error: '该知识库还没有文档' }
+    if (records.length === 0) return { ok: false, started: false, chunks: 0, error: '该知识库还没有文档' }
 
     // A build writes a whole snapshot, so admission is checked against its planned
     // footprint rather than zero. Without this a rebuild could double a store that
@@ -618,38 +665,57 @@ export class KnowledgeOperations {
     const projectedBytes = estimateCost(plan, strategy.index, self.dimension).vectorBytes
       + records.reduce((sum, record) => sum + Buffer.byteLength(record.text, 'utf8'), 0)
     const admission = admit(root, self.quota, projectedBytes, '重建该知识库的索引')
-    if (!admission.allowed) return { ok: false, chunks: 0, error: admission.reason ?? '存储配额不足' }
+    if (!admission.allowed) return { ok: false, started: false, chunks: 0, error: admission.reason ?? '存储配额不足' }
 
     const slot = inactiveSlot(meta)
-    const running = startBuild({
-      storeRoot: root,
+    const launch = startJob(
       collectionId,
-      slot,
-      index: strategy.index,
-      documents: records.map(record => ({ docId: record.id, text: record.text })),
-      chunking: strategy.chunking,
-      embed,
-      dimension: self.dimension,
-      onProgress: handlers.onProgress,
-      onLog: handlers.onLog,
-    })
-
-    const onAbort = (): void => running.cancel()
-    signal.addEventListener('abort', onAbort, { once: true })
-    try {
-      const result = await running.done
-      // A published build moves every document to 已构建 with its real chunk
-      // count; a cancelled or failed one leaves them 待构建, because nothing was
-      // published.
-      if (result.ok) {
-        const published = readMeta(root, collectionId)
-        markPublished(root, collectionId, records, result.chunks, published)
-        releaseSlot(root, collectionId, slot)
-      }
-      return { ok: result.ok, chunks: result.chunks, ...(result.error === undefined ? {} : { error: result.error }) }
-    } finally {
-      signal.removeEventListener('abort', onAbort)
+      logPathFor(root, collectionId),
+      hooks => startBuild({
+        storeRoot: root,
+        collectionId,
+        slot,
+        index: strategy.index,
+        documents: records.map(record => ({ docId: record.id, text: record.text })),
+        chunking: strategy.chunking,
+        embed,
+        dimension: self.dimension,
+        onProgress: hooks.onProgress,
+        onLog: hooks.onLog,
+      }),
+    )
+    if (!launch.started) {
+      return { ok: false, started: false, chunks: 0, error: launch.reason ?? '构建未能启动' }
     }
+
+    // The harness callbacks are superseded by the job's own record: a caller that
+    // supplied them would otherwise receive progress it can no longer deliver,
+    // since the request has already returned.
+    void handlers
+
+    // Publication is the job's business, so it is chained here rather than left to
+    // the caller: the pointer flip and the document-status update must happen even
+    // if nobody is polling.
+    void afterJobSettles(root, collectionId, slot, records)
+    return { ok: true, started: true, chunks: 0 }
+  }
+
+  /**
+   * One collection's running or last build job.
+   * @param collectionId - collection identifier.
+   * @returns the snapshot, or `null` when no build has run in this process.
+   */
+  buildStatus(collectionId: string): JobSnapshot | null {
+    return jobSnapshot(collectionId)
+  }
+
+  /**
+   * Cancel a running build.
+   * @param collectionId - collection identifier.
+   * @returns whether a running job was asked to stop.
+   */
+  cancelBuildIndex(collectionId: string): boolean {
+    return cancelJob(collectionId)
   }
 
   /**
@@ -715,6 +781,100 @@ export class KnowledgeOperations {
     const first = vectors[0]
     if (first === undefined) throw new Error('嵌入模型未返回向量')
     return first
+  }
+
+  /**
+   * Run a retrieval for the diagnostic console.
+   *
+   * Distinct from {@link search} in three ways that matter for *validation*, as
+   * opposed to answering:
+   *
+   * 1. **It embeds the query itself.** The tool-facing `search` takes a vector
+   *    because the tool embeds through a different path; here the whole point is to
+   *    exercise the same end-to-end recall a real query would.
+   * 2. **The floor is a parameter, not a constant.** Lowering it to 0 is how a
+   *    check answers "did the index simply not rank this, or did the threshold eat
+   *    it?" — a question the conversation's tool block cannot show, because there
+   *    the floor is applied silently.
+   * 3. **It reports the served snapshot and timing**, so a result can be attributed
+   *    to a specific build rather than to "whatever was live at the time".
+   *
+   * It deliberately does not generate an answer: RAG belongs to the dsh
+   * conversation (KB-09). This exists to judge the plugin's own artifacts — whether
+   * chunking produced sensible units and whether vector recall works — which the
+   * tool-call block cannot show, since it renders only what one query happened to
+   * match.
+   * @param collectionId - collection identifier.
+   * @param query - query text.
+   * @param options - topk, floor and whether to force dense-only.
+   * @returns hits, the mode that ran, the floor's effect, and index facts.
+   * @throws {Error} when the collection is unknown or no embedding provider exists.
+   */
+  async retrieveForDiagnostics(
+    collectionId: string,
+    query: string,
+    options: { topk?: number, minScore?: number, denseOnly?: boolean } = {},
+  ): Promise<{
+    hits: HitView[]
+    mode: 'hybrid' | 'dense'
+    belowFloor: number
+    embeddedMs: number
+    searchedMs: number
+    activeSlot: string | null
+    chunks: number
+    builtAt: string | null
+  }> {
+    const self = this.bound()
+    const root = self.storeRoot
+    const meta = readMeta(root, collectionId)
+    if (meta === null) throw new Error(`知识库 ${collectionId} 不存在`)
+    if (query.trim() === '') throw new Error('查询内容不能为空')
+
+    const topk = Math.min(Math.max(options.topk ?? 8, 1), 50)
+    // Clamped to [0, 1] because a negative floor would be meaningless and a floor
+    // above 1 would silently return nothing, which reads as a broken index.
+    const minScore = Math.min(Math.max(options.minScore ?? 0, 0), 1)
+
+    const embedStarted = performance.now()
+    const vector = await self.embedQuery(query)
+    const embeddedMs = performance.now() - embedStarted
+
+    const names = new Map(listDocuments(root, collectionId).map(record => [record.id, record.name]))
+    const searchStarted = performance.now()
+    const result: SearchResult = withServed(root, collectionId, handle => {
+      // A dense-only run is how a caller separates the two recall paths: if dense
+      // alone misses and hybrid finds it, the full-text index is carrying the query.
+      if (handle === null) return { hits: [], mode: 'dense' as const, belowFloor: 0 }
+      return search(handle, {
+        vector,
+        ...(options.denseOnly === true ? {} : { text: query }),
+        topk,
+      }, minScore)
+    })
+    const searchedMs = performance.now() - searchStarted
+
+    // The console is a *read*, so it must not inflate the retrieval statistics the
+    // overview shows: a hit counter that counted diagnostic runs would make the
+    // seven-day figure describe the operator's probing rather than real use.
+    return {
+      mode: result.mode,
+      belowFloor: result.belowFloor,
+      embeddedMs,
+      searchedMs,
+      activeSlot: meta.active,
+      chunks: meta.chunks,
+      builtAt: meta.builtAt,
+      hits: result.hits.map(hit => ({
+        docId: hit.docId,
+        docName: names.get(hit.docId) ?? hit.docId,
+        ordinal: hit.ordinal,
+        charStart: hit.charStart,
+        charEnd: hit.charEnd,
+        text: hit.text,
+        matchScore: hit.matchScore,
+        band: hit.band,
+      })),
+    }
   }
 
   /**
@@ -825,6 +985,47 @@ function markPublished(
   } catch {
     // Best effort: the index published successfully, and a stale status line is
     // recoverable by the next rebuild.
+  }
+}
+
+/**
+ * Wait for a launched job to settle, then apply its consequences.
+ *
+ * Publication must not depend on anyone still watching: the browser that started
+ * the build may be gone by the time it finishes, and the snapshot pointer flip and
+ * document-status update are part of the build, not of the response. So this is
+ * chained at launch time rather than driven by a poll.
+ *
+ * Chapter two of the same rule: a *successful* build releases its staging slot's
+ * handle, while a failed or cancelled one leaves the slot already discarded by
+ * `startBuild`. Closing the successful one is what lets the next build recreate
+ * that directory — the engine demands an absent path.
+ * @param root - absolute store root.
+ * @param collectionId - collection identifier.
+ * @param slot - the slot the build wrote into.
+ * @param records - the documents that were built.
+ */
+async function afterJobSettles(
+  root: string,
+  collectionId: string,
+  slot: 'a' | 'b',
+  records: DocumentRecord[],
+): Promise<void> {
+  // Polls the job record rather than holding the build's own promise, because the
+  // promise is owned by the job module and this function only has the id.
+  for (;;) {
+    const snapshot = jobSnapshot(collectionId)
+    if (snapshot === null || snapshot.settledAt !== null) {
+      if (snapshot?.ok === true) {
+        // A published build moves every document to 已构建 with its real chunk
+        // count; a cancelled or failed one leaves them 待构建, because nothing was
+        // published.
+        markPublished(root, collectionId, records, snapshot.chunks, readMeta(root, collectionId))
+        releaseSlot(root, collectionId, slot)
+      }
+      return
+    }
+    await new Promise(resolve => setTimeout(resolve, 250))
   }
 }
 

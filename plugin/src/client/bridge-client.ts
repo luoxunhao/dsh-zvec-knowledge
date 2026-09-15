@@ -23,7 +23,7 @@ import {
   type KbApiResponse,
 } from '../shared/contract.ts'
 import type {
-  KnowledgeBasePort, HostCollection, HostDocument,
+  KnowledgeBasePort, HostCollection, HostDocument, BuildJobView, RetrievalView,
 } from './app.tsx'
 import type { BuildRecord } from './pages/OverviewPage.tsx'
 import type { StorageUsage } from './components/StorageUsageCard.tsx'
@@ -216,56 +216,39 @@ export function createHostPort(): KnowledgeBasePort {
       return stored.chunking === null ? null : { chunking: stored.chunking, index: stored.index }
     },
 
-    // The build's progress arrives on the same request that runs it, so this call
-    // cannot stream: it resolves once with the outcome. The pipeline is therefore
-    // shown as running rather than as a live fraction, and the log carries one line
-    // at each boundary so the user can tell the request was accepted. Making it live
-    // needs a streaming carrier (SSE on a second route), which is deliberately not
-    // in this slice — the honest interface says "running", not a fake percentage.
-    buildIndex: async (collectionId, strategy, handlers, signal) => {
-      const stages: StageView[] = STAGES.map(id => ({ id, label: STAGE_LABELS[id], state: 'running' }))
-      handlers.onProgress({ stages, processed: 0, total: 0, fraction: 0 })
-      handlers.onLog({ at: new Date().toISOString(), level: 'info', message: '已提交构建请求，宿主正在处理…' })
+    // Submit-and-poll. The host runs the build as a job of its own, so this call
+    // resolves as soon as the job is launched and the panel polls `buildStatus`
+    // for the real stages, counts and log lines. The previous revision held the
+    // whole build inside this one request, which is why the page showed a fake
+    // `0 / 0 · 0%` and why leaving the page cancelled the work.
+    buildIndex: (collectionId, strategy) =>
+      call<{ ok: boolean, started: boolean, error?: string }>(
+        'buildIndex', { collectionId, strategy },
+      ),
 
-      const result = await call<{ ok: boolean, chunks: number, error?: string }>(
-        'buildIndex', { collectionId, strategy }, signal,
-      )
+    buildStatus: (collectionId: string): Promise<BuildJobView | null> =>
+      call<BuildJobView | null>('buildStatus', { collectionId }),
 
-      const finished: StageView[] = STAGES.map(id => ({
-        id,
-        label: STAGE_LABELS[id],
-        state: result.ok ? 'done' : 'pending',
-      }))
-      handlers.onProgress({
-        stages: finished,
-        processed: result.chunks,
-        total: result.chunks,
-        fraction: result.ok ? 1 : 0,
-      })
-      handlers.onLog({
-        at: new Date().toISOString(),
-        level: result.ok ? 'success' : 'error',
-        message: result.ok
-          ? `构建完成，已发布 ${result.chunks} 个分片`
-          : `构建未完成：${result.error ?? '未知原因'}`,
-      })
-      return result
-    },
+    cancelBuild: (collectionId: string): Promise<{ cancelled: boolean }> =>
+      call<{ cancelled: boolean }>('cancelBuild', { collectionId }),
+
+    retrieve: (collectionId: string, query: string, options): Promise<RetrievalView> =>
+      call<RetrievalView>('retrieve', { collectionId, query, ...options }),
   }
 }
 
 /**
  * The build pipeline's stages, in order.
  *
- * Duplicated from the host's `STAGES` rather than imported: the client bundle may
- * not import host code (a host module pulls Node built-ins into the browser), and
- * the pipeline is presentation — the host reports an outcome, the interface names
- * the steps it took. The two are asserted equal by `verify-load-safety`.
+ * Kept because the panel needs a sensible stage list to render *before* the first
+ * poll answers; the authoritative list comes from the host's job snapshot. The
+ * client bundle may not import host code (a host module pulls Node built-ins into
+ * the browser), and `verify-load-safety` asserts the two lists agree.
  */
-const STAGES = ['parse', 'chunk', 'index', 'publish'] as const
+export const STAGES = ['parse', 'chunk', 'index', 'publish'] as const
 
 /** Display names for those stages. */
-const STAGE_LABELS: Record<typeof STAGES[number], string> = {
+export const STAGE_LABELS: Record<typeof STAGES[number], string> = {
   parse: '解析文档',
   chunk: '切分',
   index: '向量化与索引',

@@ -341,31 +341,53 @@ export async function dispatch(
     }
 
     case 'buildIndex': {
-      const controller = new AbortController()
-      // The build is long-running: the request that starts it returns only when the
-      // build settles. A client that navigates away aborts the fetch, and the route
-      // handler's `req.on('close')` forwards that into this signal, so the host does
-      // not keep embedding vectors for a page nobody is watching.
-      const onAbort = (): void => controller.abort()
-      handlers.signal?.addEventListener('abort', onAbort, { once: true })
-      try {
-        return await operations.buildIndex(
-          requireString(args.collectionId, 'collectionId'),
-          args.strategy as never,
-          {
-            onProgress: handlers.onProgress ?? (() => {}),
-            onLog: handlers.onLog ?? (() => {}),
-          },
-          controller.signal,
-        )
-      } finally {
-        handlers.signal?.removeEventListener('abort', onAbort)
-      }
+      // Launch-and-return. The build is a host-side job (`store/job.ts`), so the
+      // request that starts it is over as soon as it is running: progress is read
+      // back through `buildStatus`. Notably there is no `req.on('close')` wiring
+      // here — an earlier revision aborted the build when the client navigated
+      // away, which made "keep this page open" a requirement and left a stale
+      // engine handle behind on every interruption.
+      const launched = await operations.buildIndex(
+        requireString(args.collectionId, 'collectionId'),
+        args.strategy as never,
+        {
+          onProgress: handlers.onProgress ?? (() => {}),
+          onLog: handlers.onLog ?? (() => {}),
+        },
+      )
+      return launched
     }
+
+    case 'buildStatus': {
+      const collectionId = requireString(args.collectionId, 'collectionId')
+      // `null` rather than an error when no job has run in this process: "no build
+      // has happened since the host started" is a normal state a newly opened page
+      // hits immediately, not a failure.
+      return operations.buildStatus(collectionId)
+    }
+
+    case 'cancelBuild':
+      return { cancelled: operations.cancelBuildIndex(requireString(args.collectionId, 'collectionId')) }
 
     case 'embedQuery': {
       const vector = await operations.embedQuery(requireString(args.text, 'text'))
       return Array.from(vector)
+    }
+
+    case 'retrieve': {
+      // The diagnostic console's read. Separate from the tool's path on purpose:
+      // this one embeds the query itself and takes the score floor as a parameter,
+      // which is what makes "did the index miss this, or did the threshold eat it?"
+      // an answerable question — the tool applies its floor silently.
+      return operations.retrieveForDiagnostics(
+        requireString(args.collectionId, 'collectionId'),
+        requireString(args.query, 'query'),
+        {
+          ...(typeof args.topk === 'number' ? { topk: args.topk } : {}),
+          ...(typeof args.minScore === 'number' ? { minScore: args.minScore } : {}),
+          ...(args.denseOnly === true ? { denseOnly: true } : {}),
+        },
+      )
     }
 
     default:
@@ -448,11 +470,10 @@ export function registerKbBridge(
       }
       const args = (typeof body.args === 'object' && body.args !== null ? body.args : {}) as Record<string, unknown>
 
-      // A client that navigates away mid-build aborts the fetch; cancelling the
-      // host-side work with it is the whole reason the build takes a signal.
+      // The request's lifetime deliberately does NOT govern host-side work here.
+      // `buildIndex` launches a job and returns, so a client that navigates away
+      // leaves the build running — which is the whole point of the job table.
       const abort = new AbortController()
-      const onClose = (): void => abort.abort()
-      req.on('close', onClose)
 
       try {
         const operations = resolveOperations()
@@ -469,8 +490,6 @@ export function registerKbBridge(
           ...(missing ? { reason: 'not_found' as const } : {}),
           error: message,
         })
-      } finally {
-        req.off('close', onClose)
       }
     },
   })

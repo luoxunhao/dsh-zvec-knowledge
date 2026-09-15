@@ -83,7 +83,10 @@ export const KB_API_METHODS = [
   'estimateCost',
   'storedStrategy',
   'buildIndex',
+  'buildStatus',
+  'cancelBuild',
   'embedQuery',
+  'retrieve',
 ] as const
 
 /** One bridge method name. */

@@ -200,6 +200,24 @@ function cosine(a, b) {
     quota: { bytes: null, warnAt: 0.9 },
   })
 
+  /**
+   * Poll a build job until it settles.
+   *
+   * The build is a host-side job now, so a test that wants its outcome has to
+   * observe it rather than read it from the launch call.
+   * @param operations - the operations under test.
+   * @param collectionId - collection being built.
+   * @returns the settled snapshot.
+   */
+  const awaitJob = async (operations, collectionId) => {
+    for (let attempt = 0; attempt < 600; attempt += 1) {
+      const snapshot = operations.buildStatus(collectionId)
+      if (snapshot !== null && snapshot.settledAt !== null) return snapshot
+      await new Promise(resolve => setTimeout(resolve, 100))
+    }
+    throw new Error('build job did not settle within 60s')
+  }
+
   await ops.createCollection({ name: 'E2E', collectionId: 'kb_prod_2f8a', description: '' })
 
   const documents = [
@@ -212,16 +230,20 @@ function cosine(a, b) {
   }
   check('e2e: documents stored', (await ops.listDocuments('kb_prod_2f8a')).length === 3, '3 documents')
 
-  const build = await ops.buildIndex(
+  // `buildIndex` now *launches* a host-side job and returns immediately, so its
+  // `ok` means "started", not "succeeded". Awaiting the job's settled status is
+  // what keeps this assertion about the build's real outcome — a test that
+  // accepted the launch result would pass even if the build failed internally.
+  const launched = await ops.buildIndex(
     'kb_prod_2f8a',
     {
       chunking: { mode: 'heading', chunkTokens: 1024, overlapTokens: 128, minChunkTokens: 1, preserveCodeBlocks: true, splitTablesByRow: false },
       index: { kind: 'HNSW', m: 32, efConstruction: 200, quantize: 'INT8' },
     },
     { onProgress: () => {}, onLog: () => {} },
-    new AbortController().signal,
   )
-  check('e2e: the build succeeds against the real model', build.ok, `ok=${build.ok} chunks=${build.chunks} err=${build.error ?? '-'}`)
+  const build = await awaitJob(ops, 'kb_prod_2f8a')
+  check('e2e: the build succeeds against the real model', launched.started && build.ok, `ok=${build.ok} chunks=${build.chunks} err=${build.error ?? '-'}`)
 
   /**
    * Run a search through the operations layer.
