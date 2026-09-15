@@ -84,6 +84,7 @@ export const KB_API_METHODS = [
   'storedStrategy',
   'buildIndex',
   'buildStatus',
+  'buildPlan',
   'cancelBuild',
   'embedQuery',
   'retrieve',

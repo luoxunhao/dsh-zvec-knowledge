@@ -148,7 +148,25 @@ export interface KnowledgeBasePort {
   buildIndex?: (
     collectionId: string,
     strategy: { chunking: ChunkingDraft, index: IndexDraft },
+    /**
+     * `incremental` embeds only the documents that are not built yet, inheriting
+     * the rest from the served snapshot; `full` re-embeds every document. The host
+     * downgrades `incremental` to a full build when the strategy no longer matches
+     * the stored chunks, and says so in the build log.
+     */
+    mode?: 'incremental' | 'full',
   ) => Promise<{ ok: boolean, started: boolean, error?: string }>
+  /**
+   * Whether an incremental build is possible for this collection and strategy.
+   *
+   * Asked before building so the page can label the option truthfully. `false` is
+   * not an error: it means the stored chunks were cut with different parameters, so
+   * the next build must re-cut everything — and the reason is what the page shows.
+   */
+  buildPlan?: (
+    collectionId: string,
+    strategy: { chunking: ChunkingDraft, index: IndexDraft },
+  ) => Promise<{ possible: boolean, reason: string }>
   /**
    * One collection's running or last build job.
    *

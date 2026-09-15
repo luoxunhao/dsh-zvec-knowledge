@@ -230,6 +230,13 @@ export function KnowledgeBasePanel({ state, port }: KnowledgeBasePanelProps): Re
   const [log, setLog] = useState<LogLine[]>([])
   const [building, setBuilding] = useState(false)
   const [buildError, setBuildError] = useState<string | null>(null)
+  // A statement about the build, not a failure: "nothing to rebuild" and "the host
+  // downgraded this to a full rebuild" both belong here.
+  const [buildNotice, setBuildNotice] = useState<string | null>(null)
+  // Whether the host can build incrementally with the current parameters, and why
+  // not when it cannot. Queried so the page can label the option truthfully rather
+  // than offering a choice the host will override.
+  const [incrementalPlan, setIncrementalPlan] = useState<{ possible: boolean, reason: string } | null>(null)
   // Whether retrieval is currently served from a previous snapshot: true from
   // the moment a build starts until it publishes.
   const [servingPrevious, setServingPrevious] = useState(false)
@@ -349,6 +356,30 @@ export function KnowledgeBasePanel({ state, port }: KnowledgeBasePanelProps): Re
     return () => { cancelled = true }
   }, [port, selectedCollection, chunking, index])
 
+  // Ask the host whether an incremental build is possible with the current
+  // parameters. Re-queried whenever the strategy changes, so flipping a chunking
+  // field immediately shows that the next build must be a full one — which is the
+  // moment the user needs to know, not after they have committed.
+  useEffect(() => {
+    const plan = port?.buildPlan
+    if (plan === undefined || selectedCollection === null) {
+      setIncrementalPlan(null)
+      return
+    }
+    let cancelled = false
+    void (async () => {
+      try {
+        const result = await plan(selectedCollection, { chunking, index })
+        if (!cancelled) setIncrementalPlan(result)
+      } catch {
+        // A plan that cannot be read must not block the page: the build itself
+        // still decides, and `buildPlan` is a label rather than a gate.
+        if (!cancelled) setIncrementalPlan(null)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [port, selectedCollection, chunking, index])
+
   /**
    * Run the index build.
    *
@@ -356,17 +387,28 @@ export function KnowledgeBasePanel({ state, port }: KnowledgeBasePanelProps): Re
    * returns, and the polling effect below reports progress. That split is what lets
    * the user leave the page — the build is the host's, not this component's.
    */
-  const submitBuild = async (): Promise<void> => {
+  const submitBuild = async (buildMode: 'incremental' | 'full' = 'incremental'): Promise<void> => {
     if (port?.buildIndex === undefined || selectedCollection === null) return
     setBuildError(null)
     // The previous run's log is cleared only once the host has accepted the new
     // one, so a rejected submit does not blank the failure the user is reading.
     try {
-      const launched = await port.buildIndex(selectedCollection, { chunking, index })
+      const launched = await port.buildIndex(selectedCollection, { chunking, index }, buildMode)
       if (!launched.started) {
-        setBuildError(launched.error ?? '构建未能启动')
+        // `started: false` with no error is the host reporting there is nothing to
+        // do — every document is already indexed under these parameters. That is a
+        // success, not a failure, so it must not be shown as one.
+        if (launched.error === undefined) {
+          setBuildError(null)
+          setBuildNotice('所有文档均已构建且参数未变更，无需重建。')
+          setBuilding(false)
+          setServingPrevious(false)
+          return
+        }
+        setBuildError(launched.error)
         return
       }
+      setBuildNotice(null)
       setBuilding(true)
       setLog([])
       setProcessed(0)
@@ -577,9 +619,15 @@ export function KnowledgeBasePanel({ state, port }: KnowledgeBasePanelProps): Re
             buildError={buildError}
             servingPreviousSnapshot={servingPrevious}
             hasDocuments={documents.length > 0}
-            onSubmit={() => { void submitBuild() }}
+            // How many documents would be embedded / reused, so the button can say
+            // what it is about to do rather than leaving the user to guess.
+            pendingDocuments={documents.filter(document => document.status !== 'ready').length}
+            totalDocuments={documents.length}
+            incrementalPlan={incrementalPlan}
+            buildNotice={buildNotice}
+            onSubmit={mode => { void submitBuild(mode) }}
             onCancel={cancelBuild}
-            onRetry={() => { void submitBuild() }}
+            onRetry={() => { void submitBuild('full') }}
             onReset={() => {
               setChunking(CHUNKING_FALLBACK)
               setIndex(INDEX_FALLBACK)

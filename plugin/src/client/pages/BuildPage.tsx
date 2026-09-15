@@ -158,8 +158,22 @@ export interface BuildPageProps {
   servingPreviousSnapshot: boolean
   /** Whether the collection has any documents. */
   hasDocuments: boolean
-  /** Submit the strategy and rebuild. */
-  onSubmit: () => void
+  /** Documents not yet built, which an incremental build would embed. */
+  pendingDocuments?: number
+  /** Documents in the collection. */
+  totalDocuments?: number
+  /**
+   * Whether the host can build incrementally with the current parameters.
+   *
+   * `null` while it is still being asked. `possible: false` is not an error — the
+   * strategy changed, so every document must be re-cut — and its `reason` is what
+   * the page shows, instead of offering a choice the host would override.
+   */
+  incrementalPlan?: { possible: boolean, reason: string } | null
+  /** A statement about the build: nothing to rebuild, or a forced full rebuild. */
+  buildNotice?: string | null
+  /** Submit the strategy and rebuild, in the chosen mode. */
+  onSubmit: (mode: 'incremental' | 'full') => void
   /** Cancel a running build. */
   onCancel: () => void
   /** Retry a failed build. */
@@ -222,12 +236,22 @@ export function BuildPage({
   collectionId, chunking, onChunkingChange, index, onIndexChange,
   preview, previewError = null, cost, models, quantizers,
   stages, processed, total, fraction, log, running, buildError = null,
-  servingPreviousSnapshot, hasDocuments, onSubmit, onCancel, onRetry, onReset,
+  servingPreviousSnapshot, hasDocuments,
+  pendingDocuments = 0, totalDocuments = 0, incrementalPlan = null, buildNotice = null,
+  onSubmit, onCancel, onRetry, onReset,
 }: BuildPageProps): React.JSX.Element {
   const [logOpen, setLogOpen] = useState(false)
+  // Which documents to embed. Defaults to the cheap path, because the common
+  // action here is "I uploaded something, index it" — and the host downgrades to a
+  // full rebuild anyway when the parameters no longer allow reuse.
+  const [mode, setMode] = useState<'incremental' | 'full'>('incremental')
   const chunkingError = useMemo(() => validateChunkingDraft(chunking), [chunking])
   const weightsError = useMemo(() => validateWeightsDraft(index), [index])
   const model = models.find(item => item.id === index.model)
+
+  // Whether the host will actually build incrementally. Asked rather than assumed:
+  // the page cannot see the stored strategy, and only two conditions allow reuse.
+  const incrementalAllowed = incrementalPlan === null || incrementalPlan.possible
 
   // Open the log automatically when a build starts: the user asked for it, and a
   // collapsed log during an active build hides the only running commentary.
@@ -493,18 +517,58 @@ export function BuildPage({
         </div>
       </div>
 
-      {/* 5. The action row, after both columns and the estimate. */}
+      {/* 5. The action row, after both columns and the estimate.
+          The mode is an explicit choice rather than something inferred, because
+          "which documents get re-embedded" changes what the user is paying for and
+          how long it takes — and the host can only tell whether it is *allowed*,
+          not whether the user wanted it. */}
       <div className={styles.submit}>
-        <Button
-          variant="primary"
-          icon="refresh"
-          onClick={onSubmit}
-          loading={running}
-          loadingLabel="构建中…"
-          disabled={submitDisabled}
-        >
-          保存并重建索引
-        </Button>
+        <div className={styles.submitChoice}>
+          <SegmentedControl
+            label="构建范围"
+            options={[
+              {
+                value: 'incremental',
+                // The label states the cost, not just the mode: "只构建新文档" is what
+                // the user is choosing between, and the count makes it concrete.
+                label: incrementalPlan?.possible === false
+                  ? '仅新增（不可用）'
+                  : `仅新增${pendingDocuments > 0 ? `（${pendingDocuments} 篇）` : ''}`,
+              },
+              { value: 'full', label: `全部重建${totalDocuments > 0 ? `（${totalDocuments} 篇）` : ''}` },
+            ]}
+            value={incrementalAllowed ? 'incremental' : 'full'}
+            onChange={value => { setMode(value as 'incremental' | 'full') }}
+          />
+          <Button
+            variant="primary"
+            icon="refresh"
+            onClick={() => onSubmit(mode)}
+            loading={running}
+            loadingLabel="构建中…"
+            disabled={submitDisabled}
+          >
+            保存并重建索引
+          </Button>
+        </div>
+
+        {/* Why the cheap option is unavailable. Shown beside the control the user
+            would otherwise reach for, so "it is greyed out" is never unexplained. */}
+        {incrementalPlan?.possible === false && (
+          <p className={styles.submitHint}>
+            <Icon name="info" size={14} /> {incrementalPlan.reason}，本次将全量重建。
+          </p>
+        )}
+        {pendingDocuments === 0 && incrementalAllowed && hasDocuments && (
+          <p className={styles.submitHint}>
+            <Icon name="info" size={14} /> 所有文档均已构建，选择「仅新增」将没有需要嵌入的内容。
+          </p>
+        )}
+        {buildNotice !== null && (
+          <p className={styles.submitHint} role="status">
+            <Icon name="info" size={14} /> {buildNotice}
+          </p>
+        )}
         {!hasDocuments && <span className={styles.submitHint}>该知识库还没有文档，请先在「文档」中上传。</span>}
       </div>
 

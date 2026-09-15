@@ -175,16 +175,30 @@
 }
 
 /* The action row sits after the estimate in source order; `justify-content`
- * only positions it within its own row and cannot move it above the estimate. */
+ * only positions it within its own row and cannot move it above the estimate.
+ * It stacks the mode control above the button, with the explanatory lines under
+ * both, so the choice reads before the consequence. */
 .submit {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--kb-space-2);
+  padding-top: var(--kb-space-2);
+}
+
+/* The mode control and the submit button sit on one line where there is room; they
+ * wrap rather than squeezing the segmented control's labels. */
+.submitChoice {
   display: flex;
   align-items: center;
   gap: var(--kb-space-3);
   flex-wrap: wrap;
-  padding-top: var(--kb-space-2);
 }
 
 .submitHint {
+  display: flex;
+  align-items: center;
+  gap: var(--kb-space-2);
   font-size: var(--kb-size-caption);
   line-height: var(--kb-leading-caption);
   color: var(--kb-text-tertiary);

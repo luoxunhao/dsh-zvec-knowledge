@@ -221,10 +221,13 @@ export function createHostPort(): KnowledgeBasePort {
     // for the real stages, counts and log lines. The previous revision held the
     // whole build inside this one request, which is why the page showed a fake
     // `0 / 0 · 0%` and why leaving the page cancelled the work.
-    buildIndex: (collectionId, strategy) =>
+    buildIndex: (collectionId, strategy, mode) =>
       call<{ ok: boolean, started: boolean, error?: string }>(
-        'buildIndex', { collectionId, strategy },
+        'buildIndex', { collectionId, strategy, ...(mode === undefined ? {} : { mode }) },
       ),
+
+    buildPlan: (collectionId: string, strategy): Promise<{ possible: boolean, reason: string }> =>
+      call<{ possible: boolean, reason: string }>('buildPlan', { collectionId, strategy }),
 
     buildStatus: (collectionId: string): Promise<BuildJobView | null> =>
       call<BuildJobView | null>('buildStatus', { collectionId }),

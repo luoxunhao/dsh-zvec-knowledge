@@ -612,6 +612,56 @@ export class KnowledgeOperations {
   }
 
   /**
+   * Whether an incremental build is possible, and why not when it is not.
+   *
+   * The decision is deliberately the host's rather than the page's: the page cannot
+   * see the stored strategy, and getting this wrong is silent. Reusing chunks that
+   * were cut with different parameters produces an index whose contents disagree
+   * with its own configuration, and every chunk is still a valid vector — so
+   * nothing fails, the answers are just quietly wrong.
+   *
+   * Only two conditions block it, and both are hard requirements rather than
+   * preferences:
+   *
+   * 1. **Nothing is built yet.** There is no snapshot to inherit from.
+   * 2. **The strategy changed.** Different chunking re-cuts every document, and a
+   *    different index family or quantizer needs a different schema.
+   *
+   * A collection whose metadata predates the recorded chunking config is treated as
+   * changed, because an unknown value cannot be proven equal.
+   * @param collectionId - collection identifier.
+   * @param chunking - the strategy the caller wants to build with.
+   * @param index - the index configuration the caller wants to build with.
+   * @returns whether incremental is possible, and the reason when it is not.
+   */
+  incrementalViability(
+    collectionId: string,
+    chunking: ChunkingConfig,
+    index: IndexConfig,
+  ): { possible: boolean, reason: string } {
+    const meta = readMeta(this.storeRoot, collectionId)
+    if (meta === null) return { possible: false, reason: `知识库 ${collectionId} 不存在` }
+    if (meta.active === null) return { possible: false, reason: '该知识库尚未构建过，本次为首次全量构建' }
+
+    const storedIndexConfig = meta.index
+    if (storedIndexConfig.kind !== index.kind
+      || storedIndexConfig.quantize !== index.quantize
+      || storedIndexConfig.m !== index.m
+      || storedIndexConfig.efConstruction !== index.efConstruction) {
+      return { possible: false, reason: '索引参数已变更，需要全量重建' }
+    }
+
+    if (meta.chunking === null) {
+      return { possible: false, reason: '无法确认上次构建使用的切分参数，为安全起见全量重建' }
+    }
+    if (!sameChunking(meta.chunking, chunking)) {
+      return { possible: false, reason: '切分参数已变更，需要全量重建' }
+    }
+
+    return { possible: true, reason: '' }
+  }
+
+  /**
    * Start an index build into the inactive snapshot slot.
    *
    * **This returns as soon as the build is launched, not when it finishes.** The
@@ -626,6 +676,10 @@ export class KnowledgeOperations {
    * @param collectionId - collection identifier.
    * @param strategy - chunking and index configuration.
    * @param handlers - progress and log callbacks, retained for the job's lifetime.
+   * @param mode - `incremental` embeds only the documents that are not built yet,
+   *   inheriting the rest from the served snapshot; `full` re-embeds everything.
+   *   Either way the host downgrades to a full build when the strategy no longer
+   *   matches what the stored chunks were cut with, and reports that in the log.
    * @returns the launch outcome; `ok` means "started", not "finished".
    */
   async buildIndex(
@@ -635,6 +689,7 @@ export class KnowledgeOperations {
       onProgress: (progress: BuildProgress) => void
       onLog: (line: BuildLogLine) => void
     },
+    mode: 'incremental' | 'full' = 'incremental',
   ): Promise<{ ok: boolean, started: boolean, chunks: number, error?: string }> {
     // One binding for the whole build. A build spans many awaits and writes a
     // snapshot, several slot pointers and a document log: resolving the workspace
@@ -657,17 +712,60 @@ export class KnowledgeOperations {
     const records = listDocuments(root, collectionId)
     if (records.length === 0) return { ok: false, started: false, chunks: 0, error: '该知识库还没有文档' }
 
+    // Which documents actually need embedding. The point of the whole exercise:
+    // uploading one document into a twenty-document collection should cost one
+    // document's embedding work, not twenty.
+    //
+    // A document counts as already built when its status is `ready`, which is only
+    // set after a publish — so a document added since the last build is `pending`
+    // and is picked up here. Anything else (a failure, a cancelled build) is
+    // re-embedded, which is the safe direction.
+    const viability = self.incrementalViability(collectionId, strategy.chunking, strategy.index)
+    const useIncremental = mode === 'incremental' && viability.possible
+    const pending = records.filter(record => record.status !== 'ready')
+    const toEmbed = useIncremental ? pending : records
+
+    // A full build is required, but the caller asked for incremental. Saying so is
+    // the difference between "your upload was cheap" and "this silently re-cut
+    // everything"; the reason is logged so the build log explains itself.
+    if (mode === 'incremental' && !viability.possible) {
+      handlers.onLog({
+        at: new Date().toISOString(),
+        level: 'info',
+        message: `回退为全量重建：${viability.reason}`,
+      })
+    } else if (useIncremental && pending.length < records.length) {
+      handlers.onLog({
+        at: new Date().toISOString(),
+        level: 'info',
+        message: `增量构建：本次重建 ${pending.length} 篇，复用已构建的 ${records.length - pending.length} 篇`,
+      })
+    }
+
+    // Nothing to do is a real outcome, not an error: it means every document is
+    // already indexed under the current strategy. Reported rather than silently
+    // starting a build that would embed zero chunks.
+    if (toEmbed.length === 0) {
+      handlers.onLog({
+        at: new Date().toISOString(),
+        level: 'success',
+        message: '所有文档均已构建且参数未变更，无需重建',
+      })
+      return { ok: true, started: false, chunks: 0, error: undefined }
+    }
+
     // A build writes a whole snapshot, so admission is checked against its planned
     // footprint rather than zero. Without this a rebuild could double a store that
     // an upload had already been refused for — the quota would look unenforced at
     // exactly the moment it matters most.
-    const plan = planBuild(records, strategy.chunking)
+    const plan = planBuild(toEmbed, strategy.chunking)
     const projectedBytes = estimateCost(plan, strategy.index, self.dimension).vectorBytes
-      + records.reduce((sum, record) => sum + Buffer.byteLength(record.text, 'utf8'), 0)
+      + toEmbed.reduce((sum, record) => sum + Buffer.byteLength(record.text, 'utf8'), 0)
     const admission = admit(root, self.quota, projectedBytes, '重建该知识库的索引')
     if (!admission.allowed) return { ok: false, started: false, chunks: 0, error: admission.reason ?? '存储配额不足' }
 
     const slot = inactiveSlot(meta)
+    const incrementalFrom = useIncremental && meta.active !== null ? meta.active : undefined
     const launch = startJob(
       collectionId,
       logPathFor(root, collectionId),
@@ -676,7 +774,17 @@ export class KnowledgeOperations {
         collectionId,
         slot,
         index: strategy.index,
-        documents: records.map(record => ({ docId: record.id, text: record.text })),
+        documents: toEmbed.map(record => ({ docId: record.id, text: record.text })),
+        // The collection's own total, which incremental builds would otherwise
+        // under-report as just the documents they embedded.
+        allDocCount: records.length,
+        ...(incrementalFrom === undefined ? {} : { incrementalFrom }),
+        // A re-uploaded document's id is new, so it cannot collide with an old one.
+        // The ids that *can* collide are the ones already in the inherited snapshot
+        // being rebuilt, which is exactly `toEmbed` minus the genuinely new.
+        ...(incrementalFrom === undefined
+          ? {}
+          : { replacedDocIds: toEmbed.filter(record => record.chunks !== null).map(record => record.id) }),
         chunking: strategy.chunking,
         embed,
         dimension: self.dimension,
@@ -695,8 +803,9 @@ export class KnowledgeOperations {
 
     // Publication is the job's business, so it is chained here rather than left to
     // the caller: the pointer flip and the document-status update must happen even
-    // if nobody is polling.
-    void afterJobSettles(root, collectionId, slot, records)
+    // if nobody is polling. Only the embedded documents change status; the inherited
+    // ones keep the counts they already had.
+    void afterJobSettles(root, collectionId, slot, toEmbed, useIncremental)
     return { ok: true, started: true, chunks: 0 }
   }
 
@@ -952,39 +1061,62 @@ function toView(meta: SnapshotMeta, summary: ReturnType<typeof summarizeDocument
 }
 
 /**
- * Mark every document as built after a successful publish, with its chunk count.
+ * Mark documents as built after a successful publish, with their chunk counts.
+ *
+ * **Read-modify-write over the whole log, never a replace with just the built
+ * subset.** `replaceDocuments` swaps the entire document log, so writing only the
+ * documents this build embedded would delete every other document from the
+ * collection. An incremental build passes a subset here by definition, so this is
+ * the difference between "reused the old chunks" and "silently destroyed the
+ * documents it did not touch".
  *
  * The per-document split comes from the build's own chunking plan, so the stored
  * figure is what was actually written rather than a share computed afterwards.
- *
- * This previously recorded a count only when the build indexed a single document
- * and wrote `null` otherwise, on the reasoning that the split was unknown. It was
- * not unknown — the build had it and discarded it — and `null` is the 待构建
- * value, so a collection with several documents displayed 待构建 against every row
- * even though the whole of it had built successfully.
  * @param root - store root.
  * @param collectionId - collection identifier.
- * @param records - the documents that were built.
+ * @param built - the documents this build embedded.
  * @param chunksByDoc - chunks written per document id.
  * @param meta - metadata after publish.
  */
 function markPublished(
   root: string,
   collectionId: string,
-  records: DocumentRecord[],
+  built: DocumentRecord[],
   chunksByDoc: Record<string, number>,
   meta: SnapshotMeta | null,
 ): void {
   const at = meta?.builtAt ?? new Date().toISOString()
-  const updated = records.map(record => ({
-    ...record,
-    status: 'ready' as const,
-    // Falls back to the previously stored count when the build did not report one
-    // for this document (a document whose text was empty, say). Falling back to
-    // `null` instead would put the row back into 待构建 for no reason.
-    chunks: chunksByDoc[record.id] ?? record.chunks,
-    builtAt: at,
-  }))
+  // Keyed by id so the merge below is a lookup rather than a scan per document.
+  const builtById = new Map(built.map(record => [record.id, record]))
+  // The log as it stands, which for an incremental build includes every document
+  // this build did not touch. Those keep their recorded state; the built ones are
+  // refreshed from what the build actually did.
+  const current = listDocuments(root, collectionId)
+  const updated = current.map(record => {
+    const rebuilt = builtById.get(record.id)
+    if (rebuilt === undefined) return record
+    return {
+      ...record,
+      status: 'ready' as const,
+      // Falls back to the previously stored count when the build did not report one
+      // for this document (a document whose text was empty, say). Falling back to
+      // `null` instead would put the row back into 待构建 for no reason.
+      chunks: chunksByDoc[record.id] ?? rebuilt.chunks ?? record.chunks,
+      builtAt: at,
+    }
+  })
+  // A document the build embedded but which is somehow absent from the log is added
+  // rather than dropped: losing a record is worse than an unexpected row.
+  const currentIds = new Set(current.map(record => record.id))
+  for (const record of built) {
+    if (currentIds.has(record.id)) continue
+    updated.push({
+      ...record,
+      status: 'ready' as const,
+      chunks: chunksByDoc[record.id] ?? record.chunks,
+      builtAt: at,
+    })
+  }
   try {
     // Through the documents module's own helper so the rewrite is atomic; a
     // partial rewrite of the log is the one failure an append cannot express.
@@ -1015,13 +1147,16 @@ function markPublished(
  * @param root - absolute store root.
  * @param collectionId - collection identifier.
  * @param slot - the slot the build wrote into.
- * @param records - the documents that were built.
+ * @param records - the documents this build embedded. In an incremental build that
+ *   is a subset; the inherited documents already hold their counts and status.
+ * @param incremental - whether this build inherited chunks from the other slot.
  */
 async function afterJobSettles(
   root: string,
   collectionId: string,
   slot: 'a' | 'b',
   records: DocumentRecord[],
+  incremental: boolean,
 ): Promise<void> {
   await awaitJobSettled(collectionId)
   const snapshot = jobSnapshot(collectionId)
@@ -1032,8 +1167,31 @@ async function afterJobSettles(
       root, collectionId, records, snapshot.chunksByDoc,
       readMeta(root, collectionId),
     )
-    releaseSlot(root, collectionId, slot)
+    // A full build released the slot it wrote (the next build recreates it); an
+    // incremental one keeps it, because that snapshot is now the served one and
+    // holding its handle is what keeps the directory locked against a stale reader.
+    if (!incremental) releaseSlot(root, collectionId, slot)
   }
+}
+
+/**
+ * Whether two chunking configurations are equivalent.
+ *
+ * Compared field by field rather than by JSON text: the stored value and the
+ * caller's value are built independently, so key order is not something either can
+ * promise, and a text comparison would report a spurious change — forcing a full
+ * rebuild of every document for no reason.
+ * @param left - one configuration.
+ * @param right - the other.
+ * @returns whether they describe the same chunking.
+ */
+function sameChunking(left: ChunkingConfig, right: ChunkingConfig): boolean {
+  return left.mode === right.mode
+    && left.chunkTokens === right.chunkTokens
+    && left.overlapTokens === right.overlapTokens
+    && left.minChunkTokens === right.minChunkTokens
+    && left.preserveCodeBlocks === right.preserveCodeBlocks
+    && left.splitTablesByRow === right.splitTablesByRow
 }
 
 /** Removes a staging slot's contents; used by tests and recovery paths. */

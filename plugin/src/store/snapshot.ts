@@ -24,7 +24,7 @@
  * @module dsh-zvec-knowledge/store/snapshot
  */
 
-import { existsSync, rmSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   ZVecCreateAndOpen, ZVecCollectionSchema,
@@ -33,6 +33,7 @@ import {
 import { assertCollectionId, collectionDir } from './paths.ts'
 import { readJsonOrNull, writeJsonAtomic, withFileLock } from './atomic.ts'
 import { buildSchema, type IndexConfig } from './collection.ts'
+import type { ChunkingConfig } from './chunk.ts'
 import { acquire, markActive, takeForWrite, type HandleLease } from './registry.ts'
 
 /** The two snapshot slots. */
@@ -55,6 +56,18 @@ export interface SnapshotMeta {
   builtAt: string | null
   /** Vector index configuration; needed because a reopen cannot accept one. */
   index: IndexConfig
+  /**
+   * Chunking configuration the active snapshot was built with.
+   *
+   * Recorded so an incremental build can tell whether the parameters still match
+   * what the stored chunks were cut with. Changing them re-cuts every document, so
+   * reusing the old vectors would produce an index whose chunks disagree with its
+   * own strategy — silently, since a wrong chunk is still a valid vector.
+   *
+   * `null` for a collection written before this field existed; a build treats an
+   * unknown value as a mismatch and rebuilds fully, which is the safe direction.
+   */
+  chunking: ChunkingConfig | null
   /** Slot currently being served. `null` before the first successful build. */
   active: Slot | null
   /** Chunks in the active snapshot, for the overview card. */
@@ -118,14 +131,16 @@ export interface ServedCollection {
  * @param meta - collection metadata; `active` is forced to `null`.
  * @throws {Error} when the collection already exists.
  */
-export async function createCollection(storeRoot: string, meta: Omit<SnapshotMeta, 'active' | 'builtAt' | 'chunks' | 'docs'>): Promise<SnapshotMeta> {
+export async function createCollection(storeRoot: string, meta: Omit<SnapshotMeta, 'active' | 'builtAt' | 'chunks' | 'docs' | 'chunking'>): Promise<SnapshotMeta> {
   const id = assertCollectionId(meta.id)
   const dir = collectionDir(storeRoot, id)
   return withFileLock(dir, () => {
     if (existsSync(dir)) {
       throw new Error(`collection ${id} already exists at ${dir}; creation is no-clobber`)
     }
-    const created: SnapshotMeta = { ...meta, builtAt: null, active: null, chunks: 0, docs: 0 }
+    // `chunking` starts null: nothing has been built, so no parameters have been
+    // used yet, and the first build always indexes everything regardless.
+    const created: SnapshotMeta = { ...meta, chunking: null, builtAt: null, active: null, chunks: 0, docs: 0 }
     writeMeta(storeRoot, created)
     return created
   })
@@ -213,6 +228,69 @@ export function resetSlot(storeRoot: string, id: string, slot: Slot, index: Inde
 }
 
 /**
+ * Clone the served snapshot into the inactive slot, for an incremental build.
+ *
+ * An incremental build must keep the chunks that are already indexed, and the
+ * engine offers no "copy these documents into a new collection" call — so the
+ * snapshot *directory* is copied and reopened. That works because every zvec
+ * artifact is self-contained: the vector index, the FTS store and the scalar
+ * columns all live under the slot directory, so a byte copy is a complete,
+ * consistent snapshot. The usual reason to avoid copying an open database (a
+ * write-ahead log mid-flight) does not apply: the active slot is never being
+ * written to — a build always targets the inactive one.
+ *
+ * The clone is only valid when the schema would be identical, so it is the
+ * caller's job to have established that the index and chunking configurations
+ * still match; a schema difference would be rejected by `ZVecOpen`.
+ * @param storeRoot - absolute store root.
+ * @param id - collection identifier.
+ * @param from - the slot to copy, normally the active one.
+ * @param to - the slot to write, normally the inactive one.
+ * @returns the number of bytes copied, for the build log.
+ * @throws {Error} when the source slot is absent or `to` already holds data.
+ */
+export function cloneSlot(storeRoot: string, id: string, from: Slot, to: Slot): number {
+  const source = slotDir(storeRoot, id, from)
+  const target = slotDir(storeRoot, id, to)
+  if (!existsSync(source)) {
+    throw new Error(`snapshot ${from} is missing, so it cannot be cloned for an incremental build`)
+  }
+  // The destination is cleared first: a previous failed build may have left a
+  // partial directory, and copying over it would merge two snapshots.
+  takeForWrite(storeRoot, id, to)
+  rmSync(target, { recursive: true, force: true })
+  const bytes = copyTree(source, target)
+  return bytes
+}
+
+/**
+ * Copy a directory tree, returning the bytes written.
+ *
+ * A plain recursive copy. The slot contents are small enough that a streaming
+ * implementation would add complexity without a benefit, and the build already
+ * reports progress at a coarser granularity.
+ * @param from - absolute source directory.
+ * @param to - absolute destination directory.
+ * @returns total bytes copied.
+ */
+function copyTree(from: string, to: string): number {
+  mkdirSync(to, { recursive: true })
+  let total = 0
+  for (const entry of readdirSync(from, { withFileTypes: true })) {
+    const sourcePath = join(from, entry.name)
+    const targetPath = join(to, entry.name)
+    if (entry.isDirectory()) {
+      total += copyTree(sourcePath, targetPath)
+      continue
+    }
+    if (!entry.isFile()) continue
+    copyFileSync(sourcePath, targetPath)
+    total += statSync(sourcePath).size
+  }
+  return total
+}
+
+/**
  * Publish a built slot by flipping the active pointer.
  *
  * The metadata write is the commit point: everything before it is invisible to
@@ -227,7 +305,7 @@ export async function publishSlot(
   storeRoot: string,
   id: string,
   slot: Slot,
-  counts: { chunks: number, docs: number },
+  counts: { chunks: number, docs: number, chunking?: ChunkingConfig },
 ): Promise<SnapshotMeta> {
   const dir = collectionDir(storeRoot, assertCollectionId(id))
   return withFileLock(dir, () => {
@@ -239,6 +317,9 @@ export async function publishSlot(
       builtAt: new Date().toISOString(),
       chunks: counts.chunks,
       docs: counts.docs,
+      // Recorded at publish time, which is the moment these parameters became the
+      // ones the served chunks were actually cut with.
+      ...(counts.chunking === undefined ? {} : { chunking: counts.chunking }),
     }
     writeMeta(storeRoot, updated)
     markActive(storeRoot, id, slot)

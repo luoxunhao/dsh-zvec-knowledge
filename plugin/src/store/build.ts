@@ -23,10 +23,10 @@
  */
 
 import { rmSync } from 'node:fs'
-import type { ZVecCollection } from '@zvec/zvec'
+import { ZVecOpen, type ZVecCollection } from '@zvec/zvec'
 import { chunkDocument, type Chunk, type ChunkingConfig } from './chunk.ts'
 import { chunkDocInput, chunkRowFromDoc, EMBEDDING_DIMENSION, FIELD_DOC_ID, FIELD_TEXT, VECTOR_FIELD, documentFilter, type ChunkRow, type IndexConfig } from './collection.ts'
-import { publishSlot, resetSlot, slotDir, type Slot } from './snapshot.ts'
+import { cloneSlot, publishSlot, resetSlot, slotDir, type Slot } from './snapshot.ts'
 import { adopt, releaseSlot } from './registry.ts'
 
 /** The four pipeline stages, in spec order. */
@@ -123,6 +123,32 @@ export interface BuildRequest {
   dimension?: number
   /** Documents to index. */
   documents: DocumentBuildRequest[]
+  /**
+   * Slot to inherit existing chunks from, for an incremental build.
+   *
+   * Set to the slot being served when only the listed documents need embedding:
+   * the snapshot is cloned into `slot` and the other documents' chunks are carried
+   * over. Omit it for a full build, which creates `slot` empty and embeds every
+   * document in `documents`.
+   */
+  incrementalFrom?: Slot
+  /**
+   * Documents whose previously indexed chunks must be dropped first.
+   *
+   * Only meaningful with {@link incrementalFrom}. A cloned slot still holds the
+   * chunks of any document being rebuilt — a re-uploaded file, or one whose text
+   * changed — and leaving them would make the superseded revision retrievable.
+   */
+  replacedDocIds?: string[]
+  /**
+   * Total documents in the collection after this build.
+   *
+   * Distinct from `documents.length` because an incremental build embeds only the
+   * changed documents while the collection holds all of them; without this the
+   * published document count would report just the newly built ones. Defaults to
+   * the number embedded, which is correct for a full build.
+   */
+  allDocCount?: number
   /** Chunking configuration. */
   chunking: ChunkingConfig
   /** Embedding provider. */
@@ -237,10 +263,35 @@ export function startBuild(request: BuildRequest): RunningBuild {
       if (controller.signal.aborted) return cancelled(0, 0, discarded)
 
       enter('index')
-      // The engine holds an exclusive lock per directory, so the registry is told
-      // to release any cached reader on this slot before the directory is recreated.
+      // Two ways to arrive at a writable slot, and the difference is the whole
+      // point of an incremental build:
+      //
+      // - `incremental` clones the served snapshot, so the chunks already indexed
+      //   are inherited and only the listed documents are re-embedded. Uploading
+      //   one document into a twenty-document collection then costs one document's
+      //   embedding work instead of all twenty.
+      // - otherwise the slot is created empty and every document is embedded.
+      //
+      // Either way the engine holds an exclusive lock per directory, so the registry
+      // is told to release any cached reader on the target slot first.
       releaseSlot(request.storeRoot, request.collectionId, request.slot)
-      handle = resetSlot(request.storeRoot, request.collectionId, request.slot, request.index, expectedWidth)
+      if (request.incrementalFrom !== undefined) {
+        const copied = cloneSlot(
+          request.storeRoot, request.collectionId, request.incrementalFrom, request.slot,
+        )
+        log('info', `已复制上一份快照（${(copied / 1024 / 1024).toFixed(1)} MB），仅重建变更的文档`)
+        handle = ZVecOpen(slotDir(request.storeRoot, request.collectionId, request.slot))
+        // The cloned slot may still hold chunks for a document being replaced — a
+        // re-upload of the same file, or a document whose content changed. Its old
+        // chunks are removed before the new ones are written, or the previous
+        // revision's text would stay retrievable and be cited.
+        for (const document of documents) {
+          if (!request.replacedDocIds?.includes(document.docId)) continue
+          handle.deleteByFilterSync(documentFilter(document.docId))
+        }
+      } else {
+        handle = resetSlot(request.storeRoot, request.collectionId, request.slot, request.index, expectedWidth)
+      }
       // Adopt immediately: the handle now owns the directory's lock, and a stale
       // registry entry would make the next acquire fail rather than reuse it.
       adopt(request.storeRoot, request.collectionId, request.slot, handle)
@@ -285,21 +336,39 @@ export function startBuild(request: BuildRequest): RunningBuild {
       // The count is read back from the engine rather than from the loop's own
       // tally, so a write the engine silently dropped cannot pass verification.
       const indexed = countChunks(handle)
-      if (indexed !== total) {
+      // An incremental build's slot holds the inherited chunks *plus* the ones just
+      // written, so the total is the engine's own figure and only the *added* part
+      // is what this build embedded. Asserting `indexed === total` here would fail
+      // on every incremental build by exactly the number of reused chunks.
+      const inherited = request.incrementalFrom === undefined ? 0 : indexed - total
+      if (request.incrementalFrom === undefined && indexed !== total) {
         throw new Error(`snapshot holds ${indexed} chunks but ${total} were expected`)
       }
+      if (inherited < 0) {
+        // The slot holds fewer chunks than this build wrote, which means the clone
+        // did not carry what it should have — a silently wrong index is worse than
+        // a failed build.
+        throw new Error(`快照中的分片数（${indexed}）少于本次写入（${total}），增量构建的基准快照不完整`)
+      }
+      const publishedChunks = indexed
+      // The collection's document total, which for an incremental build is larger
+      // than the number embedded here.
+      const allDocCount = request.allDocCount ?? documents.length
       await publishSlot(request.storeRoot, request.collectionId, request.slot, {
-        chunks: total,
-        docs: documents.length,
+        chunks: publishedChunks,
+        docs: allDocCount,
+        chunking: request.chunking,
       })
       processed = total
       stages[STAGES.indexOf('publish')]!.state = 'done'
-      log('success', `索引已发布：${total} 片 / ${documents.length} 篇`)
+      log('success', request.incrementalFrom === undefined
+        ? `索引已发布：${publishedChunks} 片 / ${allDocCount} 篇`
+        : `增量发布：新增 ${total} 片，复用 ${inherited} 片，共 ${publishedChunks} 片 / ${allDocCount} 篇`)
       emit()
       return {
         ok: true,
-        chunks: total,
-        docs: documents.length,
+        chunks: publishedChunks,
+        docs: allDocCount,
         discarded,
         // The per-document split, from the chunking stage's own plan. Reported
         // rather than recomputed so the stored count cannot disagree with what was

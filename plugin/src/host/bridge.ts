@@ -354,8 +354,20 @@ export async function dispatch(
           onProgress: handlers.onProgress ?? (() => {}),
           onLog: handlers.onLog ?? (() => {}),
         },
+        // Only the literal 'full' selects a full rebuild; anything else (absent, or
+        // an unrecognised value from an older page) takes the cheap path, which the
+        // host independently downgrades if the strategy no longer allows it.
+        args.mode === 'full' ? 'full' : 'incremental',
       )
       return launched
+    }
+
+    case 'buildPlan': {
+      // Whether an incremental build is possible, so the page can label the option
+      // honestly instead of offering a choice the host will override.
+      const collectionId = requireString(args.collectionId, 'collectionId')
+      const strategy = args.strategy as { chunking: never, index: never }
+      return operations.incrementalViability(collectionId, strategy.chunking, strategy.index)
     }
 
     case 'buildStatus': {
