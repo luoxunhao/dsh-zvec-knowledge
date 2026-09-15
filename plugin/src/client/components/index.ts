@@ -38,7 +38,7 @@ export {
   type DocumentRowData, type DocumentRowProps, type TransferState,
 } from './DocumentRow.tsx'
 export { NumberField, type NumberFieldProps } from './NumberField.tsx'
-export { ChunkPreview, type ChunkPreviewProps, type PreviewRowData } from './ChunkPreview.tsx'
+export { StrategyEvidence, type StrategyEvidenceProps } from './StrategyEvidence.tsx'
 export { CostEstimate, type CostEstimateProps } from './CostEstimate.tsx'
 export {
   BuildPipeline, formatLogTime,

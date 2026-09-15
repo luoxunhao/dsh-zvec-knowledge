@@ -23,12 +23,12 @@ import {
   type KbApiResponse,
 } from '../shared/contract.ts'
 import type {
-  KnowledgeBasePort, HostCollection, HostDocument, BuildJobView, RetrievalView,
+  KnowledgeBasePort, HostCollection, HostDocument, BuildJobView, RetrievalView, StrategyEvidenceView,
 } from './app.tsx'
 import type { BuildRecord } from './pages/OverviewPage.tsx'
 import type { StorageUsage } from './components/StorageUsageCard.tsx'
 import type {
-  HostPreview, HostCost, ChunkingDraft, IndexDraft,
+  HostCost, ChunkingDraft, IndexDraft,
 } from './pages/BuildPage.tsx'
 import type { StageView, LogLine } from './components/BuildPipeline.tsx'
 import type { QuotaStateView } from './components/QuotaNotice.tsx'
@@ -198,11 +198,11 @@ export function createHostPort(): KnowledgeBasePort {
       })
     },
 
-    previewChunks: (collectionId: string, chunking: ChunkingDraft): Promise<HostPreview> =>
-      call('previewChunks', { collectionId, chunking }),
-
     estimateCost: (collectionId: string, chunking: ChunkingDraft, index: IndexDraft): Promise<HostCost> =>
       call('estimateCost', { collectionId, chunking, index }),
+
+    strategyEvidence: (collectionId: string, chunking: ChunkingDraft): Promise<StrategyEvidenceView> =>
+      call<StrategyEvidenceView>('strategyEvidence', { collectionId, chunking }),
 
     // The host stores only the index half of the build strategy, so the chunking
     // half comes back as `null` and the caller keeps its current draft rather than

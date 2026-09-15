@@ -21,7 +21,7 @@ import { EmptyState } from './components/EmptyState.tsx'
 import { Button } from './components/Button.tsx'
 import type { StorageUsage } from './components/StorageUsageCard.tsx'
 import type { StatusKind } from './components/StatusPill.tsx'
-import type { HostPreview, HostCost, ChunkingDraft, IndexDraft } from './pages/BuildPage.tsx'
+import type { HostCost, ChunkingDraft, IndexDraft } from './pages/BuildPage.tsx'
 import type { StageView, LogLine } from './components/BuildPipeline.tsx'
 
 /** One collection as the host reports it. */
@@ -121,16 +121,19 @@ export interface KnowledgeBasePort {
   ) => Promise<HostDocument>
   /** Remove one document. */
   removeDocument?: (collectionId: string, id: string) => Promise<void>
-  /**
-   * Compute the chunk preview for a candidate chunking strategy.
-   *
-   * Host-side on purpose: the preview must come from the same chunker the build
-   * uses, or the two would eventually disagree — and the preview's whole purpose
-   * is to predict what the build will do.
-   */
-  previewChunks?: (collectionId: string, chunking: ChunkingDraft) => Promise<HostPreview>
   /** Estimate the cost of a plan. */
   estimateCost?: (collectionId: string, chunking: ChunkingDraft, index: IndexDraft) => Promise<HostCost>
+  /**
+   * Evidence that each configured chunking policy actually took effect.
+   *
+   * Replaces the corpus-wide chunk preview. It samples one document — the longest,
+   * because boundaries and code fences only break in long ones — so its cost is
+   * constant rather than linear in collection size, and it reports per-policy
+   * observations instead of corpus totals. The number of chunks a whole library
+   * produces is not something a user acts on; whether the strategy they configured
+   * is the strategy that runs is.
+   */
+  strategyEvidence?: (collectionId: string, chunking: ChunkingDraft) => Promise<StrategyEvidenceView>
   /** The strategy a collection was last built with, for a pre-filled configurator. */
   storedStrategy?: (collectionId: string) => Promise<{ chunking: ChunkingDraft, index: IndexDraft } | null>
   /**
@@ -244,6 +247,68 @@ export interface RetrievalView {
   chunks: number
   /** Last successful build time, ISO-8601, or `null`. */
   builtAt: string | null
+}
+
+/** One configuration setting and the evidence that it took effect. */
+export interface PolicyCheckView {
+  /** The setting's name. */
+  setting: string
+  /** The value in force. */
+  value: string
+  /** What was observed — measurement, not a restatement of the form. */
+  observed: string
+  /** Whether the setting demonstrably took effect. */
+  satisfied: boolean
+  /** Whether the sampled document could evidence this setting at all. */
+  applicable: boolean
+}
+
+/** One chunk's boundary, with enough context to judge it. */
+export interface ChunkEvidenceView {
+  /** Ordinal within the document. */
+  ordinal: number
+  /** Estimated tokens. */
+  tokens: number
+  /** Character range in the source. */
+  charStart: number
+  /** End character offset. */
+  charEnd: number
+  /** Heading path recorded for this chunk. */
+  heading: string | null
+  /** Leading text, verbatim, so structure is visible. */
+  head: string
+  /** Trailing text, where a boundary problem shows up. */
+  tail: string
+  /** The text shared with the previous chunk, in full. */
+  overlapText: string | null
+  /** Overlap size with the previous chunk, in tokens. */
+  overlapTokens: number
+  /** Whether the chunk starts on a heading boundary. */
+  startsAtHeading: boolean
+  /** Whether the chunk contains a fence. */
+  hasCodeFence: boolean
+  /** Whether the chunk begins inside a fence. */
+  startsInsideCodeFence: boolean
+  /** Whether the chunk contains a table row. */
+  hasTableRow: boolean
+}
+
+/** The strategy evidence report as the host produces it. */
+export interface StrategyEvidenceView {
+  /** The sampled document. */
+  document: { id: string, name: string, chars: number, chunks: number }
+  /** Why this document was chosen. */
+  sampledBecause: string
+  /** Whether any document existed to sample. */
+  available: boolean
+  /** Per-setting verification. */
+  checks: PolicyCheckView[]
+  /** The leading chunks with their boundaries. */
+  chunks: ChunkEvidenceView[]
+  /** Fragments dropped for falling below the minimum, with their text. */
+  discarded: { text: string, tokens: number }[]
+  /** How long the probe took. */
+  elapsedMs: number
 }
 
 /** One build job as the host reports it. */

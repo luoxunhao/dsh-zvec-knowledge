@@ -50,6 +50,7 @@ import {
   type ChunkingConfig, type CostEstimate, type EmbeddingModel, type PreviewResult, type QuantizerOption,
 } from '../store/strategy.ts'
 import { startBuild, type BuildLogLine, type BuildProgress, type EmbedFn } from '../store/build.ts'
+import { strategyEvidence as buildStrategyEvidence, type StrategyEvidence } from '../store/strategy-evidence.ts'
 import {
   awaitJobSettled, cancelJob, disposeJobs, jobSnapshot, logPathFor, startJob,
   type JobSnapshot,
@@ -580,6 +581,25 @@ export class KnowledgeOperations {
     const reason = validateChunking(chunking)
     if (reason !== null) throw new Error(reason)
     return this.planFor(collectionId, chunking)
+  }
+
+  /**
+   * Evidence that each configured chunking policy actually took effect.
+   *
+   * Replaces the corpus-wide preview, which chunked every document to render eight
+   * truncated rows — linear cost for a question it could not answer. This samples
+   * the single longest document, so the cost is constant regardless of collection
+   * size, and reports per-policy observations instead of corpus totals.
+   * @param collectionId - collection identifier.
+   * @param chunking - the configuration to verify.
+   * @returns the evidence report.
+   */
+  async strategyEvidence(collectionId: string, chunking: ChunkingConfig): Promise<StrategyEvidence> {
+    const reason = validateChunking(chunking)
+    if (reason !== null) throw new Error(reason)
+    // Aliased on import: an unaliased name would resolve to this method, and the
+    // call would recurse until the stack overflowed instead of reporting anything.
+    return buildStrategyEvidence(this.storeRoot, collectionId, chunking)
   }
 
   /**

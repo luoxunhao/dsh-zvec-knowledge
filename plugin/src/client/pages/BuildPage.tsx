@@ -19,7 +19,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Button } from '../components/Button.tsx'
-import { ChunkPreview, type PreviewRowData } from '../components/ChunkPreview.tsx'
+import type { StrategyEvidenceView } from '../app.tsx'
+import { StrategyEvidence } from '../components/StrategyEvidence.tsx'
 import { CostEstimate } from '../components/CostEstimate.tsx'
 import { BuildPipeline, type LogLine, type StageView } from '../components/BuildPipeline.tsx'
 import { EmptyState } from '../components/EmptyState.tsx'
@@ -58,20 +59,6 @@ export interface IndexDraft {
   efConstruction: number
   /** Quantizer. */
   quantize: 'INT8' | 'INT4' | 'FP16' | 'none'
-}
-
-/** Preview data as the host reports it. */
-export interface HostPreview {
-  /** Leading chunk rows. */
-  rows: PreviewRowData[]
-  /** Total retained chunks. */
-  totalChunks: number
-  /** Mean tokens per chunk. */
-  averageTokens: number
-  /** Discarded fragments. */
-  discarded: number
-  /** Total tokens. */
-  totalTokens: number
 }
 
 /** Cost estimate as the host reports it. */
@@ -126,10 +113,14 @@ export interface BuildPageProps {
   index: IndexDraft
   /** Called as the index draft changes. */
   onIndexChange: (next: IndexDraft) => void
-  /** Preview for the current chunking draft, or `null` while computing. */
-  preview: HostPreview | null
-  /** Preview failure reason, if any. */
-  previewError?: string | null
+  /**
+   * Evidence that the configured chunking strategy took effect, or `null` while
+   * it is being computed. Produced from one sampled document, so it does not scale
+   * with the collection.
+   */
+  evidence: StrategyEvidenceView | null
+  /** Evidence failure reason, if any. */
+  evidenceError?: string | null
   /** Cost estimate for the current drafts, or `null` while computing. */
   cost: HostCost | null
   /** Model options the configurator may choose. */
@@ -221,7 +212,7 @@ export function validateChunkingDraft(draft: ChunkingDraft): string | null {
  */
 export function BuildPage({
   collectionId, chunking, onChunkingChange, index, onIndexChange,
-  preview, previewError = null, cost, models, quantizers,
+  evidence, evidenceError = null, cost, models, quantizers,
   stages, processed, total, fraction, log, running, buildError = null,
   servingPreviousSnapshot, hasDocuments,
   pendingDocuments = 0, totalDocuments = 0, incrementalPlan = null, buildNotice = null,
@@ -348,18 +339,16 @@ export function BuildPage({
           </div>
           </section>
 
-          {/* 2. Preview — the only pre-submit quality check (§5.5). It belongs in
-              the left column with the chunking strategy, because it is that
-              strategy's own output. */}
-          <ChunkPreview
-            rows={preview?.rows ?? []}
-            totalChunks={preview?.totalChunks ?? 0}
-            averageTokens={preview?.averageTokens ?? 0}
-            discarded={preview?.discarded ?? 0}
-            totalTokens={preview?.totalTokens ?? 0}
-            loading={preview === null}
-            error={previewError}
-          />
+          {/* 2. Strategy evidence — the pre-submit check (§5.5). It belongs in the
+              left column with the chunking strategy, because it is that strategy's
+              own output.
+
+              This replaced a corpus-wide "分片预览" that chunked every document to
+              render eight truncated rows. That was linear in collection size
+              (measured 5.5 s at 2000 documents, recomputed on every edit) and could
+              not verify any of the settings it sat beside. This samples the longest
+              document, so the cost is constant, and reports per-setting evidence. */}
+          <StrategyEvidence evidence={evidence} error={evidenceError} />
         </div>
 
         {/* Right column: embedding and index strategy, the hybrid weights, and the

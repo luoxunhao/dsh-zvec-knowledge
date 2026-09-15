@@ -343,6 +343,15 @@ export async function dispatch(
         args.index as never,
       )
 
+    case 'strategyEvidence':
+      // The per-policy check that replaced the corpus-wide preview. It reads the
+      // collection's longest document only, so its cost does not grow with the
+      // collection — the preview chunked everything to render eight rows.
+      return operations.strategyEvidence(
+        requireString(args.collectionId, 'collectionId'),
+        args.chunking as never,
+      )
+
     case 'storedStrategy': {
       const index = await operations.storedStrategy(requireString(args.collectionId, 'collectionId'))
       // The client's configurator holds a chunking draft and an index draft

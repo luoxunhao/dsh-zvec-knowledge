@@ -82,6 +82,7 @@ export const KB_API_METHODS = [
   'previewChunks',
   'estimateCost',
   'storedStrategy',
+  'strategyEvidence',
   'buildIndex',
   'buildStatus',
   'buildPlan',

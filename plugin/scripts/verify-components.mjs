@@ -123,7 +123,7 @@ const TIERS = new Map([
   ['DocumentsPage.module.css', { tier: 'container', why: 'page layout: toolbar, list frame and states; the controls inside carry their own states' }],
   ['DocumentRow.module.css', { tier: 'container', why: 'list row frame; its cancel/retry/remove controls live inside and declare their own states' }],
   ['BuildPipeline.module.css', { tier: 'container', why: 'pipeline frame: stage nodes, progress and log; the cancel/retry/log controls inside carry their own states' }],
-  ['ChunkPreview.module.css', { tier: 'container', why: 'preview panel; it reports rows and totals, no control of its own' }],
+  ['StrategyEvidence.module.css', { tier: 'container', why: 'strategy-verification panel; it reports per-setting verdicts and chunk boundaries, and its disclosure summaries carry their own hover/focus rules' }],
   ['CostEstimate.module.css', { tier: 'container', why: 'estimate readout; purely descriptive' }],
   ['BuildPage.module.css', { tier: 'container', why: 'page layout for the strategy configurator; the fields inside carry their own states' }],
   ['RetrievalPage.module.css', { tier: 'container', why: 'diagnostic console layout: query form, health summary and hit cards; the field, switch and button inside carry their own states' }],

@@ -34,8 +34,9 @@ import { RetrievalPage } from './pages/RetrievalPage.tsx'
 import {
   BuildPage,
   type BuildPageProps, type ChunkingDraft, type IndexDraft,
-  type HostPreview, type HostCost, type HostModelOption, type HostQuantizerOption,
+  type HostCost, type HostModelOption, type HostQuantizerOption,
 } from './pages/BuildPage.tsx'
+import type { StrategyEvidenceView } from './app.tsx'
 import type { StageView, LogLine } from './components/BuildPipeline.tsx'
 import { QuotaNotice, type QuotaStateView } from './components/QuotaNotice.tsx'
 import styles from './KnowledgePanel.module.css'
@@ -123,6 +124,15 @@ const INITIAL_STAGES: StageView[] = [
 
 /** Views whose page is not part of this slice. */
 const PENDING_VIEWS: KnowledgeView[] = ['settings']
+
+/**
+ * Debounce for the parameter-driven host calls, in milliseconds.
+ *
+ * A number field reports every intermediate value, so an undebounced effect fires
+ * once per keystroke. This is long enough to collapse a typed number into one
+ * request and short enough to feel immediate.
+ */
+const EVIDENCE_DEBOUNCE_MS = 350
 
 /**
  * Poll interval while a build runs, in milliseconds.
@@ -232,8 +242,8 @@ export function KnowledgeBasePanel({ state, port }: KnowledgeBasePanelProps): Re
   // ---- Build (KB-07) state ----
   const [chunking, setChunking] = useState<ChunkingDraft>(CHUNKING_FALLBACK)
   const [index, setIndex] = useState<IndexDraft>(INDEX_FALLBACK)
-  const [preview, setPreview] = useState<HostPreview | null>(null)
-  const [previewError, setPreviewError] = useState<string | null>(null)
+  const [evidence, setEvidence] = useState<StrategyEvidenceView | null>(null)
+  const [evidenceError, setEvidenceError] = useState<string | null>(null)
   const [cost, setCost] = useState<HostCost | null>(null)
   const [stages, setStages] = useState<StageView[]>(INITIAL_STAGES)
   const [processed, setProcessed] = useState(0)
@@ -375,40 +385,59 @@ export function KnowledgeBasePanel({ state, port }: KnowledgeBasePanelProps): Re
     return () => { cancelled = true }
   }, [port, selectedCollection])
 
-  // Recompute the preview and estimate whenever a parameter changes. Both derive
-  // from the same host call path, so the numbers the user sees are the numbers the
-  // build will produce.
+  // Verify the chunking strategy whenever a parameter changes.
+  //
+  // Debounced, because the request is issued per keystroke otherwise: a number
+  // field reports every intermediate value, so typing "1024" fires four times. The
+  // host call is now constant-cost rather than corpus-sized, but four calls per
+  // edit is still three too many, and the debounce also keeps the panel from
+  // flickering through four verdict sets on the way to the value the user meant.
   useEffect(() => {
-    let cancelled = false
-    const run = async (): Promise<void> => {
-      if (selectedCollection === null) {
-        setPreview(null)
-        setCost(null)
-        return
-      }
-      try {
-        setPreviewError(null)
-        setPreview(null)
-        setCost(null)
-        const nextPreview = port?.previewChunks !== undefined
-          ? await port.previewChunks(selectedCollection, chunking)
-          : { rows: [], totalChunks: 0, averageTokens: 0, discarded: 0, totalTokens: 0 }
-        if (cancelled) return
-        setPreview(nextPreview)
-        const nextCost = port?.estimateCost !== undefined
-          ? await port.estimateCost(selectedCollection, chunking, index)
-          : null
-        if (cancelled) return
-        setCost(nextCost)
-      } catch (cause) {
-        if (cancelled) return
-        // The preview failure is reported in the preview panel rather than the
-        // page error, so an invalid parameter does not look like a load failure.
-        setPreviewError(String(cause instanceof Error ? cause.message : cause))
-      }
+    const readEvidence = port?.strategyEvidence
+    if (readEvidence === undefined || selectedCollection === null) {
+      setEvidence(null)
+      return
     }
-    void run()
-    return () => { cancelled = true }
+    let cancelled = false
+    const timer = setTimeout(() => {
+      void (async () => {
+        try {
+          setEvidenceError(null)
+          const next = await readEvidence(selectedCollection, chunking)
+          if (!cancelled) setEvidence(next)
+        } catch (cause) {
+          if (cancelled) return
+          // Reported in this panel rather than as a page error: an invalid
+          // parameter is not a load failure.
+          setEvidenceError(String(cause instanceof Error ? cause.message : cause))
+        }
+      })()
+    }, EVIDENCE_DEBOUNCE_MS)
+    return () => { cancelled = true; clearTimeout(timer) }
+  }, [port, selectedCollection, chunking])
+
+  // The cost estimate, which depends on the index draft as well as the chunking
+  // one. Debounced for the same reason.
+  useEffect(() => {
+    const estimate = port?.estimateCost
+    if (estimate === undefined || selectedCollection === null) {
+      setCost(null)
+      return
+    }
+    let cancelled = false
+    const timer = setTimeout(() => {
+      void (async () => {
+        try {
+          const next = await estimate(selectedCollection, chunking, index)
+          if (!cancelled) setCost(next)
+        } catch {
+          // The evidence panel reports the configuration problem; the estimate
+          // simply stays absent rather than duplicating the message.
+          if (!cancelled) setCost(null)
+        }
+      })()
+    }, EVIDENCE_DEBOUNCE_MS)
+    return () => { cancelled = true; clearTimeout(timer) }
   }, [port, selectedCollection, chunking, index])
 
   // Ask the host whether an incremental build is possible with the current
@@ -660,8 +689,8 @@ export function KnowledgeBasePanel({ state, port }: KnowledgeBasePanelProps): Re
             onChunkingChange={setChunking}
             index={index}
             onIndexChange={setIndex}
-            preview={preview}
-            previewError={previewError}
+            evidence={evidence}
+            evidenceError={evidenceError}
             cost={cost}
             models={modelOptions(embedding)}
             quantizers={quantizers}

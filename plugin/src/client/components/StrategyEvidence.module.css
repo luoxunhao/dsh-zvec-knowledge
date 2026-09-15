@@ -1,0 +1,292 @@
+/* StrategyEvidence — the per-policy chunking check.
+ *
+ * The layout leads with a verdict row per setting, because "did my configuration
+ * take effect" is the question; the boundary detail below it is the supporting
+ * evidence a reader consults when a check fails. The verdict's tone is carried on
+ * `data-tone` with the styling hanging off the attribute, so the three states are
+ * declared in one place and the component does not assemble class names by hand. */
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kb-space-3);
+  padding: var(--kb-space-4);
+  border: 1px solid var(--kb-border-subtle);
+  border-radius: var(--kb-radius-lg);
+  background: var(--kb-bg-surface);
+  min-width: 0;
+}
+
+.head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--kb-space-3);
+  flex-wrap: wrap;
+}
+
+.title {
+  margin: 0;
+  font-size: var(--kb-size-title);
+  line-height: var(--kb-leading-title);
+  font-weight: 600;
+  color: var(--kb-text-primary);
+}
+
+.note {
+  font-size: var(--kb-size-caption);
+  line-height: var(--kb-leading-caption);
+  color: var(--kb-text-tertiary);
+}
+
+.skeleton {
+  height: var(--kb-skeleton-card-height);
+  border-radius: var(--kb-radius-md);
+  background: var(--kb-bg-subtle);
+}
+
+.empty,
+.error {
+  display: flex;
+  align-items: center;
+  gap: var(--kb-space-2);
+  margin: 0;
+  font-size: var(--kb-size-body-sm);
+  line-height: var(--kb-leading-body-sm);
+  color: var(--kb-text-secondary);
+}
+
+.error {
+  padding: var(--kb-space-3);
+  border: 1px solid var(--kb-status-failed-border);
+  border-radius: var(--kb-radius-md);
+  background: var(--kb-status-failed-bg);
+  color: var(--kb-status-failed-text);
+}
+
+/* The sample statement, so the reader knows the verdicts describe one document
+ * rather than the whole library. */
+.sample {
+  display: flex;
+  align-items: center;
+  gap: var(--kb-space-2);
+  flex-wrap: wrap;
+  margin: 0;
+  padding: var(--kb-space-2) var(--kb-space-3);
+  border-radius: var(--kb-radius-md);
+  background: var(--kb-bg-subtle);
+  font-size: var(--kb-size-body-sm);
+  line-height: var(--kb-leading-body-sm);
+  color: var(--kb-text-secondary);
+}
+
+.sampleName {
+  font-weight: 600;
+  color: var(--kb-text-primary);
+}
+
+.sampleMeta {
+  color: var(--kb-text-secondary);
+}
+
+.sampleNote {
+  font-size: var(--kb-size-caption);
+  color: var(--kb-text-tertiary);
+}
+
+.checks {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kb-space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* A four-column row: setting, configured value, verdict, observation. The
+ * observation takes the remaining width because it is the part that varies. */
+.check {
+  display: grid;
+  grid-template-columns: minmax(0, 8em) minmax(0, 8em) minmax(0, 6em) minmax(0, 1fr);
+  align-items: baseline;
+  gap: var(--kb-space-3);
+  padding: var(--kb-space-2) 0;
+  border-bottom: 1px solid var(--kb-divider-card);
+  font-size: var(--kb-size-body-sm);
+  line-height: var(--kb-leading-body-sm);
+}
+
+.check:last-child {
+  border-bottom: 0;
+}
+
+.checkSetting {
+  color: var(--kb-text-primary);
+  font-weight: 600;
+}
+
+.checkValue {
+  color: var(--kb-text-secondary);
+}
+
+/* The verdict is always a word, never colour alone; the tone only reinforces it. */
+.checkVerdict {
+  font-size: var(--kb-size-caption);
+  line-height: var(--kb-leading-caption);
+  white-space: nowrap;
+}
+
+.check[data-tone='ok'] .checkVerdict {
+  color: var(--kb-status-ready-text);
+}
+
+.check[data-tone='bad'] .checkVerdict {
+  color: var(--kb-status-failed-text);
+  font-weight: 600;
+}
+
+.check[data-tone='na'] .checkVerdict {
+  color: var(--kb-text-tertiary);
+}
+
+.checkObserved {
+  color: var(--kb-text-secondary);
+  min-width: 0;
+}
+
+.section {
+  border-top: 1px solid var(--kb-divider-card);
+  padding-top: var(--kb-space-2);
+}
+
+.summary {
+  cursor: pointer;
+  font-size: var(--kb-size-body-sm);
+  line-height: var(--kb-leading-body-sm);
+  color: var(--kb-text-secondary);
+}
+
+.summary:hover {
+  color: var(--kb-text-primary);
+}
+
+.summary:focus-visible {
+  outline: var(--kb-outline-focus);
+  outline-offset: 1px;
+}
+
+.discarded,
+.chunks {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kb-space-2);
+  margin: var(--kb-space-2) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.discardedItem,
+.chunk {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kb-space-1);
+  padding: var(--kb-space-2);
+  border: 1px solid var(--kb-border-subtle);
+  border-radius: var(--kb-radius-md);
+  background: var(--kb-bg-subtle);
+  min-width: 0;
+}
+
+.chunkHead {
+  display: flex;
+  align-items: center;
+  gap: var(--kb-space-2);
+  flex-wrap: wrap;
+}
+
+.chunkOrdinal,
+.chunkTokens,
+.chunkRange,
+.discardedTokens {
+  font-size: var(--kb-size-caption);
+  color: var(--kb-text-tertiary);
+}
+
+.chunkHeading {
+  font-size: var(--kb-size-caption);
+  color: var(--kb-text-secondary);
+  font-weight: 600;
+}
+
+.flags {
+  display: flex;
+  gap: var(--kb-space-1);
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
+.flag,
+.flagBad {
+  padding: 1px var(--kb-space-1);
+  border-radius: var(--kb-radius-xs);
+  border: 1px solid var(--kb-border-subtle);
+  background: var(--kb-bg-surface);
+  font-size: var(--kb-size-caption);
+  line-height: var(--kb-leading-caption);
+  color: var(--kb-text-secondary);
+}
+
+.flagBad {
+  border-color: var(--kb-status-failed-border);
+  background: var(--kb-status-failed-bg);
+  color: var(--kb-status-failed-text);
+}
+
+/* Chunk text keeps newlines: structure is the thing being judged, and collapsing
+ * whitespace is what made the old preview unable to show it. */
+.pre {
+  margin: 0;
+  padding: var(--kb-space-2);
+  max-height: var(--kb-log-max-height);
+  overflow: auto;
+  border-radius: var(--kb-radius-sm);
+  background: var(--kb-bg-surface);
+  color: var(--kb-text-secondary);
+  font-family: var(--kb-font-mono);
+  font-size: var(--kb-size-caption);
+  line-height: var(--kb-leading-caption);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.overlap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kb-space-1);
+}
+
+.overlapLabel {
+  font-size: var(--kb-size-caption);
+  color: var(--kb-text-tertiary);
+}
+
+/* The shared passage is marked so it reads as the overlap evidence rather than as
+ * more chunk text. */
+.overlapText {
+  border-left: 2px solid var(--kb-brand);
+  background: var(--kb-brand-tint);
+}
+
+.cost {
+  margin: 0;
+  font-size: var(--kb-size-caption);
+  line-height: var(--kb-leading-caption);
+  color: var(--kb-text-tertiary);
+}
+
+@media (max-width: 720px) {
+  .check {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--kb-space-1);
+  }
+}

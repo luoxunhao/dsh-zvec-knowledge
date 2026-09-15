@@ -72,9 +72,31 @@ function buildProps(overrides = {}) {
     onChunkingChange: () => {},
     index: { model: 'local-1024', kind: 'HNSW', m: 32, efConstruction: 200, quantize: 'INT8', denseWeight: 0.6, fullTextWeight: 0.4 },
     onIndexChange: () => {},
-    preview: { rows: [], totalChunks: 12, averageTokens: 340, discarded: 3, totalTokens: 4080 },
-    previewError: null,
-    cost: { chunks: 12, rawVectorBytes: 12 * 1024 * 4, vectorBytes: 12 * 1024, compression: 4, estimatedSeconds: 1, basis: '按 40 分片/秒估算' },
+    evidence: {
+      document: { id: 'doc_x', name: 'rich.md', chars: 2500, chunks: 7 },
+      sampledBecause: '取最长的一篇：边界、代码块与表格问题只在长文档中暴露',
+      available: true,
+      checks: [
+        { setting: '切分方式', value: '按标题层级', observed: '7/7 片记录了标题路径，如「手册 › 安装」', satisfied: true, applicable: true },
+        { setting: '分片长度', value: '1024 token', observed: '实测 409–512 token', satisfied: true, applicable: true },
+        { setting: '最小分片', value: '64 token', observed: '无碎片被丢弃', satisfied: true, applicable: true },
+        { setting: '重叠长度', value: '128 token', observed: '3/6 处相邻边界共享文本', satisfied: true, applicable: true },
+        { setting: '保留代码块', value: '开启', observed: '本文档不含代码块', satisfied: true, applicable: false },
+        { setting: '表格按行拆分', value: '开启', observed: '本文档不含表格', satisfied: true, applicable: false },
+      ],
+      chunks: [
+        {
+          ordinal: 0, tokens: 512, charStart: 0, charEnd: 2000, heading: '手册 › 安装',
+          head: '# 手册\n\n## 安装\n安装说明。', tail: '安装说明。',
+          overlapText: null, overlapTokens: 0,
+          startsAtHeading: true, hasCodeFence: false, startsInsideCodeFence: false, hasTableRow: false,
+        },
+      ],
+      discarded: [],
+      elapsedMs: 2.1,
+    },
+    evidenceError: null,
+    cost: { chunks: 12, rawVectorBytes: 12 * 1024 * 4, vectorBytes: 12 * 1024, compression: 4, estimatedSeconds: 1, basis: '按实测吞吐估算' },
     models: [{ id: 'local-1024', label: '本地嵌入模型（1024 维）', dimension: 1024, metric: 'cosine', note: '与集合 schema 一致' }],
     quantizers: strategy.QUANTIZER_OPTIONS,
     stages: [
@@ -100,20 +122,20 @@ function buildProps(overrides = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// 1. Structural ordering: preview → estimate → submit button
+// 1. Structural ordering: strategy evidence → estimate → submit button
 // ---------------------------------------------------------------------------
 {
   const html = renderToStaticMarkup(React.createElement(kb.BuildPage, buildProps()))
-  const previewAt = html.indexOf('分片预览')
+  const evidenceAt = html.indexOf('切块策略验证')
   const estimateAt = html.indexOf('代价预估')
   // The submit button's own text, which appears only on that control.
   const submitAt = html.indexOf('保存并重建索引')
 
-  check('order: preview renders', previewAt !== -1, `at ${previewAt}`)
+  check('order: strategy evidence renders', evidenceAt !== -1, `at ${evidenceAt}`)
   check('order: cost estimate renders', estimateAt !== -1, `at ${estimateAt}`)
   check('order: submit button renders', submitAt !== -1, `at ${submitAt}`)
   check('order: estimate precedes the submit button', estimateAt !== -1 && submitAt !== -1 && estimateAt < submitAt, `estimate ${estimateAt} < submit ${submitAt}`)
-  check('order: preview precedes the estimate', previewAt !== -1 && estimateAt !== -1 && previewAt < estimateAt, `preview ${previewAt} < estimate ${estimateAt}`)
+  check('order: evidence precedes the estimate', evidenceAt !== -1 && estimateAt !== -1 && evidenceAt < estimateAt, `evidence ${evidenceAt} < estimate ${estimateAt}`)
 
   // The submit label is fixed by the spec.
   check('submit: label is the fixed wording', html.includes('保存并重建索引'), '保存并重建索引')
@@ -121,28 +143,32 @@ function buildProps(overrides = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// 2. Preview cannot be omitted, and always carries its summary
+// 2. The strategy check cannot be omitted, and each setting carries a verdict
 // ---------------------------------------------------------------------------
 {
-  // With no chunks at all, the preview must still render its panel with an
-  // explanation rather than disappearing — a missing preview is the failure the
-  // spec's "不允许省略" forbids.
+  // With no evidence yet, the panel must still render — a missing check is the
+  // failure mode, because a silent gap reads as "verified, nothing to show".
   const empty = renderToStaticMarkup(React.createElement(kb.BuildPage, buildProps({
-    preview: { rows: [], totalChunks: 0, averageTokens: 0, discarded: 0, totalTokens: 0 },
+    evidence: null,
   })))
-  check('preview: panel still renders with no chunks', empty.includes('分片预览'), 'panel present')
-  check('preview: explains why it is empty', empty.includes('没有可索引的内容'), 'explanation present')
+  check('evidence: panel still renders while computing', empty.includes('切块策略验证'), 'panel present')
 
-  // With rows, the four summary figures must all be present.
-  const withRows = renderToStaticMarkup(React.createElement(kb.ChunkPreview, {
-    rows: [{ ordinal: 0, tokens: 340, overlapTokens: 0, snippet: '示例片段', charStart: 0, charEnd: 400 }],
-    totalChunks: 12, averageTokens: 340, discarded: 3, totalTokens: 4080,
-  }))
-  for (const label of ['总片数', '平均 token', '丢弃碎片', '总 token']) {
-    check(`preview: summary shows ${label}`, withRows.includes(label), label)
+  // The corpus totals are gone on purpose: they answered "how many chunks does my
+  // library produce", which is not a decision a user makes. Asserting their absence
+  // keeps the panel from quietly regrowing into the preview it replaced.
+  const populated = renderToStaticMarkup(React.createElement(kb.BuildPage, buildProps()))
+  for (const label of ['总片数', '平均 token', '总 token']) {
+    check(`removed: the corpus total "${label}" is not back`, !populated.includes(label), label)
   }
-  check('preview: values are monospaced', /kb-mono/.test(withRows), 'figures carry the mono class')
-  check('preview: notes it is the only pre-submit check', withRows.includes('提交前唯一的质量校验手段'), 'stated in the panel')
+  // What renders instead is a per-setting verdict with an observation.
+  const withChecks = renderToStaticMarkup(React.createElement(kb.StrategyEvidence, {
+    evidence: buildProps().evidence,
+  }))
+  for (const setting of ['切分方式', '重叠长度', '保留代码块']) {
+    check(`evidence: the ${setting} check renders`, withChecks.includes(setting), setting)
+  }
+  check('evidence: verdicts are words, not colour alone', withChecks.includes('已生效') && withChecks.includes('本文档未涉及'), 'labels present')
+  check('evidence: it states the cost property', withChecks.includes('与文档总数无关'), 'the panel says it does not scale with the collection')
 }
 
 // ---------------------------------------------------------------------------
