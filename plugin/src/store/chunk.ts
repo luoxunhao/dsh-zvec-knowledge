@@ -415,10 +415,23 @@ function sizeWindows(text: string, budget: number, repeatTableHeaders = false): 
   while (start < text.length) {
     let end = start
     let tokens = 0
-    while (end < text.length && tokens < budget) {
+    // Counted incrementally rather than by re-measuring `text.slice(start, end)`
+    // at every step. The slice form is O(window²) in both scanning and allocation,
+    // and on a 167 KB chapter that measured at ~10 s per pass — which the build
+    // configurator paid twice on every page open, because it previews and then
+    // estimates. `estimateTokens` here is exactly the per-character accounting it
+    // performs (`cjk` adds one, others add a quarter), so the numbers are
+    // unchanged; only the cost is.
+    let cjk = 0
+    let other = 0
+    while (end < text.length) {
       const code = text.codePointAt(end) ?? 0
       const width = code > 0xffff ? 2 : 1
-      tokens = estimateTokens(text.slice(start, end + width))
+      const next = text.slice(end, end + width)
+      if (next === '') break
+      if (isCjk(next)) cjk += 1
+      else other += 1
+      tokens = cjk + Math.ceil(other / 4)
       if (tokens > budget) break
       end += width
     }
@@ -493,14 +506,22 @@ function tableWindowsOf(text: string, budget: number): { text: string, start: nu
       // part of `lines[table.from, firstRow)` and are therefore not in `rows`, so
       // building each window the same way is what keeps them identical in shape.
       let rowEnd = rowStart
+      // The header is measured once and each row's own token count added, rather
+      // than re-joining and re-measuring the growing block per row — the same
+      // quadratic shape the generic windower had. A table long enough to matter
+      // (hundreds of rows) is exactly the case this path exists for.
+      const prefixTokens = estimateTokens(prefix)
+      let blockTokens = prefixTokens
       while (rowEnd < table.to) {
-        const candidate = estimateTokens(`${prefix}\n${lines.slice(rowStart, rowEnd + 1).join('\n')}`)
+        const row = lines[rowEnd] as string
+        const candidate = blockTokens + estimateTokens(`\n${row}`)
         // Always take at least one row, even when a single row exceeds the budget:
         // dropping it would lose data, and a one-row window with its header is
         // still a truthful answer to "what is this cell".
         if (rowEnd > rowStart && candidate > budget) break
+        blockTokens = candidate
         rowEnd += 1
-        if (candidate > budget) break
+        if (blockTokens > budget) break
       }
       const rows = lines.slice(rowStart, rowEnd)
       // A continuation's text is prefixed for readability, but its offset still

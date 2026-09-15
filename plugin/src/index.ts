@@ -28,6 +28,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { assertValidConfig } from './config.ts'
 import type { Config } from './config.ts'
 import { disposeAll, openHandleCount } from './store/registry.ts'
+import { disposeJobs } from './store/job.ts'
 import { KnowledgeOperations } from './host/operations.ts'
 import { registerKbBridge, mintBridgeToken, type WebServerLike } from './host/bridge.ts'
 // The web-server declaration shim, for its `declare module` side effect.
@@ -131,6 +132,13 @@ export function apply(ctx: Context, config: Config): void {
 
   ctx.effect(() => {
     return () => {
+      // Cancel any in-flight build first: a running job holds an engine handle and
+      // is mid-write, so closing handles under it would produce exactly the stale
+      // `Collection is closed` this module's job table exists to avoid.
+      const cancelled = disposeJobs()
+      if (cancelled > 0) {
+        ctx.logger?.debug?.(`zvec-knowledge: cancelled ${cancelled} running build job(s)`)
+      }
       // Close every pooled collection handle. Without this the engine keeps its
       // per-directory lock after unload, and a reload fails with an opaque lock
       // error rather than starting cleanly.

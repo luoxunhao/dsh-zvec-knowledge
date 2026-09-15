@@ -167,6 +167,50 @@ const allText = result => result.chunks.map(chunk => chunk.text).join('\n')
   )
 }
 
+// ---------------------------------------------------------------------------
+// 5. Chunking stays linear in document size
+//
+// The windower originally measured its candidate window by re-slicing and
+// re-counting `text.slice(start, end)` at every character, which is O(n²) in both
+// scanning and allocation. On a 167 KB chapter that took ~10 s per pass, and the
+// build configurator paid it twice per page open (preview, then estimate) — the
+// reported "索引 page is slow" and the long blank screen on re-entry.
+//
+// A wall-clock budget is asserted rather than an operation count because the
+// regression is only visible as latency: scaling from 1x to 4x input must not
+// scale the cost by anything near 16x.
+// ---------------------------------------------------------------------------
+{
+  const unit = '向量检索把文本映射为稠密向量，再用近邻搜索召回相关片段，混合检索融合两路结果。\n'
+  const small = `# 章\n${unit.repeat(400)}`
+  const large = `# 章\n${unit.repeat(1600)}`
+
+  const timeOf = (text) => {
+    const started = process.hrtime.bigint()
+    chunkDocument(text, config)
+    return Number(process.hrtime.bigint() - started) / 1e6
+  }
+
+  // One warm-up pass each, so JIT compilation is not counted as a regression.
+  timeOf(small)
+  timeOf(large)
+
+  const smallMs = Math.min(...[0, 1, 2].map(() => timeOf(small)))
+  const largeMs = Math.min(...[0, 1, 2].map(() => timeOf(large)))
+  const ratio = largeMs / Math.max(smallMs, 0.01)
+
+  check(
+    'performance: a 4x larger document does not cost 16x',
+    ratio < 8,
+    `4x input cost ${ratio.toFixed(1)}x (${smallMs.toFixed(1)} ms -> ${largeMs.toFixed(1)} ms)`,
+  )
+  check(
+    'performance: a 160 KB chapter chunks in well under a second',
+    largeMs < 1000,
+    `${largeMs.toFixed(1)} ms for ${Math.round(large.length / 1024)} KB`,
+  )
+}
+
 console.log(`\nKB-13 chunking acceptance: ${passes.length} passed, ${failures.length} failed\n`)
 for (const line of passes) console.log(`  PASS  ${line}`)
 for (const line of failures) console.log(`  FAIL  ${line}`)

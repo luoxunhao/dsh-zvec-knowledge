@@ -14,6 +14,12 @@ plugin/zvec-smoke-report.json
 # Scratch: harness homes, generated reports, one-off logs, source binaries
 .workbuddy/tmp/
 
+# The plugin's runtime store: the uploaded originals, the document log and the
+# zvec snapshot directories. This is user data produced by running the plugin, not
+# a source artifact — it is machine-specific, large, and contains whatever the user
+# happened to upload. A fresh checkout creates it on first use.
+.dsh-kb-zvec/
+
 # Vision-tool artifacts (screenshots produced during visual walkthroughs). These
 # are regenerable from `scripts/render-visual.mjs` and are not sources.
 .dsh-vision-router/

@@ -39,6 +39,15 @@ interface Entry {
   leases: number
   /** Whether this entry is the collection's currently published snapshot. */
   active: boolean
+  /**
+   * Whether the underlying handle has been closed.
+   *
+   * A closed handle stays a live JS object — calling `upsertSync` or reading
+   * `stats` on it throws the engine's bare `Collection is closed`. That message
+   * names nothing a user or an operator can act on, so a stale entry has to be
+   * recognisable *here* rather than surfacing from three layers down.
+   */
+  closed: boolean
 }
 
 /**
@@ -58,6 +67,26 @@ export interface HandleLease {
 }
 
 /**
+ * Close an entry's handle and mark it closed.
+ *
+ * Every close goes through here so that "the handle is closed" and "the entry
+ * knows it" cannot drift apart. Marking before closing means a throw from
+ * `closeSync` (the engine already closed it, which happens when a build's
+ * `ZVecCreateAndOpen` failed after the directory was removed) still leaves the
+ * entry unusable rather than silently reusable.
+ * @param entry - the entry to close.
+ */
+function closeEntry(entry: Entry): void {
+  entry.closed = true
+  try {
+    entry.handle.closeSync()
+  } catch {
+    // Already closed by the engine, or the directory is already gone. Either way
+    // the handle is not usable again, which is what `closed` records.
+  }
+}
+
+/**
  * Borrow a handle for reading, opening it if needed.
  *
  * The handle is guaranteed open for the duration of the lease and is not closed
@@ -72,14 +101,18 @@ export interface HandleLease {
 export function acquire(storeRoot: string, id: string, slot: Slot): HandleLease | null {
   const key = keyOf(storeRoot, id, slot)
   const existing = entries.get(key)
-  if (existing !== undefined) {
+  if (existing !== undefined && !existing.closed) {
     existing.leases += 1
     return leaseOf(key, existing)
   }
+  // A closed entry must be dropped rather than handed out: its handle would throw
+  // `Collection is closed` on first use, which reads as a store corruption when it
+  // is really a stale cache. Discarding it makes the reopen below the recovery.
+  if (existing !== undefined) entries.delete(key)
   const dir = slotDir(storeRoot, id, slot)
   if (!existsSync(dir)) return null
   const handle = ZVecOpen(dir)
-  const entry: Entry = { handle, leases: 1, active: false }
+  const entry: Entry = { handle, leases: 1, active: false, closed: false }
   entries.set(key, entry)
   return leaseOf(key, entry)
 }
@@ -123,11 +156,7 @@ export function takeForWrite(storeRoot: string, id: string, slot: Slot): void {
   const entry = entries.get(key)
   if (entry === undefined) return
   entries.delete(key)
-  try {
-    entry.handle.closeSync()
-  } catch {
-    // Already closed by the engine; the directory is about to be removed anyway.
-  }
+  closeEntry(entry)
 }
 
 /**
@@ -145,13 +174,11 @@ export function adopt(storeRoot: string, id: string, slot: Slot, handle: ZVecCol
   const key = keyOf(storeRoot, id, slot)
   const previous = entries.get(key)
   if (previous !== undefined) {
-    try {
-      previous.handle.closeSync()
-    } catch {
-      // Superseded entry; nothing to preserve.
-    }
+    // Superseded entry; nothing to preserve. Closing it rather than dropping the
+    // reference is what releases the directory lock the old handle still holds.
+    closeEntry(previous)
   }
-  entries.set(key, { handle, leases: 0, active: false })
+  entries.set(key, { handle, leases: 0, active: false, closed: false })
 }
 
 /**
@@ -187,11 +214,7 @@ export function releaseSlot(storeRoot: string, id: string, slot: Slot): boolean 
   const entry = entries.get(key)
   if (entry === undefined || entry.leases > 0) return false
   entries.delete(key)
-  try {
-    entry.handle.closeSync()
-  } catch {
-    // Already gone.
-  }
+  closeEntry(entry)
   return true
 }
 
@@ -206,13 +229,7 @@ export function releaseSlot(storeRoot: string, id: string, slot: Slot): boolean 
  */
 export function disposeAll(): number {
   const count = entries.size
-  for (const entry of entries.values()) {
-    try {
-      entry.handle.closeSync()
-    } catch {
-      // Best effort: a handle that will not close must not block disposing others.
-    }
-  }
+  for (const entry of entries.values()) closeEntry(entry)
   entries.clear()
   return count
 }
