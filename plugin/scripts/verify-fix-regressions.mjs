@@ -184,6 +184,49 @@ check(
 )
 
 // ---------------------------------------------------------------------------
+// 5. The reported embedding shape must be the deployment's, and no client
+//    literal may stand in for it (B10)
+// ---------------------------------------------------------------------------
+
+// The configurator displayed 1024 against a schema built at 2560, while the cost
+// estimator on the same page computed with 2560 — two contradictory numbers, and
+// the read-only one was wrong, which the user could not correct.
+const { readFileSync, readdirSync, statSync } = await import('node:fs')
+const { KnowledgeOperations } = await import(new URL('../lib/host/operations.js', import.meta.url).href)
+
+const ops = new KnowledgeOperations({
+  workspaceDir: ROOT, stateDir: '.dsh-kb-zvec', dimension: 2560, embeddingModel: 'qwen3-embedding:4b',
+})
+check(
+  'B10: the host reports the configured dimension',
+  ops.embeddingInfo().dimension === 2560,
+  `dimension=${ops.embeddingInfo().dimension} (client displayed 1024)`,
+)
+check(
+  'B10: the host reports the configured model',
+  ops.embeddingInfo().model === 'qwen3-embedding:4b',
+  `model=${String(ops.embeddingInfo().model)}`,
+)
+
+/** Collect client sources recursively. */
+function clientSources(dir) {
+  const out = []
+  for (const entry of readdirSync(dir)) {
+    const full = join(dir, entry)
+    if (statSync(full).isDirectory()) out.push(...clientSources(full))
+    else if (/\.tsx?$/.test(entry)) out.push(full)
+  }
+  return out
+}
+const clientFiles = clientSources(join(ROOT, 'src', 'client'))
+const hardcoded = clientFiles.filter(file => /dimension:\s*1024|\?\?\s*1024\b|local-1024/.test(readFileSync(file, 'utf8')))
+check(
+  'B10: no client source hardcodes a vector dimension',
+  hardcoded.length === 0,
+  hardcoded.length === 0 ? `${clientFiles.length} sources scanned` : hardcoded.join(', '),
+)
+
+// ---------------------------------------------------------------------------
 
 console.log('')
 for (const line of passes) console.log(`  PASS  ${line}`)

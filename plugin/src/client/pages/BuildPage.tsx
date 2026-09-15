@@ -374,11 +374,17 @@ export function BuildPage({
           />
         </div>
 
-        {/* Read-only parameter grid: these two are not user-editable (§5.6). */}
+        {/* Read-only parameter grid: these are not user-editable (§5.6), which is
+            precisely why a wrong value here is unrecoverable for the user — the
+            dimension must come from the host rather than a client-side default. */}
         <dl className={styles.readonly}>
           <div className={styles.readonlyItem}>
             <dt className={styles.readonlyLabel}>向量维度</dt>
-            <dd className={`kb-mono ${styles.readonlyValue}`}>{model?.dimension ?? 1024}</dd>
+            {/* An em dash until the host reports it. The previous fallback was the
+                literal 1024, which silently misreported a 2560-wide deployment as
+                a 1024 one; "not known yet" and "1024" are different statements and
+                only one of them is true. */}
+            <dd className={`kb-mono ${styles.readonlyValue}`}>{model?.dimension ?? '—'}</dd>
           </div>
           <div className={styles.readonlyItem}>
             <dt className={styles.readonlyLabel}>数据类型</dt>

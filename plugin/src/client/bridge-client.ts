@@ -216,6 +216,13 @@ export function createHostPort(): KnowledgeBasePort {
       return stored.chunking === null ? null : { chunking: stored.chunking, index: stored.index }
     },
 
+    // The deployment's real embedding shape. The configurator's dimension grid is
+    // read-only, so a wrong value is one the user cannot correct — which is
+    // exactly what a client-side default produced.
+    embeddingInfo: async (): Promise<{ dimension: number, model: string | null, metric: string }> => {
+      return await call<{ dimension: number, model: string | null, metric: string }>('getEmbeddingInfo', {})
+    },
+
     // Submit-and-poll. The host runs the build as a job of its own, so this call
     // resolves as soon as the job is launched and the panel polls `buildStatus`
     // for the real stages, counts and log lines. The previous revision held the

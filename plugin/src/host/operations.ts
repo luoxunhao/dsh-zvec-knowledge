@@ -132,6 +132,13 @@ export interface OperationsOptions {
    * would be too late for the first two.
    */
   dimension?: number
+  /**
+   * Model identifier the deployment configured, for the configurator's read-only
+   * grid. Optional because a deployment may wire a provider with no name (a test
+   * double, an in-process model), and the grid states that rather than inventing
+   * one.
+   */
+  embeddingModel?: string
   /** Retrieval hit counter, for the overview's seven-day figure. */
   hitCounter?: HitCounter
   /**
@@ -181,6 +188,7 @@ export class KnowledgeOperations {
   private readonly stateDir: string
   private readonly embed: EmbedFn | undefined
   private readonly dimension: number
+  private readonly embeddingModel: string | undefined
   private readonly hitCounter: HitCounter
   private readonly quota: Quota
   /**
@@ -218,6 +226,7 @@ export class KnowledgeOperations {
     this.stateDir = options.stateDir
     this.embed = options.embed
     this.dimension = options.dimension ?? EMBEDDING_DIMENSION
+    this.embeddingModel = options.embeddingModel
     this.hitCounter = options.hitCounter ?? createHitCounter()
     this.quota = options.quota ?? { bytes: null, warnAt: 0.9 }
   }
@@ -250,6 +259,7 @@ export class KnowledgeOperations {
       stateDir: this.stateDir,
       ...(this.embed === undefined ? {} : { embed: this.embed }),
       dimension: this.dimension,
+      ...(this.embeddingModel === undefined ? {} : { embeddingModel: this.embeddingModel }),
       hitCounter: this.hitCounter,
       quota: this.quota,
     })
@@ -609,6 +619,32 @@ export class KnowledgeOperations {
    */
   async storedStrategy(collectionId: string): Promise<IndexConfig> {
     return storedIndex(this.storeRoot, collectionId)
+  }
+
+  /**
+   * The embedding endpoint's real shape, for the configurator's read-only grid.
+   *
+   * The page needs the **dimension it is actually indexing at**, and it cannot
+   * derive that: the schema is created host-side from the deployment config, and a
+   * collection's width is fixed at creation. The client previously held its own
+   * hardcoded `1024` option list, so a deployment on a 2560-wide model displayed
+   * 1024 while the cost estimator on the same page computed with 2560 — two
+   * contradictory numbers, and the displayed one was the wrong one and not
+   * correctable by the user, because the field is read-only.
+   *
+   * `dimension` is what the schema is built at (so a deployment that states none
+   * reports the spec's illustrative default, which is what it will really get).
+   * `model` and `metric` are reported so the grid can stop inventing them.
+   * @returns the embedding shape in force for this deployment.
+   */
+  embeddingInfo(): { dimension: number, model: string | null, metric: string } {
+    return {
+      dimension: this.bound().dimension,
+      // Absent when no endpoint is configured — a real state the UI must be able
+      // to show, rather than a plausible-looking model name.
+      model: this.embeddingModel ?? null,
+      metric: 'cosine',
+    }
   }
 
   /**

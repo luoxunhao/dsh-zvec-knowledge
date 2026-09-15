@@ -231,6 +231,7 @@ function createOptions(config: Config): {
   stateDir: string
   embed?: EmbedFn
   dimension?: number
+  embeddingModel?: string
   quota: Config['quota']
 } {
   const provider = embeddingProvider ?? providerFromConfig(config)
@@ -240,6 +241,10 @@ function createOptions(config: Config): {
     // The width must match the model, and a collection's schema is created at it:
     // 2560 for the model deployed here, 1024 by default.
     ...(config.embedding === undefined ? {} : { dimension: config.embedding.dimension }),
+    // Reported to the configurator's read-only grid. The client cannot infer the
+    // deployment's model, and inventing one is how it came to display a dimension
+    // of 1024 against a schema built at 2560.
+    ...(config.embedding === undefined ? {} : { embeddingModel: config.embedding.model }),
     quota: config.quota,
   }
 }

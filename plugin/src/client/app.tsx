@@ -134,6 +134,15 @@ export interface KnowledgeBasePort {
   /** The strategy a collection was last built with, for a pre-filled configurator. */
   storedStrategy?: (collectionId: string) => Promise<{ chunking: ChunkingDraft, index: IndexDraft } | null>
   /**
+   * The embedding shape in force for this deployment.
+   *
+   * Read from the host rather than known client-side: the vector width is fixed
+   * when the collection's schema is created, from deployment configuration the
+   * page cannot see. A client-side constant here is how the configurator came to
+   * display 1024 while indexing at 2560.
+   */
+  embeddingInfo?: () => Promise<{ dimension: number, model: string | null, metric: string }>
+  /**
    * Launch the index build.
    *
    * **Returns as soon as the build is started, not when it finishes.** The build

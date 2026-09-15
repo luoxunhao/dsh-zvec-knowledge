@@ -295,6 +295,12 @@ export async function dispatch(
     case 'getUsage':
       return operations.storageUsage()
 
+    case 'getEmbeddingInfo':
+      // The configurator's read-only grid. Served from the host because the width
+      // is a deployment fact the page cannot derive — it was previously hardcoded
+      // client-side, so a 2560 deployment displayed 1024.
+      return operations.embeddingInfo()
+
     case 'getQuota':
       return operations.usage()
 

@@ -103,7 +103,10 @@ const CHUNKING_FALLBACK: ChunkingDraft = {
 
 /** Index defaults, mirroring the host's §10.1 values and the engine's real set. */
 const INDEX_FALLBACK: IndexDraft = {
-  model: 'local-1024',
+  // Replaced with the host's real model id as soon as `embeddingInfo` arrives.
+  // Empty rather than a plausible constant, so a grid that has not loaded yet
+  // cannot be mistaken for a value the deployment chose.
+  model: '',
   kind: 'HNSW',
   m: 32,
   efConstruction: 200,
@@ -132,22 +135,32 @@ const PENDING_VIEWS: KnowledgeView[] = ['settings']
 const BUILD_POLL_MS = 1200
 
 /**
- * Embedding model options.
+ * Embedding model options, derived from what the host reports.
  *
- * One entry, because the collection schema is created at 1024 dimensions and a
- * different model would need a new collection rather than a new setting. The
- * list lives on the client only until the host exposes its provider list; the
- * configurator's contract does not change when it does.
+ * One entry, because a collection's schema is created at the deployment's width
+ * and a different model needs a new collection rather than a new setting. The
+ * width comes from the host: the client cannot see the deployment's configuration,
+ * and a hardcoded 1024 here is what made a 2560 deployment display the wrong
+ * dimension — in a read-only field the user has no way to correct.
+ *
+ * With no provider configured the list is empty and the grid reports 未知, which
+ * is a real state rather than a plausible-looking default.
+ * @param info - the host's embedding shape, or `null` before it arrives.
+ * @returns options for the model selector.
  */
-const MODEL_OPTIONS: HostModelOption[] = [
-  {
-    id: 'local-1024',
-    label: '本地嵌入模型（1024 维）',
-    dimension: 1024,
+function modelOptions(info: { dimension: number, model: string | null } | null): HostModelOption[] {
+  if (info === null) return []
+  const label = info.model === null
+    ? `本地嵌入模型（${info.dimension} 维）`
+    : `${info.model}（${info.dimension} 维）`
+  return [{
+    id: `embedding-${info.dimension}`,
+    label,
+    dimension: info.dimension,
     metric: 'cosine',
     note: '与集合 schema 一致，无需重建集合',
-  },
-]
+  }]
+}
 
 /** Quantizer options, each stating the compression/recall trade-off (§5.6). */
 const QUANTIZER_OPTIONS: HostQuantizerOption[] = [
@@ -297,6 +310,32 @@ export function KnowledgeBasePanel({ state, port }: KnowledgeBasePanelProps): Re
   useEffect(() => { void loadDocuments(selectedCollection) }, [port, selectedCollection])
 
   // ---- Build strategy: prefill, preview, estimate ----
+
+  // The deployment's embedding shape. Fetched rather than assumed: the vector
+  // width is a property of the schema the host creates, and a client-side constant
+  // here is exactly how the configurator displayed 1024 against a 2560 schema.
+  const [embedding, setEmbedding] = useState<{ dimension: number, model: string | null, metric: string } | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    const load = async (): Promise<void> => {
+      if (port?.embeddingInfo === undefined) return
+      try {
+        const info = await port.embeddingInfo()
+        if (cancelled) return
+        setEmbedding(info)
+        // Seed the draft's model id with the host's real one, so the selector is
+        // not left holding the empty fallback. `storedStrategy` overwrites this
+        // for a collection that has been built; both agree because the id is
+        // derived from the same deployment width.
+        setIndex(current => current.model === '' ? { ...current, model: `embedding-${info.dimension}` } : current)
+      } catch {
+        // Leave it null: the grid then says "—" rather than a plausible number.
+        // Inventing one is the defect this replaced.
+      }
+    }
+    void load()
+    return () => { cancelled = true }
+  }, [port])
 
   // Load the stored strategy so a rebuild shows what it is changing rather than
   // silently presenting defaults that differ from the live index.
@@ -606,7 +645,7 @@ export function KnowledgeBasePanel({ state, port }: KnowledgeBasePanelProps): Re
             preview={preview}
             previewError={previewError}
             cost={cost}
-            models={MODEL_OPTIONS}
+            models={modelOptions(embedding)}
             quantizers={QUANTIZER_OPTIONS}
             stages={stages}
             processed={processed}
