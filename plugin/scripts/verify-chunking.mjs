@@ -165,6 +165,32 @@ const allText = result => result.chunks.map(chunk => chunk.text).join('\n')
     headings.every(heading => heading === null || !heading.includes('注释')),
     `headings=${JSON.stringify(headings)}`,
   )
+
+  // CRLF line endings must not disable heading detection. Uploaded files very
+  // often carry \r\n; split on '\n' leaves every line ending in '\r', and the
+  // heading pattern's `$` anchor does not match before it — so the whole document
+  // fell through to one heading-less paragraph segment. A 167 KB chapter indexed
+  // as 122 chunks with heading=null on all of them, silently.
+  const crlf = '# Title\r\n\r\nFirst paragraph.\r\n\r\n## Second\r\n\r\nMore body.\r\n'
+  const crlfResult = chunkDocument(crlf, config)
+  const crlfHeadings = crlfResult.chunks.filter(chunk => chunk.heading !== null)
+  check(
+    'regression: CRLF line endings still detect headings',
+    crlfHeadings.length >= 2
+      && crlfHeadings.some(chunk => chunk.heading === 'Title')
+      && crlfHeadings.some(chunk => chunk.heading?.includes('Second')),
+    `chunks=${crlfResult.chunks.length}, with heading=${crlfHeadings.length}: ` +
+    crlfResult.chunks.map(chunk => JSON.stringify(chunk.heading)).join(', '),
+  )
+  // The same document with LF must produce the identical structure, so the fix is
+  // a normalization rather than a behaviour change for well-formed input.
+  const lfResult = chunkDocument(crlf.replace(/\r\n/g, '\n'), config)
+  check(
+    'regression: CRLF and LF yield the same chunk structure',
+    lfResult.chunks.length === crlfResult.chunks.length
+      && lfResult.chunks.every((chunk, index) => chunk.heading === crlfResult.chunks[index]?.heading),
+    `LF ${lfResult.chunks.length} chunks vs CRLF ${crlfResult.chunks.length}`,
+  )
 }
 
 // ---------------------------------------------------------------------------

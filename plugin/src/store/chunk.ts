@@ -113,6 +113,28 @@ interface Segment {
 }
 
 /**
+ * Normalize a document's line endings to `\n`.
+ *
+ * Uploaded files frequently carry `\r\n`. Left as-is, every line ends with a
+ * stray `\r`, and the heading detector — `^(#{1,6})\s+(.*)$`, whose `$` does not
+ * match before a `\r` — then finds **no headings at all**. The failure is silent
+ * and severe: the whole document falls through to one giant paragraph segment,
+ * so a 167 KB chapter indexed as 122 chunks with `heading: null` on every one,
+ * and heading-context retrieval was impossible. Fence detection and
+ * blank-line/paragraph logic are equally line-ending-sensitive.
+ *
+ * Normalizing here rather than at upload keeps every chunker caller safe and
+ * makes the offsets internally consistent: the rest of the module reasons about
+ * `\n`-separated lines, and the character ranges it produces are relative to the
+ * normalized text, which is what gets stored and embedded.
+ * @param text - raw document text.
+ * @returns text whose line breaks are `\n`.
+ */
+function normalizeNewlines(text: string): string {
+  return text.replace(/\r\n?/g, '\n')
+}
+
+/**
  * Split a document according to the configured strategy.
  *
  * Every mode produces segments first and then applies the same size/overlap pass,
@@ -122,7 +144,8 @@ interface Segment {
  * @param config - chunking configuration.
  * @returns chunking result with its preview summary.
  */
-export function chunkDocument(text: string, config: ChunkingConfig): ChunkingResult {
+export function chunkDocument(rawText: string, config: ChunkingConfig): ChunkingResult {
+  const text = normalizeNewlines(rawText)
   const segments = config.mode === 'heading' ? headingSegments(text)
     : config.mode === 'paragraph' ? paragraphSegments(text)
       : fixedSegments(text)
