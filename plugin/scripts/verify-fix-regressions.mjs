@@ -360,6 +360,47 @@ check('B4: at most one slot occupies disk at rest', leftover.length <= 1, `${lef
 slotOps.dispose()
 
 // ---------------------------------------------------------------------------
+// 8. A withdrawn call must not be reported as a timeout (B8)
+// ---------------------------------------------------------------------------
+
+// Both outcomes were funneled through one controller, so a caller-initiated abort
+// came back as reason='timeout' with "检索超时（超过 15 秒）" — at 0 ms. An
+// operator reading that looks for a slow search instead of a cancelled one.
+const { defineKbSearchTool } = await import(new URL('../lib/host/search-tool.js', import.meta.url).href)
+const { KB_SEARCH_TOOL } = await import(new URL('../lib/shared/contract.js', import.meta.url).href)
+
+// An embedder that never resolves, so only the abort path can settle the call.
+const stalledOps = {
+  embedQuery: () => new Promise(() => {}),
+  search: async () => ({ hits: [], mode: 'hybrid', belowFloor: 0 }),
+}
+const tool = defineKbSearchTool(stalledOps, 0.55)
+
+const preAborted = new AbortController()
+preAborted.abort()
+const withdrew = await tool.execute({ query: 'q', collection: 'kb_prod_2f8a' }, { signal: preAborted.signal })
+check(
+  'B8: a caller abort reports cancelled, not timeout',
+  withdrew.reason === 'cancelled',
+  `reason=${String(withdrew.reason)} (was 'timeout', "检索超时（超过 15 秒）" at 0 ms)`,
+)
+check(
+  'B8: the cancellation message does not claim a 15-second wait',
+  !/15\s*秒|超时/.test(withdrew.summary),
+  `summary=${JSON.stringify(withdrew.summary)}`,
+)
+
+// The tool's description is the only place a model learns the failure semantics,
+// so it must name both outcomes now that they differ.
+const description = String(tool.description ?? '')
+check(
+  'B8: the tool description names both timeout and cancellation',
+  /timeout/.test(description) && /cancelled/.test(description),
+  description.includes('timeout') && description.includes('cancelled') ? 'both named' : `description=${JSON.stringify(description.slice(0, 80))}`,
+)
+check('B8: the tool keeps its wire name', KB_SEARCH_TOOL === 'dsh_kb_search', KB_SEARCH_TOOL)
+
+// ---------------------------------------------------------------------------
 
 console.log('')
 for (const line of passes) console.log(`  PASS  ${line}`)

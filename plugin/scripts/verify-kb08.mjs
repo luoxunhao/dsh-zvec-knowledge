@@ -42,9 +42,10 @@ function exec(overrides = {}) {
  * Build a tool against stub operations.
  * @param overrides - partial operations, merged over a working stub.
  * @param minScore - the configured floor.
+ * @param timeoutMs - the search budget; shortened by tests that exercise expiry.
  * @returns the tool definition.
  */
-function toolWith(overrides = {}, minScore = 0.55) {
+function toolWith(overrides = {}, minScore = 0.55, timeoutMs = undefined) {
   const base = {
     embedQuery: async () => new Float32Array(1024),
     search: async () => ({
@@ -57,7 +58,7 @@ function toolWith(overrides = {}, minScore = 0.55) {
       }],
     }),
   }
-  return defineKbSearchTool({ ...base, ...overrides }, minScore)
+  return defineKbSearchTool({ ...base, ...overrides }, minScore, timeoutMs)
 }
 
 // ---------------------------------------------------------------------------
@@ -198,17 +199,40 @@ function toolWith(overrides = {}, minScore = 0.55) {
   check('missing: reason is collection_not_found', missingValue.reason === 'collection_not_found', `reason=${missingValue.reason}`)
   check('missing: names the collection and a next step', missingValue.summary.includes('kb_nope_0000') && /创建/.test(missingValue.summary), missingValue.summary)
 
-  // Timeout: the tool aborts cooperatively rather than hanging the turn.
+  // Cancellation: the tool settles cooperatively rather than hanging the turn.
+  //
+  // This previously asserted `reason === 'timeout'` while aborting the *caller's*
+  // signal — i.e. it required a cancellation to be misreported as a 15-second
+  // timeout. The two outcomes are now distinct, so the assertion is split: an
+  // aborted caller gets `cancelled`, and a genuine budget expiry is covered by the
+  // separate case below.
   const slow = toolWith({
     embedQuery: () => new Promise(() => {}),
   })
   const controller = new AbortController()
   const pending = slow.execute({ query: 'q', collection: 'kb_prod_2f8a' }, exec({ signal: controller.signal }))
   controller.abort()
-  const timeoutValue = await pending
-  check('timeout: settles instead of hanging', timeoutValue !== null, 'resolved after abort')
-  check('timeout: reason is timeout', timeoutValue.reason === 'timeout', `reason=${timeoutValue.reason}`)
-  check('timeout: states the budget and a next step', /超时/.test(timeoutValue.summary) && /重试|缩小/.test(timeoutValue.summary), timeoutValue.summary)
+  const cancelledValue = await pending
+  check('cancel: settles instead of hanging', cancelledValue !== null, 'resolved after abort')
+  check('cancel: reason is cancelled, not timeout', cancelledValue.reason === 'cancelled', `reason=${cancelledValue.reason}`)
+  check(
+    'cancel: does not claim a timeout that never happened',
+    !/超时|15\s*秒/.test(cancelledValue.summary),
+    cancelledValue.summary,
+  )
+
+  // A real budget expiry is reported as a timeout. Driven through the tool's own
+  // budget (injected short) rather than a caller abort, so the two paths cannot be
+  // confused again — the previous assertion required a cancellation to look like a
+  // timeout, which is the defect that was fixed.
+  const stalled = toolWith({ embedQuery: () => new Promise(() => {}) }, 0.55, 60)
+  const timedOut = await stalled.execute({ query: 'q', collection: 'kb_prod_2f8a' }, exec())
+  check('timeout: reason is timeout when the budget expires', timedOut.reason === 'timeout', `reason=${timedOut.reason}`)
+  check(
+    'timeout: states the budget and a next step',
+    /超时/.test(timedOut.summary) && /重试|缩小/.test(timedOut.summary),
+    timedOut.summary,
+  )
 
   // Blank query: rejected before touching the store.
   const blank = await toolWith().execute({ query: '   ', collection: 'kb_prod_2f8a' }, exec())

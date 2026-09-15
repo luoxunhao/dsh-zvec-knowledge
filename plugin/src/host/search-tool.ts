@@ -119,7 +119,7 @@ export interface ToolOutput {
   /** Whether the search itself succeeded. A false value still carries a usable message. */
   ok: boolean
   /** Machine-readable failure kind, absent on success. */
-  reason?: 'empty_result' | 'collection_not_found' | 'invalid_argument' | 'timeout' | 'internal_error'
+  reason?: 'empty_result' | 'collection_not_found' | 'invalid_argument' | 'timeout' | 'cancelled' | 'internal_error'
   /** One-line summary a model can act on. */
   summary: string
   /** The collection searched. */
@@ -138,6 +138,25 @@ export interface ToolOutput {
 const SEARCH_TIMEOUT_MS = 15_000
 
 /**
+ * Rejection sentinel for the search budget expiring.
+ *
+ * A sentinel string rather than a typed error because it crosses the
+ * {@link Promise.race} boundary as a plain rejection; the catch block compares it
+ * exactly, so it can never be confused with a store message that happens to
+ * contain the word "timeout".
+ */
+const SEARCH_TIMEOUT_SENTINEL = '__kb_search_timeout__'
+
+/**
+ * Rejection sentinel for the caller withdrawing the call.
+ *
+ * Distinct from the timeout sentinel because the two need different reports — one
+ * says the search was too slow, the other that nobody is waiting for it any more.
+ * Sharing a sentinel reported a 0 ms cancellation as a 15-second timeout.
+ */
+const SEARCH_CANCELLED_SENTINEL = '__kb_search_cancelled__'
+
+/**
  * Build the `dsh_kb_search` tool definition.
  *
  * `operations` is injected rather than imported so the tool has no ambient
@@ -145,9 +164,16 @@ const SEARCH_TIMEOUT_MS = 15_000
  * is the isolation dimension the persistence acceptance criterion is about.
  * @param operations - the knowledge-base operations to search through.
  * @param minScore - normalized floor; hits below it are counted, not returned.
+ * @param timeoutMs - budget for one search. Injectable so a test can exercise the
+ *   expiry path without waiting the real {@link SEARCH_TIMEOUT_MS}; production
+ *   callers omit it and get the constant.
  * @returns the registry-ready tool definition.
  */
-export function defineKbSearchTool(operations: KnowledgeOperations, minScore: number) {
+export function defineKbSearchTool(
+  operations: KnowledgeOperations,
+  minScore: number,
+  timeoutMs: number = SEARCH_TIMEOUT_MS,
+) {
   return defineTool({
     name: KB_SEARCH_TOOL,
     description: [
@@ -158,8 +184,9 @@ export function defineKbSearchTool(operations: KnowledgeOperations, minScore: nu
       '入参：query（自然语言查询）、collection（集合标识，形如 kb_prod_2f8a）、topk（可选，返回条数上限，默认 8）。',
       '出参：hits 数组，每项含 file / doc_id / ordinal / char_start / char_end / text / match_score / band；'
         + 'match_score 为 0 到 1 的归一化分数，越大越相关；band 为 strong / relevant / fair / low 四档。',
-      '失败语义：不抛异常。空结果、知识库不存在、参数非法、超时都会返回 ok=false 与可读的 summary，'
-        + '其中空结果同时给出 below_floor（低于阈值被过滤的条数），便于判断是"确实没有"还是"阈值过高"。',
+      '失败语义：不抛异常。空结果、知识库不存在、参数非法、超时、已取消都会返回 ok=false 与可读的 summary，'
+        + '其中空结果同时给出 below_floor（低于阈值被过滤的条数），便于判断是"确实没有"还是"阈值过高"；'
+        + 'reason 区分 timeout（预算耗尽）与 cancelled（调用方撤回）。',
       '副作用：无。只读取知识库，不写入、不修改任何数据。',
     ].join('\n'),
     parameters: {
@@ -225,13 +252,14 @@ export function defineKbSearchTool(operations: KnowledgeOperations, minScore: nu
       const fail = (
         reason: ToolOutput['reason'],
         summary: string,
+        mode: ToolOutput['mode'] = 'dense',
       ): ToolOutput => ({
         ok: false,
         ...(reason === undefined ? {} : { reason }),
         summary,
         collection,
         query,
-        mode: 'dense',
+        mode,
         hits: [],
         below_floor: 0,
       })
@@ -252,23 +280,44 @@ export function defineKbSearchTool(operations: KnowledgeOperations, minScore: nu
       // the timeout would never fire. So each awaited step is also raced against
       // the budget, which is what makes the timeout a real bound rather than a
       // flag that is checked once the work has already finished.
-      const timeout = new AbortController()
-      const timer = setTimeout(() => timeout.abort(), SEARCH_TIMEOUT_MS)
-      const onAbort = (): void => timeout.abort()
-      exec.signal.addEventListener('abort', onAbort, { once: true })
+      //
+      // The two are tracked with **separate** sentinels. They previously shared one
+      // controller, so a caller-initiated abort was reported as
+      // `reason='timeout'` with the text "检索超时（超过 15 秒）" — at 0 ms, for a
+      // call nobody had waited on. That is a misdiagnosis an operator acts on, so
+      // the outcomes are distinct: the model gets `timeout` only when the budget
+      // actually expired, and `cancelled` when the caller withdrew.
+      const budget = new AbortController()
+      const timer = setTimeout(() => budget.abort(), timeoutMs)
 
-      /** Reject as soon as the budget expires or the caller aborts. */
-      const budget = new Promise<never>((_resolve, reject) => {
-        timeout.signal.addEventListener('abort', () => {
-          reject(new Error('__kb_search_timeout__'))
-        }, { once: true })
+      /** Reject as soon as the budget expires, with the budget's own sentinel. */
+      const expired = new Promise<never>((_resolve, reject) => {
+        budget.signal.addEventListener('abort', () => reject(new Error(SEARCH_TIMEOUT_SENTINEL)), { once: true })
       })
-      /** Race one step against the budget. */
-      const within = <T>(work: Promise<T>): Promise<T> => Promise.race([work, budget])
+      /**
+       * Reject as soon as the caller aborts, with a distinct sentinel.
+       *
+       * A caller that has already withdrawn must be recognised immediately rather
+       * than after the first await, which is why the already-aborted case is
+       * checked here as well as listened for.
+       */
+      const withdrawn = new Promise<never>((_resolve, reject) => {
+        const onAbort = (): void => reject(new Error(SEARCH_CANCELLED_SENTINEL))
+        if (exec.signal.aborted) onAbort()
+        else exec.signal.addEventListener('abort', onAbort, { once: true })
+      })
+      /** Race one step against both outcomes. */
+      const within = <T>(work: Promise<T>): Promise<T> => Promise.race([work, expired, withdrawn])
+
+      // `mode` is reported on failures too, so a caller that timed out mid-hybrid
+      // is not told the search was dense-only. It is widened once the real mode is
+      // known, and stays 'dense' only for a failure that happened before retrieval.
+      let failureMode: ToolOutput['mode'] = 'dense'
 
       try {
         const vector = await within(operations.embedQuery(query))
         const result = await within(operations.search(collection, query, vector, topk, minScore))
+        failureMode = result.mode
         const hits: ToolHit[] = result.hits.map(hit => ({
           file: hit.docName,
           doc_id: hit.docId,
@@ -296,18 +345,23 @@ export function defineKbSearchTool(operations: KnowledgeOperations, minScore: nu
         const message = String(error instanceof Error ? error.message : error)
         // The budget's own sentinel, distinguished from a store error so the two
         // do not both read as "检索失败".
-        if (message === '__kb_search_timeout__') {
-          return fail('timeout', `检索超时（超过 ${SEARCH_TIMEOUT_MS / 1000} 秒）。可缩小 topk 或稍后重试。`)
+        if (message === SEARCH_TIMEOUT_SENTINEL) {
+          return fail('timeout', `检索超时（超过 ${timeoutMs / 1000} 秒）。可缩小 topk 或稍后重试。`, failureMode)
+        }
+        // The caller withdrew. Reported as such rather than as a timeout: the two
+        // need different responses, and telling an operator a call took 15 seconds
+        // when it was cancelled at 0 ms sends them looking in the wrong place.
+        if (message === SEARCH_CANCELLED_SENTINEL) {
+          return fail('cancelled', '检索已取消。', failureMode)
         }
         // A missing collection is the one failure worth naming precisely: it is
         // the difference between "you typed the id wrong" and "something broke".
         if (/不存在|does not exist|not exist/i.test(message)) {
-          return fail('collection_not_found', `知识库 ${collection} 不存在。请用正确的集合标识，或先在知识库页面创建它。`)
+          return fail('collection_not_found', `知识库 ${collection} 不存在。请用正确的集合标识，或先在知识库页面创建它。`, failureMode)
         }
-        return fail('internal_error', `检索失败：${message}`)
+        return fail('internal_error', `检索失败：${message}`, failureMode)
       } finally {
         clearTimeout(timer)
-        exec.signal.removeEventListener('abort', onAbort)
       }
     },
   })
