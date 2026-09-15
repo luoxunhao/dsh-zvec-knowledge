@@ -128,15 +128,56 @@ export function chunkDocument(text: string, config: ChunkingConfig): ChunkingRes
       : fixedSegments(text)
   const sized = segments.flatMap(segment => splitSegment(segment, config))
   const retained: Chunk[] = []
+  /**
+   * Heading-only chunks awaiting a body to lead.
+   *
+   * Held rather than dropped because a heading names a real level of the document;
+   * carrying it into the next body is what makes that level retrievable at all.
+   */
+  let pending: Omit<Chunk, 'ordinal'>[] = []
+  /** Source offsets of the pending headings, so a merged chunk cites from the earliest. */
+  const pendingStart: number[] = []
   let discarded = 0
   for (const candidate of sized) {
     if (candidate.tokens < config.minChunkTokens) {
+      // A section whose whole text is its heading path is not noise to be dropped
+      // — it is a real level of the outline, and a query naming it must be able to
+      // match. Fold it into the next chunk that is large enough, where it reads as
+      // the context line it is, instead of losing it. Anything else below the
+      // minimum is genuinely too small to retrieve on and is counted as discarded.
+      if (isHeadingOnly(candidate)) {
+        pending.push(candidate)
+        pendingStart.push(candidate.charStart)
+        continue
+      }
       discarded += 1
       continue
     }
-    retained.push({ ...candidate, ordinal: retained.length })
+    const prefix = pending.map(entry => entry.text.trim()).filter(part => part !== '')
+    const earliest = pendingStart.length === 0 ? candidate.charStart : Math.min(...pendingStart)
+    pending = []
+    pendingStart.length = 0
+    if (prefix.length === 0) {
+      retained.push({ ...candidate, ordinal: retained.length })
+      continue
+    }
+    // The carried headings lead the chunk so the section they name is stated
+    // before the content that belongs to it.
+    const carried = `${prefix.join('\n')}\n\n${candidate.text}`
+    retained.push({
+      ...candidate,
+      text: carried,
+      tokens: estimateTokens(carried),
+      charStart: Math.min(candidate.charStart, earliest),
+      ordinal: retained.length,
+    })
   }
-  applyOverlap(retained)
+  // Headings left at the very end never found a body; they are still real, so
+  // they are emitted rather than silently dropped — a document that ends on a
+  // heading should still answer to that heading.
+  for (const leftover of pending) {
+    retained.push({ ...leftover, ordinal: retained.length })
+  }  applyOverlap(retained)
   const totalTokens = retained.reduce((sum, chunk) => sum + chunk.tokens, 0)
   return {
     chunks: retained,
@@ -148,23 +189,67 @@ export function chunkDocument(text: string, config: ChunkingConfig): ChunkingRes
 }
 
 /**
- * Split on Markdown headings, keeping each section with its heading.
+ * Whether a chunk's entire content is heading lines.
+ *
+ * Such a chunk is the outline entry for the section that follows, so it carries
+ * structure rather than retrievable prose.
+ * @param chunk - the candidate.
+ * @returns whether every non-blank line is a heading.
+ */
+function isHeadingOnly(chunk: Omit<Chunk, 'ordinal'>): boolean {
+  const lines = chunk.text.split('\n').map(line => line.trim()).filter(line => line !== '')
+  return lines.length > 0 && lines.every(line => /^#{1,6}\s+/.test(line))
+}
+
+/**
+ * Split on Markdown headings, keeping each section with its heading path.
+ *
+ * Two properties this must hold, both of which the first version violated and
+ * `verify-chunking` now locks:
+ *
+ * - **A parent section is never dropped.** The first version emitted a segment
+ *   only if the section it had accumulated had a non-blank body, so a `##` that
+ *   held nothing but `###` children vanished — and with it every query that
+ *   names that section. A heading always opens a segment here, whether or not
+ *   the document gives it body text.
+ * - **A section knows its ancestors.** A section titled `安装` under `手册` is
+ *   indexed as `手册 › 安装`, because a fragment carrying only its nearest
+ *   heading states less than the document does, and the embedding has nothing
+ *   else to recover the missing context from. A heading stack is what makes this
+ *   fall out without a second pass over the text.
  * @param text - full document text.
  * @returns segments.
  */
 function headingSegments(text: string): Segment[] {
   const segments: Segment[] = []
   const lines = text.split('\n')
+
+  /**
+   * The open heading path, outermost first: level and title, so a shallower
+   * heading can pop every deeper entry rather than needing a parallel count.
+   */
+  const stack: { level: number, title: string }[] = []
+  /** The heading line that opened the current section, kept so its text survives. */
+  let openHeading: string | null = null
   let current: string[] = []
-  let heading: string | null = null
   let start = 0
   let offset = 0
   let inFence = false
 
-  /** Flush the pending section. */
-  const flush = (end: number): void => {
+  /** The current heading path rendered for display, or `null` at the top level. */
+  const pathOf = (): string | null =>
+    stack.length === 0 ? null : stack.map(entry => entry.title).join(' › ')
+
+  /** Flush the pending section, if it holds anything but its own heading line. */
+  const flush = (): void => {
     const body = current.join('\n')
-    if (body.trim() !== '') segments.push({ text: body, start, heading, code: false })
+    const withoutHeading = openHeading === null ? body : body.replace(openHeading, '')
+    // A section is emitted when it has content *or* a heading of its own. The
+    // second half is the fix: a parent whose only text is its title is still a
+    // real section of the document and must be retrievable by that title.
+    if (body.trim() !== '' && (withoutHeading.trim() !== '' || openHeading !== null)) {
+      segments.push({ text: body, start, heading: pathOf(), code: false })
+    }
     current = []
   }
 
@@ -172,10 +257,18 @@ function headingSegments(text: string): Segment[] {
     const isFence = /^\s*(```|~~~)/.test(line)
     if (isFence) inFence = !inFence
     // A heading inside a fenced block is code, not structure.
-    const isHeading = !inFence && /^#{1,6}\s+/.test(line)
-    if (isHeading) {
-      flush(offset)
-      heading = line.replace(/^#{1,6}\s+/, '').trim()
+    const match = inFence ? null : /^(#{1,6})\s+(.*)$/.exec(line)
+    if (match !== null) {
+      // The path is captured before the stack changes, so it describes the
+      // section being closed rather than the one about to open.
+      flush()
+      const level = (match[1] as string).length
+      const title = (match[2] as string).trim()
+      // Pop every entry at this level or deeper: a `##` closes the previous `##`
+      // and everything under it, which is what makes the path an outline.
+      while (stack.length > 0 && (stack[stack.length - 1] as { level: number }).level >= level) stack.pop()
+      stack.push({ level, title })
+      openHeading = line
       start = offset
       current = [line]
     } else {
@@ -184,7 +277,7 @@ function headingSegments(text: string): Segment[] {
     }
     offset += line.length + 1
   }
-  flush(text.length)
+  flush()
   return segments
 }
 
@@ -236,7 +329,7 @@ function splitSegment(segment: Segment, config: ChunkingConfig): Omit<Chunk, 'or
       cursor += piece.text.length
       continue
     }
-    for (const window of sizeWindows(piece.text, config.chunkTokens)) {
+    for (const window of sizeWindows(piece.text, config.chunkTokens, config.splitTablesByRow)) {
       out.push(makeChunk(window.text, cursorStart + window.start, segment.heading))
     }
     cursor += piece.text.length
@@ -281,19 +374,42 @@ function protectCode(text: string): { text: string, code: boolean }[] {
   return pieces.filter(piece => piece.text !== '')
 }
 
+/** Whether a line is a Markdown table row. */
+function isTableRow(line: string): boolean {
+  return /^\s*\|.*\|\s*$/.test(line)
+}
+
+/** Whether a line is the `| --- | --- |` separator under a table's header. */
+function isTableSeparator(line: string): boolean {
+  return /^\s*\|[\s:|-]+\|\s*$/.test(line) && line.includes('-')
+}
+
 /**
  * Slice text into windows of at most `budget` tokens.
  *
  * Boundaries prefer paragraph breaks, then sentence enders, then a hard cut, so
  * a chunk rarely ends mid-sentence. The cut is never in the middle of a surrogate
  * pair, which is what keeps an emoji or an extension-B ideograph intact.
+ *
+ * **Tables are handled separately when `repeatTableHeaders` is set.** A generic
+ * character window cuts wherever the budget runs out, which inside a table means
+ * mid-row — and the continuation then begins with cells whose column names are in
+ * the previous chunk. So a table is split on *row* boundaries and every window
+ * after the first is prefixed with the header and separator rows. The repeated
+ * header is deliberately included in that window's token count, because it is
+ * genuinely part of what gets embedded.
  * @param text - text to window.
  * @param budget - token budget per window.
+ * @param repeatTableHeaders - whether to split tables on rows and repeat their header.
  * @returns windows with their offsets.
  */
-function sizeWindows(text: string, budget: number): { text: string, start: number }[] {
+function sizeWindows(text: string, budget: number, repeatTableHeaders = false): { text: string, start: number }[] {
   if (text === '') return []
   if (estimateTokens(text) <= budget) return [{ text, start: 0 }]
+  if (repeatTableHeaders) {
+    const tableWindows = tableWindowsOf(text, budget)
+    if (tableWindows !== null) return tableWindows
+  }
   const windows: { text: string, start: number }[] = []
   let start = 0
   while (start < text.length) {
@@ -317,6 +433,86 @@ function sizeWindows(text: string, budget: number): { text: string, start: numbe
     start = cut
   }
   return windows.filter(window => window.text !== '')
+}
+
+/**
+ * Window a text whose oversized part is a table, on row boundaries.
+ *
+ * Returns `null` when the text does not need table treatment, so the caller can
+ * fall back to the generic character window. Prose around the table is emitted as
+ * its own windows, so a segment that is "paragraph + big table" keeps both.
+ * @param text - text to window.
+ * @param budget - token budget per window.
+ * @returns windows, or `null` when this text has no splittable table.
+ */
+function tableWindowsOf(text: string, budget: number): { text: string, start: number }[] | null {
+  const lines = text.split('\n')
+  const offsets: number[] = []
+  let running = 0
+  for (const line of lines) {
+    offsets.push(running)
+    running += line.length + 1
+  }
+
+  // Locate every table by its separator row, so an oversized table is found even
+  // when it is not the first thing in the segment.
+  const tables: { from: number, to: number, header: string[] }[] = []
+  for (let index = 0; index < lines.length; index += 1) {
+    if (!isTableSeparator(lines[index] as string)) continue
+    const headerLine = index - 1
+    if (headerLine < 0 || !isTableRow(lines[headerLine] as string)) continue
+    let end = index + 1
+    while (end < lines.length && isTableRow(lines[end] as string)) end += 1
+    tables.push({ from: headerLine, to: end, header: [lines[headerLine] as string, lines[index] as string] })
+    index = end - 1
+  }
+  const oversized = tables.filter(table =>
+    estimateTokens(lines.slice(table.from, table.to).join('\n')) > budget)
+  if (oversized.length === 0) return null
+
+  const windows: { text: string, start: number }[] = []
+  let cursor = 0
+
+  /** Emit the non-table run `lines[cursor, until)` through the generic windower. */
+  const emitProse = (until: number): void => {
+    if (until <= cursor) return
+    const body = lines.slice(cursor, until).join('\n')
+    const from = offsets[cursor] as number
+    for (const window of sizeWindows(body, budget)) {
+      windows.push({ text: window.text, start: from + window.start })
+    }
+  }
+
+  for (const table of oversized) {
+    emitProse(table.from)
+    const prefix = table.header.join('\n')
+    const firstRow = table.from + table.header.length
+    let rowStart = firstRow
+    while (rowStart < table.to) {
+      // Every window repeats the header, including the first: the header lines are
+      // part of `lines[table.from, firstRow)` and are therefore not in `rows`, so
+      // building each window the same way is what keeps them identical in shape.
+      let rowEnd = rowStart
+      while (rowEnd < table.to) {
+        const candidate = estimateTokens(`${prefix}\n${lines.slice(rowStart, rowEnd + 1).join('\n')}`)
+        // Always take at least one row, even when a single row exceeds the budget:
+        // dropping it would lose data, and a one-row window with its header is
+        // still a truthful answer to "what is this cell".
+        if (rowEnd > rowStart && candidate > budget) break
+        rowEnd += 1
+        if (candidate > budget) break
+      }
+      const rows = lines.slice(rowStart, rowEnd)
+      // A continuation's text is prefixed for readability, but its offset still
+      // points at the first genuine row, so citation ranges stay in the source.
+      windows.push({ text: `${prefix}\n${rows.join('\n')}`, start: offsets[rowStart] as number })
+      rowStart = rowEnd
+    }
+    cursor = table.to
+  }
+  emitProse(lines.length)
+
+  return windows.filter(window => window.text.trim() !== '')
 }
 
 /**
