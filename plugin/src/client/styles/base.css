@@ -23,6 +23,31 @@
 }
 
 /**
+ * Border-box sizing for everything in the plugin's scope.
+ *
+ * Without this the default is `content-box`, so a control written as
+ * `width: 100%` plus `padding: 0 12px` and a 1px border computes to a box 26px
+ * wider than its container. Inside a grid column that is not merely untidy: the
+ * column's minimum is its content, so the overflow widens the track and the
+ * control's right edge is clipped by the card's own border — which is exactly how
+ * the 检索验证 query input was reported.
+ *
+ * The design tokens are all outer dimensions (a control is "34px tall", a card is
+ * "373px wide"), so border-box is also the model every token already assumes:
+ * under content-box a `height: var(--kb-control-md)` control is 34px *plus* its
+ * border, and a `width` token is short by its padding.
+ *
+ * Scoped to `.kb-root` rather than `*` so the plugin cannot restyle host elements,
+ * and applied to pseudo-elements too, which do not inherit it.
+ */
+.kb-root,
+.kb-root *,
+.kb-root *::before,
+.kb-root *::after {
+  box-sizing: border-box;
+}
+
+/**
  * Technical values (collection ids, chunk counts, scores, timestamps) stay
  * monospaced with tabular figures so list columns align vertically. This is the
  * design spec's "技术值一律等宽" rule, and it is a class rather than a property
