@@ -271,6 +271,95 @@ check(
 )
 
 // ---------------------------------------------------------------------------
+// 7. A published build must reclaim the slot it displaced (B4)
+// ---------------------------------------------------------------------------
+
+// The stale slot was never cleaned up: a 20-document collection measured 24.24 MB
+// of a 62.01 MB store (39%) in a snapshot nothing could reach, and the quota check
+// counts it, so a user could be refused an upload by a directory they cannot see.
+// Uses a deterministic stub embedder so no endpoint is required.
+const { mkdirSync, rmSync, existsSync, writeFileSync } = await import('node:fs')
+const { SLOTS } = await import(new URL('../lib/store/snapshot.js', import.meta.url).href)
+
+const workRoot = join(ROOT, 'tmp', 'fix-regressions-slot')
+rmSync(workRoot, { recursive: true, force: true })
+mkdirSync(workRoot, { recursive: true })
+
+const stubEmbed = async texts => texts.map((text, i) => {
+  const v = new Float32Array(8)
+  for (let k = 0; k < 8; k += 1) v[k] = Math.sin((text.length + i + k) * 0.7)
+  const norm = Math.sqrt(v.reduce((sum, x) => sum + x * x, 0))
+  return v.map(x => x / norm)
+})
+
+const slotOps = new KnowledgeOperations({
+  workspaceDir: workRoot, stateDir: '.dsh-kb-zvec', embed: stubEmbed, dimension: 8,
+  quota: { bytes: null, warnAt: 0.9 },
+})
+const slotCollection = 'kb_slot_0001'
+const buildStrategy = {
+  chunking: { mode: 'heading', chunkTokens: 128, overlapTokens: 16, minChunkTokens: 1, preserveCodeBlocks: true, splitTablesByRow: false },
+  index: { kind: 'HNSW', m: 32, efConstruction: 200, quantize: 'INT8' },
+}
+/** Wait for the collection's build job to settle. `running` is the job flag. */
+const settle = async () => {
+  for (let i = 0; i < 400; i += 1) {
+    const snapshot = slotOps.buildStatus(slotCollection)
+    if (snapshot !== null && snapshot.running === false) return snapshot
+    await new Promise(resolve => setTimeout(resolve, 50))
+  }
+  throw new Error('build did not settle')
+}
+
+await slotOps.createCollection({ name: 'slot', collectionId: slotCollection, description: 'd' })
+await slotOps.addDocument(slotCollection, {
+  name: 'a.md', bytes: 100,
+  text: Array.from({ length: 30 }, (_, i) => `# 章节 ${i}\n\n第 ${i} 节的内容。`).join('\n\n'),
+})
+await slotOps.buildIndex(slotCollection, buildStrategy, { onProgress: () => {}, onLog: () => {} }, 'full')
+const firstBuild = await settle()
+const metaAfterFirst = JSON.parse(readFileSync(join(workRoot, '.dsh-kb-zvec', slotCollection, 'meta.json'), 'utf8'))
+
+await slotOps.buildIndex(slotCollection, buildStrategy, { onProgress: () => {}, onLog: () => {} }, 'full')
+const secondBuild = await settle()
+const metaAfterSecond = JSON.parse(readFileSync(join(workRoot, '.dsh-kb-zvec', slotCollection, 'meta.json'), 'utf8'))
+
+check('B4: both builds published', firstBuild.ok === true && secondBuild.ok === true, `${firstBuild.chunks} then ${secondBuild.chunks} chunks`)
+check(
+  'B4: successive builds land in different slots',
+  metaAfterFirst.active !== metaAfterSecond.active,
+  `${metaAfterFirst.active} -> ${metaAfterSecond.active}`,
+)
+
+const staleSlot = metaAfterSecond.active === SLOTS[0] ? SLOTS[1] : SLOTS[0]
+const staleDir = join(workRoot, '.dsh-kb-zvec', slotCollection, staleSlot)
+check(
+  'B4: the displaced slot is reclaimed after a publish',
+  !existsSync(staleDir),
+  `${staleSlot}/ exists=${existsSync(staleDir)} (was left behind, 39% of the store)`,
+)
+check('B4: the served slot survives', existsSync(join(workRoot, '.dsh-kb-zvec', slotCollection, metaAfterSecond.active)), `${metaAfterSecond.active}/`)
+
+// The reclamation must not have removed what an incremental build needs.
+await slotOps.addDocument(slotCollection, {
+  name: 'b.md', bytes: 100,
+  text: Array.from({ length: 8 }, (_, i) => `# 补充 ${i}\n\n新增第 ${i} 节。`).join('\n\n'),
+})
+const stillViable = slotOps.incrementalViability(slotCollection, buildStrategy.chunking, buildStrategy.index)
+check('B4: an incremental build is still viable afterwards', stillViable.possible === true, stillViable.reason || 'possible')
+
+await slotOps.buildIndex(slotCollection, buildStrategy, { onProgress: () => {}, onLog: () => {} }, 'incremental')
+const thirdBuild = await settle()
+check(
+  'B4: the incremental build still succeeds',
+  thirdBuild.ok === true,
+  `chunks=${thirdBuild.chunks} error=${thirdBuild.error ?? 'none'}`,
+)
+const leftover = SLOTS.filter(s => existsSync(join(workRoot, '.dsh-kb-zvec', slotCollection, s)))
+check('B4: at most one slot occupies disk at rest', leftover.length <= 1, `${leftover.length} slot(s)`)
+slotOps.dispose()
+
+// ---------------------------------------------------------------------------
 
 console.log('')
 for (const line of passes) console.log(`  PASS  ${line}`)
