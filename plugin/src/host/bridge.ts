@@ -42,7 +42,9 @@ import { randomBytes, timingSafeEqual } from 'node:crypto'
 // `ctx.on('webserver/index-inject', ...)` is type-checked.
 import './services.ts'
 import {
-  KB_API_PATH, KB_TOKEN_GLOBAL, KB_TOKEN_HEADER, type KbApiResponse,
+  KB_API_PATH, KB_TOKEN_GLOBAL, KB_TOKEN_HEADER,
+  KB_UPLOAD_PATH, KB_UPLOAD_COLLECTION_HEADER, KB_UPLOAD_NAME_HEADER, KB_UPLOAD_SIZE_HEADER,
+  type KbApiResponse,
 } from '../shared/contract.ts'
 import type { KnowledgeOperations, CollectionView } from './operations.ts'
 import type { BuildLogLine, BuildProgress } from '../store/build.ts'
@@ -473,12 +475,89 @@ export function registerKbBridge(
     },
   })
 
-  ctx.logger?.debug?.(`zvec-knowledge: 已注册宿主数据通道 ${KB_API_PATH}`)
+  const disposeUpload = webServer.register({
+    kind: 'exact',
+    path: KB_UPLOAD_PATH,
+    async handler(req, res): Promise<void> {
+      const provided = req.headers[KB_TOKEN_HEADER]
+      if (!tokenMatches(Array.isArray(provided) ? provided[0] : provided, token)) {
+        send(res, 403, {
+          ok: false,
+          reason: 'unauthorized',
+          error: '宿主数据通道未授权：请求缺少或携带了错误的令牌。请刷新页面后重试。',
+        })
+        return
+      }
+      if (req.method !== 'POST') {
+        send(res, 405, { ok: false, error: '该接口只接受 POST', reason: 'invalid_argument' })
+        return
+      }
+
+      const header = (name: string): string | undefined => {
+        const value = req.headers[name]
+        return Array.isArray(value) ? value[0] : value
+      }
+      const collectionId = header(KB_UPLOAD_COLLECTION_HEADER) ?? ''
+      const rawName = header(KB_UPLOAD_NAME_HEADER) ?? ''
+      // The name is percent-encoded by the client so a non-ASCII file name is not
+      // mangled by the header transport, which is latin-1 on the wire.
+      let name = rawName
+      try {
+        name = decodeURIComponent(rawName)
+      } catch {
+        // A name that is not valid percent-encoding is taken literally rather than
+        // rejected: the only consequence is a different display name.
+      }
+      const declaredBytes = Number(header(KB_UPLOAD_SIZE_HEADER) ?? '0')
+
+      if (collectionId === '' || name === '') {
+        send(res, 200, {
+          ok: false,
+          reason: 'invalid_argument',
+          error: '上传请求缺少集合标识或文件名',
+        })
+        return
+      }
+
+      // The client aborting (navigating away, cancelling the row) closes the
+      // request; aborting the write with it is what stops the host from finishing a
+      // transfer nobody is waiting for.
+      const abort = new AbortController()
+      const onClose = (): void => abort.abort()
+      req.on('close', onClose)
+
+      try {
+        const operations = resolveOperations()
+        const stored = await operations.addDocumentStream(
+          collectionId,
+          name,
+          Number.isFinite(declaredBytes) ? declaredBytes : 0,
+          req,
+          abort.signal,
+        )
+        send(res, 200, { ok: true, result: stored })
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        ctx.logger?.warn?.(`zvec-knowledge: 上传 ${name} 失败：${message}`)
+        const missing = /不存在|does not exist|not exist/i.test(message)
+        send(res, 200, {
+          ok: false,
+          ...(missing ? { reason: 'not_found' as const } : {}),
+          error: message,
+        })
+      } finally {
+        req.off('close', onClose)
+      }
+    },
+  })
+
+  ctx.logger?.debug?.(`zvec-knowledge: 已注册宿主数据通道 ${KB_API_PATH} 与上传路由 ${KB_UPLOAD_PATH}`)
   return () => {
-    // Route first, then injection: with the endpoint gone, a page that still
+    // Routes first, then injection: with the endpoints gone, a page that still
     // carried the token could only 404, whereas removing the injection first would
-    // leave a live route and a page that cannot reach it.
+    // leave live routes and a page that cannot reach them.
     disposeRoute()
+    disposeUpload()
     disposeInject()
   }
 }

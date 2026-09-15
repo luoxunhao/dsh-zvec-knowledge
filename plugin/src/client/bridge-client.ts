@@ -18,7 +18,9 @@
  */
 
 import {
-  KB_API_PATH, KB_TOKEN_GLOBAL, KB_TOKEN_HEADER, type KbApiResponse,
+  KB_API_PATH, KB_TOKEN_GLOBAL, KB_TOKEN_HEADER,
+  KB_UPLOAD_PATH, KB_UPLOAD_COLLECTION_HEADER, KB_UPLOAD_NAME_HEADER, KB_UPLOAD_SIZE_HEADER,
+  type KbApiResponse,
 } from '../shared/contract.ts'
 import type {
   KnowledgeBasePort, HostCollection, HostDocument,
@@ -133,17 +135,68 @@ export function createHostPort(): KnowledgeBasePort {
       await call('removeDocument', { collectionId, id })
     },
 
-    // Upload is not wired yet: the host has `addDocument`, but the browser must
-    // first *read* the file, which needs its own contract (name, byte size,
-    // extracted text) and its own progress reporting. Returning a clear refusal
-    // beats shipping a transport that silently drops the file.
-    uploadDocument: (
-      _collectionId: string,
-      _file: File,
-      _onProgress: (fraction: number) => void,
-      _signal: AbortSignal,
-    ): Promise<HostDocument> =>
-      Promise.reject(new Error('上传通道尚未接通：宿主已具备存储能力，浏览器侧的文件读取契约仍在实现中')),
+    // Uploaded as a stream rather than through `call`, so a large file is never
+    // aggregated into a JSON body on either side. Metadata rides in headers, which
+    // lets the host refuse the upload before it reads any of the bytes.
+    uploadDocument: async (
+      collectionId: string,
+      file: File,
+      onProgress: (fraction: number) => void,
+      signal: AbortSignal,
+    ): Promise<HostDocument> => {
+      const token = readBridgeToken()
+      // XHR rather than fetch: fetch cannot report upload progress, and a 32 MB
+      // transfer with no progress is a frozen-looking interface. The `File` is
+      // handed over as the body, so the browser streams it from disk rather than
+      // reading it into a string first.
+      return await new Promise<HostDocument>((resolve, reject) => {
+        const request = new XMLHttpRequest()
+        request.open('POST', KB_UPLOAD_PATH)
+        request.setRequestHeader(KB_TOKEN_HEADER, token)
+        request.setRequestHeader(KB_UPLOAD_COLLECTION_HEADER, collectionId)
+        request.setRequestHeader(KB_UPLOAD_NAME_HEADER, encodeURIComponent(file.name))
+        request.setRequestHeader(KB_UPLOAD_SIZE_HEADER, String(file.size))
+
+        request.upload.addEventListener('progress', event => {
+          if (event.lengthComputable && event.total > 0) {
+            onProgress(Math.min(1, event.loaded / event.total))
+          }
+        })
+
+        const onAbort = (): void => request.abort()
+        signal.addEventListener('abort', onAbort, { once: true })
+        const release = (): void => signal.removeEventListener('abort', onAbort)
+
+        request.addEventListener('load', () => {
+          release()
+          let payload: KbApiResponse<HostDocument>
+          try {
+            payload = JSON.parse(request.responseText) as KbApiResponse<HostDocument>
+          } catch {
+            reject(new Error(`上传响应无法解析（HTTP ${request.status}）`))
+            return
+          }
+          if (!payload.ok || payload.result === undefined) {
+            reject(new Error(payload.error ?? `上传失败（HTTP ${request.status}）`))
+            return
+          }
+          onProgress(1)
+          resolve(payload.result)
+        })
+        request.addEventListener('error', () => {
+          release()
+          reject(new Error('上传失败：宿主数据通道不可达'))
+        })
+        request.addEventListener('abort', () => {
+          release()
+          // An AbortError is how the caller distinguishes its own cancellation
+          // from a failure worth showing the user.
+          reject(new DOMException('上传已取消', 'AbortError'))
+        })
+
+        request.send(file)
+      })
+    },
 
     previewChunks: (collectionId: string, chunking: ChunkingDraft): Promise<HostPreview> =>
       call('previewChunks', { collectionId, chunking }),

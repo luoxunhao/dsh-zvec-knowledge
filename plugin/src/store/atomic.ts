@@ -211,3 +211,74 @@ export function readJsonOrNull<T>(file: string): T | null {
   if (text.trim() === '') return null
   return JSON.parse(text) as T
 }
+
+/** Outcome of a streamed write. */
+export interface StreamWriteResult {
+  /** Bytes actually written. */
+  bytes: number
+}
+
+/**
+ * Write a file from an async byte source, without holding it in memory.
+ *
+ * This exists because {@link writeFileAtomic} takes the *whole* contents as a
+ * string. That is fine for a manifest and wrong for an upload: a 32 MB document
+ * would be buffered in full, and aggregating uploads on the host is the one thing
+ * a large-file path must not do.
+ *
+ * Durability follows the same shape as the atomic writer — a sibling temp file,
+ * fsync, then a rename — because the failure it prevents is identical: a reader
+ * must never see half a document. The difference is that the bytes arrive in
+ * chunks and are never concatenated.
+ *
+ * On failure the temp file is removed and nothing is published, so a cancelled
+ * upload leaves no partial document behind for the build to read.
+ * @param file - destination path.
+ * @param source - async iterable of byte chunks.
+ * @param signal - aborts the write, discarding the temp file.
+ * @returns how many bytes were written.
+ * @throws {Error} when the destination cannot be written or the signal aborts.
+ */
+export async function writeFileStreamed(
+  file: string,
+  source: AsyncIterable<Uint8Array>,
+  signal?: AbortSignal,
+): Promise<StreamWriteResult> {
+  mkdirSync(dirname(file), { recursive: true })
+  const temp = join(dirname(file), `.${process.pid}.${Date.now().toString(36)}.${Math.random().toString(36).slice(2, 8)}.part`)
+  const fd = openSync(temp, 'w')
+  let bytes = 0
+  try {
+    for await (const chunk of source) {
+      if (signal?.aborted === true) throw new Error('上传已取消')
+      writeSync(fd, chunk)
+      bytes += chunk.byteLength
+    }
+    fsyncSync(fd)
+  } catch (error) {
+    try {
+      closeSync(fd)
+    } catch {
+      // Already closed by the failing write; the original error is what matters.
+    }
+    try {
+      unlinkSync(temp)
+    } catch {
+      // Nothing to clean up.
+    }
+    throw error
+  }
+  closeSync(fd)
+  try {
+    renameSync(temp, file)
+  } catch (error) {
+    try {
+      unlinkSync(temp)
+    } catch {
+      // The temp file is already gone.
+    }
+    throw error
+  }
+  syncDirectory(dirname(file))
+  return { bytes }
+}

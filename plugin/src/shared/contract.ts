@@ -40,6 +40,29 @@ export type KbToolParam = typeof KB_TOOL_PARAMS[number]
 export const KB_API_PATH = '/api/_kb_zvec'
 
 /**
+ * The host route that receives an uploaded document's bytes.
+ *
+ * A separate path from {@link KB_API_PATH} because the two have genuinely
+ * different shapes: the bridge is JSON request/response over a small buffered
+ * body, while this one streams a file of up to 32 MB and must never aggregate it.
+ * Folding uploads into the JSON route would mean raising its body limit, which is
+ * exactly the aggregation a large-file path exists to avoid.
+ *
+ * Metadata travels in headers rather than a multipart body, so the host can decide
+ * whether to accept the upload before reading a single byte of it.
+ */
+export const KB_UPLOAD_PATH = '/api/_kb_zvec/upload'
+
+/** Header carrying the target collection identifier. */
+export const KB_UPLOAD_COLLECTION_HEADER = 'x-kb-collection'
+
+/** Header carrying the original file name, percent-encoded. */
+export const KB_UPLOAD_NAME_HEADER = 'x-kb-file-name'
+
+/** Header carrying the file's byte length, when the browser knows it. */
+export const KB_UPLOAD_SIZE_HEADER = 'x-kb-file-size'
+
+/**
  * Method names carried in the request body.
  *
  * A single POST route with a method discriminator rather than one path per

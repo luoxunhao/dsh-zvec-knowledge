@@ -186,6 +186,26 @@ function formatBytesForMessage(bytes: number): string {
   return `${bytes} B`
 }
 
+/** Directory inside a collection holding uploaded originals. */
+export const SOURCES_DIR = 'sources'
+
+/**
+ * Path of one document's stored original.
+ *
+ * The original is kept byte-for-byte and never overwritten, which is what makes
+ * the index a *derived* artifact: when the chunking rules or the text extraction
+ * change, the corpus can be reprocessed from what the user actually uploaded
+ * rather than from a transform whose inputs are gone.
+ * @param storeRoot - absolute store root.
+ * @param collectionId - collection identifier.
+ * @param id - document id.
+ * @param ext - lower-case extension, kept so the file is openable by hand.
+ * @returns absolute path.
+ */
+export function sourcePath(storeRoot: string, collectionId: string, id: string, ext: string): string {
+  return join(collectionDir(storeRoot, collectionId), SOURCES_DIR, `${id}.${ext}`)
+}
+
 /**
  * Replace a collection's document set.
  *

@@ -37,8 +37,11 @@ import {
 import { disposeAll, markActive, releaseSlot } from '../store/registry.ts'
 import {
   appendDocument, documentId, extensionOf, listDocuments, removeDocument,
-  replaceDocuments, summarizeDocuments, validateUpload, type DocumentRecord,
+  replaceDocuments, sourcePath, summarizeDocuments, validateUpload,
+  MAX_UPLOAD_BYTES, MAX_UPLOAD_LABEL, type DocumentRecord,
 } from '../store/documents.ts'
+import { extractVerbatim, extractionSupport } from '../store/extract.ts'
+import { writeFileStreamed } from '../store/atomic.ts'
 import {
   CHUNKING_DEFAULTS, INDEX_DEFAULTS, estimateCost, planBuild, storedIndex,
   validateChunking, validateIndex, validateWeights,
@@ -386,6 +389,118 @@ export class KnowledgeOperations {
       bytes: values.bytes,
       ext: extensionOf(values.name),
       text: values.text,
+      status: 'pending',
+      chunks: null,
+      uploadedAt: new Date().toISOString(),
+      builtAt: null,
+    }
+    appendDocument(root, collectionId, record)
+    return {
+      id: record.id, name: record.name, bytes: record.bytes, ext: record.ext,
+      status: 'pending', chunks: null,
+    }
+  }
+
+  /**
+   * Accept one uploaded document as a byte stream.
+   *
+   * The large-file path: bytes are written straight to a temp file and renamed
+   * into place, so a 32 MB document is never held in memory — not by the route, not
+   * by this method, and not by the JSON bridge (whose body limit exists precisely
+   * because a buffered upload would be aggregated on the host).
+   *
+   * Ordering is deliberate. Everything that can refuse the upload without writing
+   * anything is checked first: the collection exists, the name and declared size are
+   * acceptable, and the format is one this module can actually turn into text. Only
+   * then is the body streamed. A refusal therefore costs no disk I/O and leaves no
+   * partial file.
+   *
+   * The size limit is enforced *while* streaming rather than from the declared size,
+   * because the declared size is caller-supplied: trusting it would let a caller
+   * declare 1 KB and send a gigabyte. Exceeding it aborts the write and removes the
+   * temp file.
+   * @param collectionId - collection identifier.
+   * @param name - original file name.
+   * @param declaredBytes - size the caller claims, checked for the cheap rejections.
+   * @param body - the file's bytes.
+   * @param signal - aborts the upload.
+   * @returns the stored document record, in 待构建 state.
+   * @throws {Error} when the upload is refused.
+   */
+  async addDocumentStream(
+    collectionId: string,
+    name: string,
+    declaredBytes: number,
+    body: AsyncIterable<Uint8Array>,
+    signal?: AbortSignal,
+  ): Promise<{ id: string, name: string, bytes: number, ext: string, status: 'pending', chunks: null }> {
+    const self = this.bound()
+    const root = self.storeRoot
+    if (readMeta(root, collectionId) === null) {
+      throw new Error(`知识库 ${collectionId} 不存在`)
+    }
+    const reason = validateUpload(name, declaredBytes)
+    if (reason !== null) throw new Error(reason)
+    const support = extractionSupport(name)
+    if (support.kind !== 'verbatim') {
+      // Named precisely, with the remedy: this is the difference between a user
+      // converting the file and a user concluding the plugin is broken.
+      throw new Error(support.remedy ?? `无法处理 .${extensionOf(name)} 格式的文件`)
+    }
+    const id = documentId(name)
+    const ext = extensionOf(name)
+    const target = sourcePath(root, collectionId, id, ext)
+
+    // The ceiling is applied to what actually arrives, not to what was declared.
+    // The check runs *before* a chunk is yielded, so the over-limit chunk is never
+    // written at all: testing after the write would let one chunk beyond the limit
+    // reach the temp file before the abort, which is bytes on disk that a refusal
+    // promised not to consume.
+    let received = 0
+    const counted = (async function* (): AsyncIterable<Uint8Array> {
+      for await (const chunk of body) {
+        if (received + chunk.byteLength > MAX_UPLOAD_BYTES) {
+          throw new Error(`文件超出上限 ${MAX_UPLOAD_LABEL}`)
+        }
+        received += chunk.byteLength
+        yield chunk
+      }
+    })()
+
+    const written = await writeFileStreamed(target, counted, signal)
+    if (written.bytes === 0) {
+      throw new Error(`文件为空，没有可索引的内容（可接受 1 B 至 ${MAX_UPLOAD_LABEL}）`)
+    }
+
+    let text: string
+    try {
+      text = extractVerbatim(target)
+    } catch (error) {
+      // The original is unreadable or not text; nothing was published, so removing
+      // it keeps the collection free of a document that can never be built.
+      rmSync(target, { force: true })
+      throw new Error(`无法读取文件内容：${error instanceof Error ? error.message : String(error)}`)
+    }
+    if (text.trim() === '') {
+      rmSync(target, { force: true })
+      throw new Error('文档没有可索引的文本内容（空白文件或仅有 BOM）')
+    }
+
+    // Admission is measured against what will actually occupy the store — the
+    // retained original plus its decoded text — because both are written.
+    const footprint = written.bytes + Buffer.byteLength(text, 'utf8')
+    const admission = admit(root, self.quota, footprint, '上传该文档')
+    if (!admission.allowed) {
+      rmSync(target, { force: true })
+      throw new Error(admission.reason ?? '存储配额不足')
+    }
+
+    const record: DocumentRecord = {
+      id,
+      name,
+      bytes: written.bytes,
+      ext,
+      text,
       status: 'pending',
       chunks: null,
       uploadedAt: new Date().toISOString(),
