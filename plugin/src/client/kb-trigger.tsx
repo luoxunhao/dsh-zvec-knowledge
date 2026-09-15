@@ -106,14 +106,38 @@ export interface KbTriggerSource {
 }
 
 /**
- * The pipeline face this module needs, restated from
+ * The root service face, restated from
  * `dsh-client-ui-input-trigger/lib/types/client/contract.d.ts`
- * (`InputTriggerServiceContract`). Accessed through the context under the
- * service's registered name, which is the one seam the harness exposes.
+ * (`InputTriggerServiceContract`).
+ *
+ * **A source sees `registerSource` alone.** The contract says so verbatim: "sources
+ * see registerSource alone, the conversation wiring layer resolves its per-session
+ * controller through sessionOf". That distinction is the whole reason this module
+ * has two interfaces instead of one — see {@link triggerRegistryOf}.
  */
 export interface InputTriggerRegistry {
   registerSource(src: KbTriggerSource): () => void
-  /** Opens one source's menu at a synthetic hit (see the shipped command button). */
+  /**
+   * Resolve the lazy controller owned by one session scope.
+   *
+   * Not used by this module's own registrations, but declared because its presence
+   * is how a caller can tell the root service apart from a stub, and because the
+   * composer button needs the controller it returns.
+   */
+  sessionOf(actx: unknown): InputTriggerControllerLike
+}
+
+/**
+ * The per-session controller, narrowed to the one method the button uses.
+ *
+ * Restated from `InputTriggerController` (`lib/types/client/controller.d.ts`).
+ * `toggleSource` lives here and **not** on the root service: an earlier revision
+ * looked for it on the root, so {@link triggerRegistryOf} always returned
+ * `undefined`, the source never registered, and the composer button rendered as a
+ * clickable control that silently did nothing.
+ */
+export interface InputTriggerControllerLike {
+  /** Opens a menu containing exactly one registered source. */
   toggleSource(
     source: string,
     hit: {
@@ -126,13 +150,45 @@ export interface InputTriggerRegistry {
 
 /**
  * Read the trigger registry off a client context.
+ *
+ * Requires `registerSource` **only**. An earlier version also required
+ * `toggleSource` here, which the root service never has — so the guard rejected a
+ * perfectly good registry and disabled the entire feature with no error anywhere.
+ * Demanding a method from the wrong object is worse than not checking at all,
+ * because the failure is silent.
  * @param ctx - the plugin's client context.
  * @returns the registry, or `undefined` when the harness does not provide it.
  */
 export function triggerRegistryOf(ctx: unknown): InputTriggerRegistry | undefined {
   const registry = (ctx as { inputTriggers?: Partial<InputTriggerRegistry> }).inputTriggers
-  if (registry?.registerSource === undefined || registry?.toggleSource === undefined) return undefined
+  if (registry?.registerSource === undefined) return undefined
   return registry as InputTriggerRegistry
+}
+
+/**
+ * Resolve the per-session controller the composer button drives.
+ *
+ * The button needs `toggleSource`, which only the controller has. Resolution is
+ * best-effort: on a harness whose `sessionOf` is absent or throws, the button
+ * still renders (the `@` keyboard path is unaffected) and simply does not open a
+ * menu, which is a smaller failure than taking the panel down with it.
+ * @param registry - the root service, when present.
+ * @param ctx - the plugin's client context, used as the session scope.
+ * @returns the controller, or `undefined` when it cannot be resolved.
+ */
+export function triggerControllerOf(
+  registry: InputTriggerRegistry | undefined,
+  ctx: unknown,
+): InputTriggerControllerLike | undefined {
+  if (registry?.sessionOf === undefined) return undefined
+  try {
+    const controller = registry.sessionOf(ctx)
+    return typeof controller?.toggleSource === 'function' ? controller : undefined
+  } catch {
+    // A scope that is not a session, or a harness that throws for one: the button
+    // degrades to a no-op rather than escaping into the render.
+    return undefined
+  }
 }
 
 /**

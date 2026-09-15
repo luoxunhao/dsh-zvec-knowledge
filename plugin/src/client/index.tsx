@@ -29,7 +29,7 @@ import { KnowledgeBasePanel } from './panel.tsx'
 import { createHostPort } from './bridge-client.ts'
 import { SearchToolView, type SearchToolViewProps } from './SearchToolView.tsx'
 import { KbButton } from './composer/KbButton.tsx'
-import { createKbTriggerSource, triggerRegistryOf, KB_TRIGGER_SOURCE } from './kb-trigger.tsx'
+import { createKbTriggerSource, triggerControllerOf, triggerRegistryOf, KB_TRIGGER_SOURCE } from './kb-trigger.tsx'
 import {
   KNOWLEDGE_LABEL, KNOWLEDGE_ORDER, KNOWLEDGE_PANEL_KEY, KNOWLEDGE_SIDEBAR_ID,
 } from './panel-id.ts'
@@ -214,6 +214,10 @@ export function apply(ctx: ClientContext): void {
     if (triggers !== undefined) {
       disposeTrigger = triggers.registerSource(createKbTriggerSource(port))
     }
+    // `toggleSource` belongs to the per-session controller, not the root service.
+    // Looking for it on the root meant this was always undefined, so the source
+    // never registered and the button was a silent no-op.
+    const controller = triggerControllerOf(triggers, ctx)
 
     // The composer button. A list entry beside the shipped input controls; it
     // opens the same trigger menu, so it needs no picker of its own.
@@ -223,15 +227,15 @@ export function apply(ctx: ClientContext): void {
         <KbButton
           locked={owner.locked}
           onOpen={() => {
-            if (triggers === undefined) return
-            // Routed through the trigger pipeline, which owns the menu: the
+            if (controller === undefined) return
+            // Routed through the per-session controller, which owns the menu: the
             // shipped command button opens its menu the same way. The synthetic
             // hit sits at the end of the current draft, which is where the chip
             // lands.
             const editor = document.querySelector<HTMLTextAreaElement>('textarea')
             const draft = editor?.value ?? ''
             const end = draft.length
-            triggers.toggleSource(KB_TRIGGER_SOURCE, {
+            controller.toggleSource(KB_TRIGGER_SOURCE, {
               trigger: '@',
               query: '',
               quoted: false,
