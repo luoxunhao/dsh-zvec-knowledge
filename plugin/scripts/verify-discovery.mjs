@@ -248,14 +248,29 @@ try {
     'the client may only import module-table entries; the contract is restated with its source',
   )
   check(
-    'button: it opens the trigger menu rather than owning a picker',
-    /toggleSource/.test(entrySource) && /conversation\.input\.right/.test(entrySource),
-    'one menu serves the button and the keyboard',
+    'button: it writes the draft through the slot input actions',
+    /inputActions/.test(entrySource) && /setDraft/.test(buttonSource),
+    'the sanctioned composer path, not the trigger controller',
   )
   check(
-    'button: it disables with the composer, from the slot owner',
-    /locked/.test(buttonSource) && /locked=\{owner\.locked\}/.test(entrySource),
-    'the lock comes from the conversation, not from local state',
+    'button: it no longer resolves a trigger controller',
+    !/triggerControllerOf/.test(entrySource) && !/toggleSource/.test(entrySource),
+    'sessionOf needs a session scope this slot does not receive; the old path was a silent no-op',
+  )
+  check(
+    'button: a single collection is inserted without a menu',
+    /list\.length === 1/.test(buttonSource),
+    'the common single-base deployment never sees a picker',
+  )
+  check(
+    'button: the lock comes from the input phase, since the owner share is empty',
+    /phase/.test(entrySource) && /locked=\{busy/.test(entrySource),
+    'renderSlot passes {} for this slot, so owner.locked would always be undefined',
+  )
+  check(
+    'diagnostics: the entrances report whether they are live',
+    /reportClientDiagnostics/.test(triggerSource) && /reportClientDiagnostics\(/.test(entrySource),
+    'a button that silently does nothing is otherwise indistinguishable from a broken one',
   )
 
   // The slots shim declares the new contract, and the catalogue cross-check in

@@ -29,7 +29,7 @@ import { KnowledgeBasePanel } from './panel.tsx'
 import { createHostPort } from './bridge-client.ts'
 import { SearchToolView, type SearchToolViewProps } from './SearchToolView.tsx'
 import { KbButton } from './composer/KbButton.tsx'
-import { createKbTriggerSource, triggerControllerOf, triggerRegistryOf, KB_TRIGGER_SOURCE } from './kb-trigger.tsx'
+import { createKbTriggerSource, kbCandidates, reportClientDiagnostics, triggerRegistryOf } from './kb-trigger.tsx'
 import {
   KNOWLEDGE_LABEL, KNOWLEDGE_ORDER, KNOWLEDGE_PANEL_KEY, KNOWLEDGE_SIDEBAR_ID,
 } from './panel-id.ts'
@@ -203,48 +203,57 @@ export function apply(ctx: ClientContext): void {
       ),
     ))
 
-    // The @ trigger source: `@` completion over knowledge bases, and the menu the
-    // composer button opens. One source serves both entrances, so the two cannot
-    // present different lists. The registry is read structurally: the trigger
-    // pipeline is a host plugin whose types this client may not import (see
-    // kb-trigger.tsx), and its absence — a harness without it — only disables the
-    // entrances, never the panel.
+    // The @ trigger source: `@` keyboard completion over knowledge bases. The
+    // registry is read structurally — the trigger pipeline is a host plugin whose
+    // types this client may not import (see kb-trigger.tsx) — and its absence on a
+    // harness without it disables only the keyboard path, never the panel.
     let disposeTrigger: (() => void) | undefined
     const triggers = triggerRegistryOf(ctx)
     if (triggers !== undefined) {
       disposeTrigger = triggers.registerSource(createKbTriggerSource(port))
     }
-    // `toggleSource` belongs to the per-session controller, not the root service.
-    // Looking for it on the root meant this was always undefined, so the source
-    // never registered and the button was a silent no-op.
-    const controller = triggerControllerOf(triggers, ctx)
+    // One diagnostic line, kept because the failure it reports is otherwise
+    // invisible: a client plugin that cannot reach the trigger service renders a
+    // composer button that silently does nothing, with no error anywhere a user
+    // would see. It names which of the two entrances are live.
+    reportClientDiagnostics({
+      triggerRegistry: triggers !== undefined,
+      sourceRegistered: disposeTrigger !== undefined,
+    })
 
-    // The composer button. A list entry beside the shipped input controls; it
-    // opens the same trigger menu, so it needs no picker of its own.
+    // The composer button. It writes the draft through the slot's own
+    // `inputActions`, which `SessionStandardProps` documents as the session's
+    // "Stable public input actions" — the sanctioned path for a composer control.
+    //
+    // An earlier revision drove the trigger pipeline's menu instead, via
+    // `inputTriggers.sessionOf(sessionContext)`. That needs a session-scoped
+    // context, and this slot hands its entry an empty owner share
+    // (`renderSlot("conversation.input.right", {})`), so the resolution always
+    // failed and a `catch` swallowed it: the button rendered and did nothing.
     const disposeButton = ctx.slots.inject('conversation.input.right', () => ctx.slots.register(
       { name: 'conversation.input.right', id: 'kb-zvec-knowledge' },
-      (owner: { locked: boolean }) => (
-        <KbButton
-          locked={owner.locked}
-          onOpen={() => {
-            if (controller === undefined) return
-            // Routed through the per-session controller, which owns the menu: the
-            // shipped command button opens its menu the same way. The synthetic
-            // hit sits at the end of the current draft, which is where the chip
-            // lands.
-            const editor = document.querySelector<HTMLTextAreaElement>('textarea')
-            const draft = editor?.value ?? ''
-            const end = draft.length
-            controller.toggleSource(KB_TRIGGER_SOURCE, {
-              trigger: '@',
-              query: '',
-              quoted: false,
-              position: draft.trim() === '' ? 'leading' : 'inline',
-              span: { start: end, end, draftRev: 0 },
-            })
-          }}
-        />
-      ),
+      // `useInput` and `inputActions` are standard session shares; the owner share
+      // is empty for this slot, so the lock is read from the input phase instead.
+      (props: {
+        useInput?: (select: (state: { draft: string, phase: string }) => unknown) => unknown
+        inputActions?: { setDraft: (text: string) => void }
+      }) => {
+        const draft = typeof props.useInput === 'function'
+          ? String(props.useInput(state => state.draft) ?? '')
+          : ''
+        const busy = typeof props.useInput === 'function'
+          ? props.useInput(state => state.phase) !== 'plain'
+          : false
+        const setDraft = props.inputActions?.setDraft
+        return (
+          <KbButton
+            locked={busy || setDraft === undefined}
+            draft={draft}
+            setDraft={setDraft ?? (() => {})}
+            loadCandidates={() => kbCandidates(port, '')}
+          />
+        )
+      },
     ))
 
     return () => {

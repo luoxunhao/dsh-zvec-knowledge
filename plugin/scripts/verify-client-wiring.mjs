@@ -129,15 +129,44 @@ function drive({ exposeRoot = true, exposeSessionOf = true } = {}) {
   return { error, sources, toggles, slots }
 }
 
-/** Click the composer button and report whether the menu was asked to open. */
-function clickComposer(result) {
+/**
+ * Drive the composer button with the shares the slot actually provides.
+ *
+ * The button no longer reaches the trigger controller: `conversation.input.right`
+ * hands its entry an empty owner share, so the session-scoped `sessionOf` call it
+ * used to make always failed and the failure was swallowed. It writes the draft
+ * through `inputActions.setDraft` instead, which `SessionStandardProps` documents
+ * as the session's stable public input actions.
+ * @param result - the drive() result.
+ * @returns what the component received and did.
+ */
+function driveComposer(result) {
   const button = result.slots.find(entry => entry.options.name === 'conversation.input.right')
   if (button === undefined) return { present: false }
-  const element = button.component({ locked: false })
-  const onOpen = element?.props?.onOpen
-  if (typeof onOpen !== 'function') return { present: true, openable: false }
-  onOpen()
-  return { present: true, openable: true, opens: result.toggles.length }
+  const drafts = []
+  const shares = {
+    // Standard session shares. `useInput` is a selector hook; the draft is what
+    // the button appends to.
+    useInput: (select) => select({ draft: '已有内容', phase: 'plain' }),
+    inputActions: { setDraft: (text) => { drafts.push(text) } },
+  }
+  const element = button.component(shares)
+  // The registration renders `<KbButton …/>`, and a component reference is a
+  // function in the element tree — a stub runtime does not call it. Invoking it
+  // here is what reaches the control the user actually clicks.
+  const rendered = typeof element?.type === 'function' ? element.type(element.props) : element
+  const kids = rendered?.props?.children
+  const control = (Array.isArray(kids) ? kids : [kids]).find(
+    kid => kid != null && (kid.type === 'button' || kid.props?.onClick !== undefined),
+  )
+  const onClick = control?.props?.onClick
+  return {
+    present: true,
+    clickable: typeof onClick === 'function',
+    click: onClick,
+    drafts,
+    disabled: control?.props?.disabled,
+  }
 }
 
 // The shape the harness actually provides. This is the case that was broken.
@@ -149,12 +178,12 @@ function clickComposer(result) {
   check('harness shape: the source declares the @ trigger', source?.trigger === '@', String(source?.trigger))
   check('harness shape: the source exposes candidates()', typeof source?.candidates === 'function', typeof source?.candidates)
   check('harness shape: the source exposes a codec', typeof source?.codec?.serialize === 'function', typeof source?.codec?.serialize)
-  const click = clickComposer(result)
+  const click = driveComposer(result)
   check('harness shape: the composer button is registered', click.present === true, click.present ? 'present' : 'absent')
   check(
-    'harness shape: clicking it opens the trigger menu',
-    click.opens === 1,
-    click.opens === undefined ? 'no onOpen' : `toggleSource called ${click.opens} time(s) (0 = silent no-op)`,
+    'harness shape: the button is wired to the session input actions',
+    click.clickable === true && click.disabled === false,
+    click.clickable ? `disabled=${click.disabled}` : 'no onClick on the control',
   )
 }
 
@@ -162,14 +191,20 @@ function clickComposer(result) {
 {
   const result = drive({ exposeSessionOf: false })
   check('degraded: no sessionOf still registers the source', result.sources.length === 1 && result.error === null, result.error ?? 'ok')
-  const click = clickComposer(result)
-  check('degraded: the button stays present and is a safe no-op', click.present === true && click.opens === 0, `opens=${click.opens}`)
+  const click = driveComposer(result)
+  // The button no longer depends on the controller at all, so it stays live —
+  // which is the improvement: the entrances are independent of each other.
+  check(
+    'degraded: the button still works without the trigger controller',
+    click.present === true && click.clickable === true,
+    `present=${click.present} clickable=${click.clickable}`,
+  )
 }
 {
   const result = drive({ exposeRoot: false })
   check('degraded: no inputTriggers does not throw', result.error === null, result.error ?? 'ok')
   check('degraded: no inputTriggers registers no source', result.sources.length === 0, `${result.sources.length} source(s)`)
-  const click = clickComposer(result)
+  const click = driveComposer(result)
   check('degraded: the button is still registered', click.present === true, click.present ? 'present' : 'absent')
 }
 

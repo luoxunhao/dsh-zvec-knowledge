@@ -37,8 +37,7 @@
 }
 
 /* The interactive-tier state set is declared even where the button cannot reach
- * it today: `loading` is reserved for a future remote fetch (the menu data is
- * fetched by the pipeline, so today this never mounts busy), and declaring the
+ * it today: `loading` is reserved for a future in-flight state, and declaring the
  * rule here is what keeps the five-state contract enforceable per stylesheet
  * instead of per call site. */
 .loading,
@@ -49,4 +48,79 @@
 
 .label {
   white-space: nowrap;
+}
+
+/* The picker is anchored to the button and opens upward: the composer sits at the
+ * bottom of the viewport, so a downward menu would fall off the screen. */
+.wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.menu {
+  position: absolute;
+  bottom: calc(100% + var(--kb-space-2));
+  right: 0;
+  z-index: var(--kb-overlay-z);
+  min-width: var(--kb-dialog-width);
+  max-height: var(--kb-log-max-height);
+  overflow-y: auto;
+  padding: var(--kb-space-1);
+  border: 1px solid var(--kb-border-strong);
+  border-radius: var(--kb-radius-md);
+  background: var(--kb-bg-surface);
+  box-shadow: var(--kb-shadow-3);
+}
+
+.menuList {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.menuItem {
+  display: flex;
+  align-items: baseline;
+  gap: var(--kb-space-2);
+  width: 100%;
+  padding: var(--kb-space-2);
+  border: 0;
+  border-radius: var(--kb-radius-sm);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.menuItem:hover {
+  background: var(--kb-bg-hover);
+}
+
+.menuItem:focus-visible {
+  outline: var(--kb-outline-focus);
+  outline-offset: -1px;
+}
+
+.menuName {
+  font-size: var(--kb-size-body-sm);
+  line-height: var(--kb-leading-body-sm);
+  color: var(--kb-text-primary);
+  white-space: nowrap;
+}
+
+.menuMeta {
+  margin-left: auto;
+  font-size: var(--kb-size-caption);
+  color: var(--kb-text-tertiary);
+  white-space: nowrap;
+}
+
+.menuNote {
+  margin: 0;
+  padding: var(--kb-space-3);
+  font-size: var(--kb-size-caption);
+  line-height: var(--kb-leading-caption);
+  color: var(--kb-text-tertiary);
 }

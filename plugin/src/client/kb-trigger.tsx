@@ -205,6 +205,31 @@ export function serializeKbReference(collection: string, name: string): string {
   return `（用户指定本次回答使用知识库「${name}」：调用 dsh_kb_search 时 collection 参数传 "${collection}"）`
 }
 
+/**
+ * Report which composer entrances are live, once.
+ *
+ * The failure this exists for is invisible: a plugin that cannot reach the
+ * trigger service draws no menu, throws nothing, and leaves a button that appears
+ * functional. A single line naming what was found turns that into something a user
+ * can read and report, instead of a feature that "does nothing".
+ *
+ * It is written to the console rather than the DOM because it is a diagnostic for
+ * whoever is debugging, not product copy.
+ * @param state - what the registration actually found.
+ */
+export function reportClientDiagnostics(state: {
+  triggerRegistry: boolean
+  sourceRegistered: boolean
+}): void {
+  // eslint-disable-next-line no-console
+  console.info(
+    '[dsh-zvec-knowledge] composer entrances:',
+    `triggerRegistry=${state.triggerRegistry ? 'yes' : 'NO'}`,
+    `@sourceRegistered=${state.sourceRegistered ? 'yes' : 'NO'}`,
+    '(the 知识库 button writes the draft directly and does not depend on these)',
+  )
+}
+
 /** One collection as the menu shows it. */
 export interface KbCandidate {
   /** The collection id, which is what the chip carries. */
