@@ -1,14 +1,42 @@
 /* BuildPage — design spec §5.5 / §5.6 / §6.5 (索引策略配置).
  *
- * The page is a single column of numbered sections followed by the cost estimate
- * and only then the action row. That vertical order is the requirement, not a
- * stylistic choice, so nothing here uses a layout that could reorder them. */
+ * §6.5 fixes the shape: 「页面为双栏结构：左栏为切分策略与分片预览，右栏为嵌入与索引
+ * 策略、混合检索权重与代价预估」. So the page is a header, then a two-column grid,
+ * then the submit row — and the paragraph order inside each column is the §5.3/§5.5
+ * ordering requirement, which is why nothing here reorders them. */
 
 .page {
   display: flex;
   flex-direction: column;
   gap: var(--kb-space-5);
-  max-width: var(--kb-panel-max-width);
+  /* The two-column width, not the single-column one: §6.5's columns each need a
+   * readable form width, and the narrower token left the page occupying half a
+   * wide screen with the right column's content squeezed. */
+  max-width: var(--kb-split-max-width);
+  min-width: 0;
+}
+
+/* Two equal columns, per §6.5's 左栏/右栏 pairing. An explicit pair rather than
+ * `auto-fit`: with `auto-fit` the browser also creates a collapsed phantom track
+ * once the container is wider than two minimums, which measured as a third 0px
+ * track and left the two real columns narrower than they should be. The fold to a
+ * single column is therefore stated at the breakpoints below, where it is
+ * unambiguous. `minmax(0, 1fr)` keeps a wide child (a long hint, a table) from
+ * pushing its own track wider than half. */
+.columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--kb-space-5);
+  align-items: start;
+  min-width: 0;
+}
+
+/* One column: a vertical stack of sections. Sections are siblings here rather than
+ * direct children of the page, so the gap lives on this element. */
+.column {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kb-space-5);
   min-width: 0;
 }
 
@@ -73,9 +101,14 @@
   color: var(--kb-text-primary);
 }
 
+/* Three fields side by side is the §5.5 arrangement on a wide column, but inside a
+ * §6.5 column there is roughly half that width — so the tracks are `auto-fit` and
+ * fold to two then one rather than crushing the labels. The floor is the shared
+ * split-column minimum rather than a new literal: it is the same "narrowest a
+ * column may get before it stops being readable" value the two-column layout uses. */
 .grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(var(--kb-split-column-min), 100%), 1fr));
   gap: var(--kb-space-3);
 }
 
@@ -85,11 +118,14 @@
   gap: var(--kb-space-2);
 }
 
-/* Read-only parameter grid (§5.6): these are stated, not offered for editing. */
+/* Read-only parameter grid (§5.6): these are stated, not offered for editing.
+ * Three short label/value pairs, so they flow and wrap rather than occupying
+ * fixed-width tracks — inside a §6.5 column a track based on a form-field width
+ * would leave two empty tracks and one cramped value. */
 .readonly {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: var(--kb-space-3);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--kb-space-3) var(--kb-space-5);
   margin: 0;
   padding: var(--kb-space-3);
   border: 1px dashed var(--kb-border-strong);
@@ -154,10 +190,12 @@
   color: var(--kb-text-tertiary);
 }
 
+/* Below the stats breakpoint the §6.5 column pair folds to one, which also gives
+ * each in-section grid its full width back — so the folding there is left to the
+ * `auto-fit` tracks rather than being restated per breakpoint. */
 @media (max-width: 1100px) {
-  .grid,
-  .readonly {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  .columns {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 

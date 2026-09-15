@@ -1,7 +1,7 @@
 /*
  * 由 scripts/gen-tokens.mjs 从 tokens/kb-tokens.json 生成，请勿手工编辑。
  * 令牌源：《DSH 知识库插件（基于 zvec）设计规范》v1.1.0 第 3 章（浅色）、第 7 章（深色）
- * 共 155 项令牌，其中 48 项在深色主题下取不同值。
+ * 共 158 项令牌，其中 48 项在深色主题下取不同值。
  */
 
 :root {
@@ -123,7 +123,10 @@
   --kb-preview-range-col: 96px;
   --kb-preview-skeleton-height: 168px;
   --kb-log-max-height: 220px;
-  --kb-panel-max-width: 880px;
+  --kb-panel-max-width: 1200px;
+  --kb-split-max-width: 1600px;
+  --kb-split-columns: 2;
+  --kb-split-column-min: 420px;
   --kb-dialog-width: 480px;
   --kb-overlay-scrim: rgba(19, 22, 25, 0.42);
   --kb-overlay-z: 1000;

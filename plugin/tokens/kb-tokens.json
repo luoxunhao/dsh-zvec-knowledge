@@ -1062,8 +1062,35 @@
       "specName": null,
       "group": "layout",
       "kind": "dimension",
-      "light": "880px",
-      "note": "配置器等内容区最大宽度。规范未给数值，按可读行宽与三段式表单列宽推导，避免超宽屏下行长过长",
+      "light": "1200px",
+      "note": "单列内容区（总览/文档/设置）最大宽度。规范未给数值：1200 是「侧栏 240 + 主区可读上限」在 1440 画板下的自然结果，既保留超宽屏防行长，又不让内容只占半屏（原 880 的实测后果）",
+      "derived": true
+    },
+    {
+      "var": "--kb-split-max-width",
+      "specName": null,
+      "group": "layout",
+      "kind": "dimension",
+      "light": "1600px",
+      "note": "双栏页面（索引策略、检索验证）最大宽度。规范 6.5 要求双栏，两栏各自需可读行宽，故上限高于单列；1600 在 1920 屏上仍留白，在 1440 屏上撑满",
+      "derived": true
+    },
+    {
+      "var": "--kb-split-columns",
+      "specName": null,
+      "group": "layout",
+      "kind": "dimension",
+      "light": "2",
+      "note": "双栏页面的栏数（规范 6.5「页面为双栏结构」）。抽成令牌使 6.5 与检索验证页共用同一栏定义，而不是各自写死 minmax。无单位，因为它是 `repeat()` 的计数而非长度",
+      "derived": true
+    },
+    {
+      "var": "--kb-split-column-min",
+      "specName": null,
+      "group": "layout",
+      "kind": "dimension",
+      "light": "420px",
+      "note": "双栏页面单栏的最小宽度；低于此值两栏自动堆叠（规范未给数值，按表单字段可读宽度推导）",
       "derived": true
     },
     {

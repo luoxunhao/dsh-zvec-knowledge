@@ -280,44 +280,53 @@ export function BuildPage({
           <h3 className={styles.title}>索引策略</h3>
           {/* §5.3: the header must say that parameters need a rebuild to apply. */}
           <p className={styles.description}>
-            参数变更需重建才生效。当前的检索与问答仍使用上一次构建的索引。
+            参数变更需重建才生效。重建期间，会话中的 dsh_kb_search 仍使用上一次构建的索引。
           </p>
         </div>
         <Button variant="ghost" icon="refresh" onClick={onReset}>重置为推荐值</Button>
       </header>
 
-      {/* 1. Chunking strategy */}
-      <section className={styles.section} aria-label="切分策略">
-        <h4 className={styles.sectionTitle}>切分策略</h4>
-        <div className={styles.row}>
-          <SegmentedControl
-            label="切分方式"
-            options={MODE_OPTIONS.map(item => ({ value: item.value, label: item.label }))}
-            value={chunking.mode}
-            onChange={value => patchChunking({ mode: value as ChunkingDraft['mode'] })}
-          />
-        </div>
-        <div className={styles.grid}>
-          <NumberField
-            label="分片长度（token）"
-            value={chunking.chunkTokens}
-            onChange={value => patchChunking({ chunkTokens: value })}
-            min={64}
-            max={8192}
-            step={64}
-            hint="单个分片的目标 token 数"
-          />
-          <NumberField
-            label="重叠长度（token）"
-            value={chunking.overlapTokens}
-            onChange={value => patchChunking({ overlapTokens: value })}
-            min={0}
-            max={4096}
-            step={16}
-            hint="相邻分片共享的上下文"
-          />
-          <NumberField
-            label="最小分片（token）"
+      {/* §6.5 is explicit about the shape: 左栏为切分策略与分片预览，右栏为嵌入与索引
+          策略、混合检索权重与代价预估. The two columns are literal siblings so the
+          division is a property of the markup rather than a responsive accident.
+
+          The cost estimate stays in the right column (it belongs to the embedding
+          and index strategy it describes), and the submit row sits below both, so
+          §5.6's "estimate before the submit button" still holds in source order. */}
+      <div className={styles.columns}>
+        <div className={styles.column}>
+          {/* 1. Chunking strategy */}
+          <section className={styles.section} aria-label="切分策略">
+            <h4 className={styles.sectionTitle}>切分策略</h4>
+            <div className={styles.row}>
+              <SegmentedControl
+                label="切分方式"
+                options={MODE_OPTIONS.map(item => ({ value: item.value, label: item.label }))}
+                value={chunking.mode}
+                onChange={value => patchChunking({ mode: value as ChunkingDraft['mode'] })}
+              />
+            </div>
+            <div className={styles.grid}>
+              <NumberField
+                label="分片长度（token）"
+                value={chunking.chunkTokens}
+                onChange={value => patchChunking({ chunkTokens: value })}
+                min={64}
+                max={8192}
+                step={64}
+                hint="单个分片的目标 token 数"
+              />
+              <NumberField
+                label="重叠长度（token）"
+                value={chunking.overlapTokens}
+                onChange={value => patchChunking({ overlapTokens: value })}
+                min={0}
+                max={4096}
+                step={16}
+                hint="相邻分片共享的上下文"
+              />
+              <NumberField
+                label="最小分片（token）"
             value={chunking.minChunkTokens}
             onChange={value => patchChunking({ minChunkTokens: value })}
             min={0}
@@ -331,36 +340,42 @@ export function BuildPage({
             <Icon name="alert" size={14} /> {chunkingError}
           </p>
         )}
-        <div className={styles.switches}>
-          <Switch
-            label="保留代码块"
-            description="不切断围栏代码块，避免产出无法阅读的片段"
-            checked={chunking.preserveCodeBlocks}
-            onChange={value => patchChunking({ preserveCodeBlocks: value })}
-          />
-          <Switch
-            label="表格按行拆分"
-            description="大表格按行切分，而不是整表作为一个分片"
-            checked={chunking.splitTablesByRow}
-            onChange={value => patchChunking({ splitTablesByRow: value })}
+          <div className={styles.switches}>
+            <Switch
+              label="保留代码块"
+              description="不切断围栏代码块，避免产出无法阅读的片段"
+              checked={chunking.preserveCodeBlocks}
+              onChange={value => patchChunking({ preserveCodeBlocks: value })}
+            />
+            <Switch
+              label="表格按行拆分"
+              description="大表格按行切分，而不是整表作为一个分片"
+              checked={chunking.splitTablesByRow}
+              onChange={value => patchChunking({ splitTablesByRow: value })}
+            />
+          </div>
+          </section>
+
+          {/* 2. Preview — the only pre-submit quality check (§5.5). It belongs in
+              the left column with the chunking strategy, because it is that
+              strategy's own output. */}
+          <ChunkPreview
+            rows={preview?.rows ?? []}
+            totalChunks={preview?.totalChunks ?? 0}
+            averageTokens={preview?.averageTokens ?? 0}
+            discarded={preview?.discarded ?? 0}
+            totalTokens={preview?.totalTokens ?? 0}
+            loading={preview === null}
+            error={previewError}
           />
         </div>
-      </section>
 
-      {/* 2. Preview — the only pre-submit quality check (§5.5). */}
-      <ChunkPreview
-        rows={preview?.rows ?? []}
-        totalChunks={preview?.totalChunks ?? 0}
-        averageTokens={preview?.averageTokens ?? 0}
-        discarded={preview?.discarded ?? 0}
-        totalTokens={preview?.totalTokens ?? 0}
-        loading={preview === null}
-        error={previewError}
-      />
-
-      {/* 3. Embedding & index strategy */}
-      <section className={styles.section} aria-label="嵌入与索引策略">
-        <h4 className={styles.sectionTitle}>嵌入与索引策略</h4>
+        {/* Right column: embedding and index strategy, the hybrid weights, and the
+            cost estimate — per §6.5. */}
+        <div className={styles.column}>
+          {/* 3. Embedding & index strategy */}
+          <section className={styles.section} aria-label="嵌入与索引策略">
+            <h4 className={styles.sectionTitle}>嵌入与索引策略</h4>
         <div className={styles.grid}>
           <Select
             label="嵌入模型"
@@ -434,48 +449,51 @@ export function BuildPage({
           />
         </div>
 
-        <div className={styles.weights}>
-          <span className={styles.fieldLabel}>混合检索权重</span>
-          <div className={styles.grid}>
-            <NumberField
-              label="稠密向量"
-              value={index.denseWeight}
-              onChange={value => setWeight('denseWeight', value)}
-              min={0}
-              max={1}
-              step={0.05}
-            />
-            <NumberField
-              label="全文检索"
-              value={index.fullTextWeight}
-              onChange={value => setWeight('fullTextWeight', value)}
-              min={0}
-              max={1}
-              step={0.05}
-            />
+          <div className={styles.weights}>
+            <span className={styles.fieldLabel}>混合检索权重</span>
+            <div className={styles.grid}>
+              <NumberField
+                label="稠密向量"
+                value={index.denseWeight}
+                onChange={value => setWeight('denseWeight', value)}
+                min={0}
+                max={1}
+                step={0.05}
+              />
+              <NumberField
+                label="全文检索"
+                value={index.fullTextWeight}
+                onChange={value => setWeight('fullTextWeight', value)}
+                min={0}
+                max={1}
+                step={0.05}
+              />
+            </div>
+            <p className={styles.hint}>两者之和固定为 1，融合方式固定为 RRF</p>
+            {weightsError !== null && (
+              <p className={styles.error} role="alert">
+                <Icon name="alert" size={14} /> {weightsError}
+              </p>
+            )}
           </div>
-          <p className={styles.hint}>两者之和固定为 1，融合方式固定为 RRF</p>
-          {weightsError !== null && (
-            <p className={styles.error} role="alert">
-              <Icon name="alert" size={14} /> {weightsError}
-            </p>
+          </section>
+
+          {/* 4. Cost estimate — in the same column as the configuration it
+              describes, and above the submit row in source order, per §5.6. */}
+          {cost !== null && (
+            <CostEstimate
+              chunks={cost.chunks}
+              rawVectorBytes={cost.rawVectorBytes}
+              vectorBytes={cost.vectorBytes}
+              compression={cost.compression}
+              estimatedSeconds={cost.estimatedSeconds}
+              basis={cost.basis}
+            />
           )}
         </div>
-      </section>
+      </div>
 
-      {/* 4. Cost estimate — before the submit button, per §5.6. */}
-      {cost !== null && (
-        <CostEstimate
-          chunks={cost.chunks}
-          rawVectorBytes={cost.rawVectorBytes}
-          vectorBytes={cost.vectorBytes}
-          compression={cost.compression}
-          estimatedSeconds={cost.estimatedSeconds}
-          basis={cost.basis}
-        />
-      )}
-
-      {/* 5. The action row, after the estimate. */}
+      {/* 5. The action row, after both columns and the estimate. */}
       <div className={styles.submit}>
         <Button
           variant="primary"
