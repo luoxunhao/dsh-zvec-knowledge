@@ -68,6 +68,17 @@ export interface SnapshotMeta {
    * unknown value as a mismatch and rebuilds fully, which is the safe direction.
    */
   chunking: ChunkingConfig | null
+  /**
+   * Tokenizer the active snapshot's full-text index was built with.
+   *
+   * Recorded for the same reason as `chunking`: the tokenizer is a schema
+   * property fixed at creation, so an incremental build that clones an old slot
+   * would inherit the old tokenizer and silently keep the bad segmentation that
+   * `TOKENIZER_NAME` exists to fix. An unknown value (a collection written before
+   * this field existed) is treated as a mismatch, which forces the safe full
+   * rebuild.
+   */
+  tokenizer: string | null
   /** Slot currently being served. `null` before the first successful build. */
   active: Slot | null
   /** Chunks in the active snapshot, for the overview card. */
@@ -131,7 +142,7 @@ export interface ServedCollection {
  * @param meta - collection metadata; `active` is forced to `null`.
  * @throws {Error} when the collection already exists.
  */
-export async function createCollection(storeRoot: string, meta: Omit<SnapshotMeta, 'active' | 'builtAt' | 'chunks' | 'docs' | 'chunking'>): Promise<SnapshotMeta> {
+export async function createCollection(storeRoot: string, meta: Omit<SnapshotMeta, 'active' | 'builtAt' | 'chunks' | 'docs' | 'chunking' | 'tokenizer'>): Promise<SnapshotMeta> {
   const id = assertCollectionId(meta.id)
   const dir = collectionDir(storeRoot, id)
   return withFileLock(dir, () => {
@@ -140,7 +151,7 @@ export async function createCollection(storeRoot: string, meta: Omit<SnapshotMet
     }
     // `chunking` starts null: nothing has been built, so no parameters have been
     // used yet, and the first build always indexes everything regardless.
-    const created: SnapshotMeta = { ...meta, chunking: null, builtAt: null, active: null, chunks: 0, docs: 0 }
+    const created: SnapshotMeta = { ...meta, chunking: null, tokenizer: null, builtAt: null, active: null, chunks: 0, docs: 0 }
     writeMeta(storeRoot, created)
     return created
   })
@@ -305,7 +316,7 @@ export async function publishSlot(
   storeRoot: string,
   id: string,
   slot: Slot,
-  counts: { chunks: number, docs: number, chunking?: ChunkingConfig },
+  counts: { chunks: number, docs: number, chunking?: ChunkingConfig, tokenizer?: string },
 ): Promise<SnapshotMeta> {
   const dir = collectionDir(storeRoot, assertCollectionId(id))
   return withFileLock(dir, () => {
@@ -320,6 +331,9 @@ export async function publishSlot(
       // Recorded at publish time, which is the moment these parameters became the
       // ones the served chunks were actually cut with.
       ...(counts.chunking === undefined ? {} : { chunking: counts.chunking }),
+      // Same reasoning for the tokenizer: it is a schema property of the snapshot
+      // just published, and the next incremental build compares against it.
+      ...(counts.tokenizer === undefined ? {} : { tokenizer: counts.tokenizer }),
     }
     writeMeta(storeRoot, updated)
     markActive(storeRoot, id, slot)

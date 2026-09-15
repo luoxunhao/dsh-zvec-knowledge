@@ -53,7 +53,7 @@ import {
   awaitJobSettled, cancelJob, disposeJobs, jobSnapshot, logPathFor, startJob,
   type JobSnapshot,
 } from '../store/job.ts'
-import { EMBEDDING_DIMENSION, type IndexConfig } from '../store/collection.ts'
+import { EMBEDDING_DIMENSION, TOKENIZER_NAME, type IndexConfig } from '../store/collection.ts'
 import { admit, quotaState, type Quota, type QuotaState } from '../store/quota.ts'
 import { search, type SearchResult } from '../store/retrieval.ts'
 import { rmSync } from 'node:fs'
@@ -658,6 +658,15 @@ export class KnowledgeOperations {
       return { possible: false, reason: '切分参数已变更，需要全量重建' }
     }
 
+    // The tokenizer is a schema property of the FTS index, and an incremental
+    // build clones the previous slot — so it would silently inherit the old
+    // tokenizer and keep the bad CJK segmentation that `TOKENIZER_NAME` fixes.
+    // A collection built before this field existed records `null`, which cannot
+    // be proven equal and is therefore treated as changed.
+    if (meta.tokenizer !== TOKENIZER_NAME) {
+      return { possible: false, reason: `全文分词器已变更（${meta.tokenizer ?? '未记录'} → ${TOKENIZER_NAME}），需要全量重建` }
+    }
+
     return { possible: true, reason: '' }
   }
 
@@ -786,6 +795,12 @@ export class KnowledgeOperations {
           ? {}
           : { replacedDocIds: toEmbed.filter(record => record.chunks !== null).map(record => record.id) }),
         chunking: strategy.chunking,
+        // An incremental build cloned the served slot, so the published snapshot's
+        // FTS index still carries *that* slot's tokenizer — which `incrementalViability`
+        // has already proved equals the current one. A full build creates a fresh
+        // schema and takes the default. Passing it explicitly keeps the recorded
+        // value truthful either way.
+        ...(useIncremental ? { tokenizer: meta.tokenizer ?? TOKENIZER_NAME } : {}),
         embed,
         dimension: self.dimension,
         onProgress: hooks.onProgress,

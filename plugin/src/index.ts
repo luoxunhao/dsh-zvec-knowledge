@@ -46,7 +46,7 @@ export {
 // The store surface, re-exported so a caller (the KB-08 tool, the KB-04 pages)
 // imports one module rather than reaching into `store/` paths that may move.
 export {
-  EMBEDDING_DIMENSION, VECTOR_FIELD, buildSchema, confidenceBand,
+  EMBEDDING_DIMENSION, TOKENIZER_NAME, VECTOR_FIELD, buildSchema, confidenceBand,
   documentFilter, escapeLiteral, toMatchScore,
   type ChunkRow, type ConfidenceBand, type IndexConfig, type IndexKind, type QuantizeKind,
 } from './store/collection.ts'

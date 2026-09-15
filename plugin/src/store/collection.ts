@@ -93,6 +93,28 @@ function quantizeType(quantize: QuantizeKind): ZVecQuantizeType {
 }
 
 /**
+ * Tokenizer the full-text index is built with.
+ *
+ * **`jieba` and not the engine's default.** The default (`standard`) does not
+ * segment multi-character CJK: it matches on individual characters, so a query
+ * like `完全不存在` ("completely nonexistent") returned 200 chunks that do not
+ * contain it, because 的/不/完/全 appear in every Chinese document. Measured on
+ * the real corpus, `standard` matched 66 chunks for `翁家翌` of which exactly one
+ * contained the string, and returned the identical hit set for the substrings
+ * `翁家` and `家翌` — it has no notion of a phrase at all.
+ *
+ * `jieba` segments properly: it returns *exactly one* hit for `翁家翌` and zero
+ * for `狼人杀`, the two cases where a false positive is most visible. `ngram` is
+ * not usable — it gave 69 hits for the ASCII string `qwertyuiop`.
+ *
+ * This is a **schema property fixed at collection creation**, so changing it
+ * requires a rebuild; {@link TOKENIZER_NAME} is recorded in collection metadata
+ * precisely so an incremental build can refuse to reuse an index cut with the
+ * old one. See `snapshot.ts`'s `SnapshotMeta.tokenizer`.
+ */
+export const TOKENIZER_NAME = 'jieba'
+
+/**
  * Scalar fields every knowledge collection carries.
  *
  * `text` gets an FTS index because hybrid retrieval fuses a dense pass with a
@@ -106,7 +128,11 @@ function scalarFields(): ZVecFieldSchema[] {
     { name: FIELD_ORDINAL, dataType: ZVecDataType.INT64 },
     { name: FIELD_CHAR_START, dataType: ZVecDataType.INT64 },
     { name: FIELD_CHAR_END, dataType: ZVecDataType.INT64 },
-    { name: FIELD_TEXT, dataType: ZVecDataType.STRING, indexParams: { indexType: ZVecIndexType.FTS } },
+    {
+      name: FIELD_TEXT,
+      dataType: ZVecDataType.STRING,
+      indexParams: { indexType: ZVecIndexType.FTS, tokenizerName: TOKENIZER_NAME },
+    },
   ]
 }
 

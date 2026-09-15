@@ -25,7 +25,7 @@
 import { rmSync } from 'node:fs'
 import { ZVecOpen, type ZVecCollection } from '@zvec/zvec'
 import { chunkDocument, type Chunk, type ChunkingConfig } from './chunk.ts'
-import { chunkDocInput, chunkRowFromDoc, EMBEDDING_DIMENSION, FIELD_DOC_ID, FIELD_TEXT, VECTOR_FIELD, documentFilter, type ChunkRow, type IndexConfig } from './collection.ts'
+import { chunkDocInput, chunkRowFromDoc, EMBEDDING_DIMENSION, FIELD_DOC_ID, FIELD_TEXT, TOKENIZER_NAME, VECTOR_FIELD, documentFilter, type ChunkRow, type IndexConfig } from './collection.ts'
 import { cloneSlot, publishSlot, resetSlot, slotDir, type Slot } from './snapshot.ts'
 import { adopt, releaseSlot } from './registry.ts'
 
@@ -151,6 +151,16 @@ export interface BuildRequest {
   allDocCount?: number
   /** Chunking configuration. */
   chunking: ChunkingConfig
+  /**
+   * Tokenizer the published snapshot's full-text index uses.
+   *
+   * Passed in rather than read from the constant because an incremental build
+   * inherits the tokenizer of the slot it cloned, which may be an older one. The
+   * value is recorded in collection metadata so the next viability check can
+   * compare it against what the code now wants and force a full rebuild when they
+   * differ. Omit to record the current default (a fresh full build).
+   */
+  tokenizer?: string
   /** Embedding provider. */
   embed: EmbedFn
   /** Progress callback, invoked as stages and counts change. */
@@ -358,6 +368,12 @@ export function startBuild(request: BuildRequest): RunningBuild {
         chunks: publishedChunks,
         docs: allDocCount,
         chunking: request.chunking,
+        // What the published snapshot's FTS index actually uses. A full build
+        // creates the schema here so it is the current constant; an incremental
+        // build cloned the served slot and inherited *its* tokenizer, so the
+        // caller passes that value through. Recording the truth rather than the
+        // preference is what lets the next viability check notice a mismatch.
+        tokenizer: request.tokenizer ?? TOKENIZER_NAME,
       })
       processed = total
       stages[STAGES.indexOf('publish')]!.state = 'done'
