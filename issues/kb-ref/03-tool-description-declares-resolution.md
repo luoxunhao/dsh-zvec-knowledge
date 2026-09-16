@@ -4,7 +4,7 @@
 
 **Blocked by:** KB-REF-02（解析行为必须先真实存在）。
 
-**Status:** ready-for-agent
+**Status:** done
 
 ## 背景
 

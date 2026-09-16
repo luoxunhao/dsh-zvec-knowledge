@@ -4,7 +4,7 @@
 
 **Blocked by:** KB-REF-01（解析纯函数与其门禁）。
 
-**Status:** ready-for-agent
+**Status:** done
 
 ## 背景
 

@@ -4,7 +4,7 @@
 
 **Blocked by:** KB-REF-02（代码级保证必须先就位）。
 
-**Status:** ready-for-agent
+**Status:** done
 
 ## 背景
 

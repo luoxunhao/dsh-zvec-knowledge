@@ -4,7 +4,7 @@
 
 **Blocked by:** 无 —— 可立即开始。
 
-**Status:** ready-for-agent
+**Status:** done
 
 ## 背景（为什么存在这条 issue）
 
