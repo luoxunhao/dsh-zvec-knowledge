@@ -37,8 +37,18 @@ import { KB_SEARCH_TOOL } from '../shared/contract.ts'
  * deployment floor instead of failing every call.
  */
 export type SearchOperations = Pick<KnowledgeOperations, 'embedQuery' | 'search'> & {
-  /** Resolves the floor in force for one collection, when the host supports it. */
-  retrievalSettings?: (collectionId: string) => { minScore: number, topk: number, source: 'collection' | 'deployment' }
+  /**
+   * Resolves the strategy in force for one collection, when the host supports it.
+   *
+   * Every field is read per call rather than captured at registration, because a
+   * value captured there is exactly how a threshold tuned in the interface stayed
+   * decorative: the tool kept the config default while the UI reported the new one.
+   */
+  retrievalSettings?: (collectionId: string) => {
+    minScore: number
+    topk: number
+    source: 'collection' | 'deployment'
+  }
   /**
    * Lists the collections a caller may choose from, for the discovery path.
    *
@@ -85,7 +95,7 @@ import type { ConfidenceBand } from '../store/collection.ts'
  * @returns the rendered text.
  */
 export function renderHits(
-  hits: { docName: string, ordinal: number, charStart: number, charEnd: number, text: string, matchScore: number, band: ConfidenceBand }[],
+  hits: { docName: string, ordinal: number, charStart: number, charEnd: number, text: string, matchScore: number, band: ConfidenceBand, sourcePath?: string, line?: number }[],
   query: string,
   collection: string,
   mode: 'hybrid' | 'dense',
@@ -104,7 +114,13 @@ export function renderHits(
 
   const lines = hits.map((hit, index) => {
     const preview = hit.text.replace(/\s+/g, ' ').trim().slice(0, 300)
-    return `${index + 1}. [${hit.band} ${hit.matchScore.toFixed(2)}] ${hit.docName} #${hit.ordinal} (字符 ${hit.charStart}-${hit.charEnd})\n   ${preview}`
+    // A citation is only useful if it can be followed. Rendering the resolvable
+    // path + line when the store knows them, and the raw identifiers when it does
+    // not, keeps a reader from mistaking a content hash for a file name.
+    const where = hit.sourcePath === undefined
+      ? `${hit.docName} #${hit.ordinal} (字符 ${hit.charStart}-${hit.charEnd})`
+      : `${hit.sourcePath}${hit.line === undefined ? '' : `:${hit.line}`} (字符 ${hit.charStart}-${hit.charEnd})`
+    return `${index + 1}. [${hit.band} ${hit.matchScore.toFixed(2)}] ${where}\n   ${preview}`
   })
 
   return [
@@ -118,6 +134,21 @@ export function renderHits(
 export interface ToolHit {
   /** Source file name. */
   file: string
+  /**
+   * Workspace-relative path of the stored source text, when resolvable.
+   *
+   * This is the citation a reader can actually follow. `file` is a display name
+   * and `doc_id` is a content hash, so neither locates anything on its own.
+   * Absent when the source could not be resolved — never invented.
+   */
+  source_path?: string
+  /**
+   * 1-based line in {@link source_path} where the chunk starts.
+   *
+   * Present because a character offset is not a locator for a human. Absent when
+   * {@link source_path} is, since the two come from the same resolution.
+   */
+  line?: number
   /** Source document id. */
   doc_id: string
   /** Chunk ordinal within the document. */
@@ -232,7 +263,12 @@ export function defineKbSearchTool(
   ): Promise<ToolOutput> => {
     const query = args.query ?? ''
     const collection = args.collection ?? null
-    const topk = Math.min(Math.max(args.topk ?? DEFAULT_TOPK, 1), MAX_TOPK)
+    // `topk` is resolved *after* the collection is known, because the collection's
+    // stored default is what fills an omitted argument. Resolving it here from the
+    // constant would make the configured value decorative: the settings page would
+    // save a number the tool never read — the same "saved but not in force" defect
+    // the floor already had to be fixed for.
+    const requestedTopk = args.topk
 
     /** Build a failure value with a usable message. */
     const fail = (
@@ -348,10 +384,16 @@ export function defineKbSearchTool(
       // captured default rather than failing every call.
       const effective = operations.retrievalSettings?.(collection)
       const floor = effective?.minScore ?? minScore
+      // An explicit `topk` from the caller wins — it is asking for a specific
+      // size. Otherwise the collection's configured default applies, falling back
+      // to the constant for a host object without the settings channel.
+      const topk = Math.min(Math.max(requestedTopk ?? effective?.topk ?? DEFAULT_TOPK, 1), MAX_TOPK)
       const result = await within(operations.search(collection, query, vector, topk, floor))
       failureMode = result.mode
       const hits: ToolHit[] = result.hits.map(hit => ({
         file: hit.docName,
+        ...(hit.sourcePath === undefined ? {} : { source_path: hit.sourcePath }),
+        ...(hit.line === undefined ? {} : { line: hit.line }),
         doc_id: hit.docId,
         ordinal: hit.ordinal,
         char_start: hit.charStart,
@@ -410,9 +452,12 @@ export function defineKbSearchTool(
       '何时调用：当用户的问题可能由已上传到知识库的文档回答时；或需要在回答前核实事实、给出引用来源时。',
       '必要前置条件：目标知识库必须已上传文档并至少成功构建过一次索引；未构建的知识库没有可检索的快照。',
       'collection 参数：可省略。省略时只有一个已构建的知识库会直接检索它；有多个会返回知识库清单（含 id、名称、构建状态），你从中选一个再次调用。',
-      '入参：query（自然语言查询）、collection（可选，集合标识，形如 kb_prod_2f8a）、topk（可选，返回条数上限，默认 8）。',
-      '出参：hits 数组，每项含 file / doc_id / ordinal / char_start / char_end / text / match_score / band；'
+      '入参：query（自然语言查询）、collection（可选，集合标识，形如 kb_prod_2f8a）、topk（可选，返回条数上限；省略时按该知识库配置的检索策略返回）。',
+      '出参：hits 数组，每项含 file / source_path / line / doc_id / ordinal / char_start / char_end / text / match_score / band；'
         + 'match_score 为 0 到 1 的归一化分数，越大越相关；band 为 strong / relevant / fair / low 四档。'
+        + 'source_path 与 line 是可回溯的引用定位（工作区相对路径 + 行号），回答时必须用它们引用来源；'
+        + '缺失时退回 file/ordinal/char_start-char_end，并说明该标识无法解析。注意 char_start 是字符偏移，不是行号。'
+        + '分数分布整体偏低，fair 档常常就是正确答案，不要因为分数不高就否定命中；但全部命中为 fair 或更低时应说明证据强度有限。'
         + 'fts_only_hits 是仅有全文精确匹配、无向量证据的命中数——这类命中分数固定很低，若查询是专有名词且结果为空，可建议用户降低阈值。',
       '失败语义：不抛异常。空结果、知识库不存在、参数非法、超时、已取消都会返回 ok=false 与可读的 summary，'
         + '其中空结果同时给出 below_floor（低于阈值被过滤的条数），便于判断是"确实没有"还是"阈值过高"；'
@@ -422,7 +467,7 @@ export function defineKbSearchTool(
     parameters: {
       query: { type: 'string', required: true, description: '自然语言查询语句' },
       collection: { type: 'string', description: '知识库集合标识，形如 kb_prod_2f8a。省略时：只有一个已构建的知识库则直接检索它；有多个则返回清单供你选择' },
-      topk: { type: 'integer', description: `返回条数上限，默认 ${DEFAULT_TOPK}，最大 ${MAX_TOPK}` },
+      topk: { type: 'integer', description: `返回条数上限，最大 ${MAX_TOPK}。省略时按该知识库配置的检索策略返回` },
     },
     output: {
       schema: {
@@ -460,6 +505,8 @@ export function defineKbSearchTool(
               additionalProperties: false,
               properties: {
                 file: { type: 'string' },
+                source_path: { type: 'string' },
+                line: { type: 'integer' },
                 doc_id: { type: 'string' },
                 ordinal: { type: 'integer' },
                 char_start: { type: 'integer' },

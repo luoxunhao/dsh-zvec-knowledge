@@ -118,8 +118,18 @@ function toolWith(overrides = {}, minScore = 0.55, timeoutMs = undefined) {
   check('output: top-level fields match the spec plus discovery', JSON.stringify(top) === JSON.stringify(expectedTop), top.join(', '))
 
   const hit = Object.keys(schema.properties.hits.items.properties).sort()
-  const expectedHit = ['band', 'char_end', 'char_start', 'doc_id', 'file', 'match_score', 'ordinal', 'text']
+  // The spec's fields, plus the two that make a hit traceable: `source_path` is
+  // the workspace-relative file and `line` its 1-based line. A display name and a
+  // content hash do not locate anything, so a citation needs these.
+  const expectedHit = ['band', 'char_end', 'char_start', 'doc_id', 'file', 'line', 'match_score', 'ordinal', 'source_path', 'text']
   check('output: hit fields match the spec', JSON.stringify(hit) === JSON.stringify(expectedHit), hit.join(', '))
+
+  // Both are optional by nature: a hit whose document record cannot be read has
+  // no resolvable path, and the tool omits it rather than inventing one.
+  const hitProps = schema.properties.hits.items.properties
+  check('output: citation fields are declared as path and line',
+    hitProps.source_path?.type === 'string' && hitProps.line?.type === 'integer',
+    `${hitProps.source_path?.type} / ${hitProps.line?.type}`)
 
   // The score field must be snake_case `match_score`; camelCase would be the
   // drift the spec explicitly forbids.

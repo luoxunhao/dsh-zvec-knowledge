@@ -20,7 +20,7 @@
  */
 
 import { existsSync, readdirSync } from 'node:fs'
-import { isAbsolute } from 'node:path'
+import { isAbsolute, relative as relative2, sep } from 'node:path'
 import { performance } from 'node:perf_hooks'
 import { resolveStoreRoot } from '../store/paths.ts'
 import {
@@ -31,9 +31,11 @@ import {
   openServed,
   readMeta,
   renameCollection as renameSnapshotCollection,
+  RETRIEVAL_STRATEGY_DEFAULTS,
   SLOTS,
   slotDir,
   withServed,
+  type RetrievalStrategy,
   type SnapshotMeta,
 } from '../store/snapshot.ts'
 import { disposeAll, markActive, releaseSlot } from '../store/registry.ts'
@@ -98,6 +100,24 @@ export interface HitView {
   docId: string
   /** Source file name, when resolvable. */
   docName: string
+  /**
+   * Workspace-relative path of the stored source text, when resolvable.
+   *
+   * This is what makes a hit *traceable*: `docName` alone is ambiguous (a set can
+   * hold both `chapter1.md` in Chinese and in English), and `docId` is a content
+   * hash that means nothing to a reader. This path can be handed to a file tool.
+   * Absent when the document record could not be found — never synthesized from
+   * the id, which would produce a path that does not exist.
+   */
+  sourcePath?: string
+  /**
+   * 1-based line within {@link sourcePath} holding the chunk's first character.
+   *
+   * Presented because a character offset is not a usable citation for a reader;
+   * a line number is. Absent when the source text is unavailable, since the line
+   * can only be derived by counting newlines in that text.
+   */
+  line?: number
   /** Chunk ordinal within the document. */
   ordinal: number
   /** Character range within the source. */
@@ -156,10 +176,10 @@ export interface OperationsOptions {
    * The deployment's retrieval settings, used when a collection has none of its own.
    *
    * Defaults live here rather than being invented at call sites, so a collection
-   * with no stored settings and a caller that passes nothing still agree on one
+   * with no stored strategy and a caller that passes nothing still agree on one
    * floor — the deployment config's — rather than each choosing its own.
    */
-  retrievalDefaults?: { minScore: number, topk: number }
+  retrievalDefaults?: Partial<RetrievalStrategy>
 }
 
 /** Tracks retrieval hits so the overview's seven-day figure is real, not a placeholder. */
@@ -202,7 +222,7 @@ export class KnowledgeOperations {
   private readonly embeddingModel: string | undefined
   private readonly hitCounter: HitCounter
   private readonly quota: Quota
-  private readonly retrievalDefaults: { minScore: number, topk: number }
+  private readonly retrievalDefaults: RetrievalStrategy
   /**
    * Operations objects already built for a workspace, when the workspace is
    * resolved per call rather than pinned.
@@ -240,7 +260,10 @@ export class KnowledgeOperations {
     this.dimension = options.dimension ?? EMBEDDING_DIMENSION
     this.embeddingModel = options.embeddingModel
     this.hitCounter = options.hitCounter ?? createHitCounter()
-    this.retrievalDefaults = options.retrievalDefaults ?? { minScore: 0.55, topk: 8 }
+    // Merged onto the defaults rather than replacing them: a deployment that
+    // configures only `minScore` must keep the default pool and mode rather than
+    // having them become `undefined` and silently disable the full-text pass.
+    this.retrievalDefaults = { ...RETRIEVAL_STRATEGY_DEFAULTS, ...options.retrievalDefaults }
     this.quota = options.quota ?? { bytes: null, warnAt: 0.9 }
   }
 
@@ -666,12 +689,25 @@ export class KnowledgeOperations {
   }
 
   /**
-   * Read the strategy a collection was last built with.
+   * Read the build strategy a collection was last built with.
+   *
+   * Both halves are read from the published snapshot's metadata, because both are
+   * recorded there at publish time. `chunking` is `null` only when no snapshot has
+   * ever been published — which is a different statement from "the collection uses
+   * the defaults", and the caller is expected to keep its own draft in that case
+   * rather than being handed invented values.
    * @param collectionId - collection identifier.
-   * @returns stored index configuration.
+   * @returns the stored index configuration and the chunking it was built with.
    */
-  async storedStrategy(collectionId: string): Promise<IndexConfig> {
-    return storedIndex(this.storeRoot, collectionId)
+  async storedStrategy(collectionId: string): Promise<{
+    index: IndexConfig
+    chunking: ChunkingConfig | null
+  }> {
+    const meta = readMeta(this.storeRoot, collectionId)
+    return {
+      index: storedIndex(this.storeRoot, collectionId),
+      chunking: meta?.chunking ?? null,
+    }
   }
 
   /**
@@ -955,47 +991,50 @@ export class KnowledgeOperations {
   }
 
   /**
-   * The retrieval settings in force for a collection.
+   * The retrieval strategy in force for a collection.
    *
-   * Resolution order: the collection's own stored settings, then the deployment
-   * config's. Per-collection wins because the floor that is right depends on the
-   * embedding model, and the model is a property of the collection's schema — a
-   * deployment hosting two collections built by different models needs two floors,
-   * which one global value cannot express.
+   * Resolution order: the collection's own stored strategy, then the deployment
+   * config's. Per-collection wins because every knob here is right only relative
+   * to the corpus and the embedding model, and the model is a property of the
+   * collection's schema — a deployment hosting two collections built by different
+   * models needs two floors, which one global value cannot express.
    * @param collectionId - collection identifier.
-   * @returns the effective settings, with a flag saying where they came from.
+   * @returns the effective strategy, with a flag saying where it came from.
    */
-  retrievalSettings(collectionId: string): {
-    minScore: number
-    topk: number
-    source: 'collection' | 'deployment'
-  } {
+  retrievalSettings(collectionId: string): RetrievalStrategy & { source: 'collection' | 'deployment' } {
     const stored = readMeta(this.storeRoot, collectionId)?.retrieval ?? null
-    if (stored !== null) return { ...stored, source: 'collection' }
+    // A stored strategy written before a field existed is completed from the
+    // defaults rather than returned short: an object missing `candidates` would
+    // make the query path fall back to `undefined`, which is how a setting that
+    // looks present quietly stops applying.
+    if (stored !== null) return { ...RETRIEVAL_STRATEGY_DEFAULTS, ...stored, source: 'collection' }
     return { ...this.retrievalDefaults, source: 'deployment' }
   }
 
   /**
-   * Store retrieval settings for a collection, making them the ones the
+   * Store retrieval strategy for a collection, making it the one the
    * `dsh_kb_search` tool applies from the next call on.
    *
-   * Takes effect immediately and needs no rebuild: the floor is applied at query
-   * time, so this is a metadata write rather than an index change — which is the
-   * whole reason it belongs in the interface rather than in a config file.
+   * Takes effect immediately and needs no rebuild: every knob here is applied at
+   * query time, so this is a metadata write rather than an index change — which is
+   * the whole reason it belongs in the interface rather than in a config file.
+   *
+   * It is also why this cannot fix a *build* problem: raising `candidates` widens
+   * the search, but a chunk that chunking never produced is not recoverable here.
    * @param collectionId - collection identifier.
-   * @param retrieval - the new floor and default hit count.
-   * @returns the stored settings, with their source.
+   * @param retrieval - the new strategy.
+   * @returns the stored strategy, with its source.
    */
   async setRetrievalSettings(
     collectionId: string,
-    retrieval: { minScore: number, topk: number },
-  ): Promise<{ minScore: number, topk: number, source: 'collection' }> {
+    retrieval: RetrievalStrategy,
+  ): Promise<RetrievalStrategy & { source: 'collection' }> {
     const updated = await updateRetrieval(this.storeRoot, collectionId, retrieval)
-    // Narrowed from the write: `updateRetrieval` validates and stores both fields,
+    // Narrowed from the write: `updateRetrieval` validates and stores every field,
     // so the result is present even though the metadata type keeps it optional for
     // collections written before the field existed.
     const stored = updated.retrieval
-    if (stored === null) throw new Error('检索设置写入未生效')
+    if (stored === null) throw new Error('检索策略写入未生效')
     return { ...stored, source: 'collection' }
   }
 
@@ -1004,11 +1043,17 @@ export class KnowledgeOperations {
    *
    * Returns normalized `matchScore` values only; the engine's raw distance never
    * leaves the store layer, which is the spec's "不暴露内部数值" rule.
+   *
+   * The candidate pool and the hybrid/dense mode come from the collection's stored
+   * strategy rather than from the caller, because they bound *what can be found*
+   * rather than how much is returned. A caller names how many hits it wants; the
+   * collection decides how wide the search that produces them is.
    * @param collectionId - collection identifier.
    * @param query - query text.
    * @param vector - query embedding.
    * @param topk - maximum hits.
    * @param minScore - normalized floor; hits below it are counted, not returned.
+   * @param denseOnly - force the dense pass alone, overriding the stored mode.
    * @returns hits and the mode that produced them.
    */
   async search(
@@ -1017,33 +1062,78 @@ export class KnowledgeOperations {
     vector: Float32Array | number[],
     topk: number,
     minScore: number,
+    denseOnly = false,
   ): Promise<{ hits: HitView[], mode: 'hybrid' | 'dense', belowFloor: number, ftsOnlyHits: number }> {
     const self = this.bound()
     const root = self.storeRoot
     if (readMeta(root, collectionId) === null) {
       throw new Error(`知识库 ${collectionId} 不存在`)
     }
-    const names = new Map(listDocuments(root, collectionId).map(record => [record.id, record.name]))
+    const strategy = this.retrievalSettings(collectionId)
+    // Indexed by id so a hit can resolve its own name, extension and source text.
+    // A hit whose record is missing still returns: the index and the document log
+    // can disagree for a moment mid-rebuild, and dropping the hit would turn a
+    // cosmetic gap into a missing search result.
+    const records = new Map(listDocuments(root, collectionId).map(record => [record.id, record]))
     const result: SearchResult = withServed(root, collectionId, handle => {
       if (handle === null) return { hits: [], mode: 'dense' as const, belowFloor: 0, ftsOnlyHits: 0 }
-      return search(handle, { vector, text: query, topk }, minScore)
+      return search(handle, {
+        vector,
+        // A dense-only strategy omits the text clause, which is what makes the
+        // full-text pass not run at all — the same lever the console's toggle pulls.
+        ...(denseOnly || strategy.mode === 'dense' ? {} : { text: query }),
+        topk,
+        candidates: strategy.candidates,
+      }, minScore)
     })
     self.hitCounter.record(collectionId, result.hits.length)
     return {
       mode: result.mode,
       belowFloor: result.belowFloor,
       ftsOnlyHits: result.ftsOnlyHits,
-      hits: result.hits.map(hit => ({
-        docId: hit.docId,
-        docName: names.get(hit.docId) ?? hit.docId,
-        ordinal: hit.ordinal,
-        charStart: hit.charStart,
-        charEnd: hit.charEnd,
-        text: hit.text,
-        matchScore: hit.matchScore,
-        band: hit.band,
-      })),
+      hits: result.hits.map(hit => {
+        const record = records.get(hit.docId)
+        // Only resolvable when the record exists: a synthesized path would point
+        // at a file that is not there, which is worse than admitting no source.
+        const path = record === undefined
+          ? undefined
+          : self.relativeSourcePath(root, collectionId, record)
+        return {
+          docId: hit.docId,
+          docName: record?.name ?? hit.docId,
+          ...(path === undefined ? {} : { sourcePath: path }),
+          // Line is derived from the stored text, the same text the chunks were
+          // cut from, so it cannot drift from what was indexed.
+          ...(record === undefined ? {} : { line: lineOf(record.text, hit.charStart) }),
+          ordinal: hit.ordinal,
+          charStart: hit.charStart,
+          charEnd: hit.charEnd,
+          text: hit.text,
+          matchScore: hit.matchScore,
+          band: hit.band,
+        }
+      }),
     }
+  }
+
+  /**
+   * Workspace-relative path of a document's stored source text.
+   *
+   * Derived from the same fields the store itself uses, so it always names a file
+   * that exists. Returned relative because that is the form a file tool accepts
+   * and the form a reader can act on.
+   * @param root - absolute store root.
+   * @param collectionId - collection identifier.
+   * @param record - the document whose source is wanted.
+   * @returns the relative path.
+   */
+  private relativeSourcePath(root: string, collectionId: string, record: DocumentRecord): string {
+    const absolute = sourcePath(root, collectionId, record.id, record.ext)
+    const relative = relative2(this.workspaceDir, absolute)
+    // `relative` escapes the workspace only for a store pinned outside it; the
+    // absolute path is still traceable, and a fabricated in-workspace path would
+    // not be.
+    return relative.startsWith('..') ? absolute : relative.split(sep).join('/')
   }
 
   /**
@@ -1116,6 +1206,9 @@ export class KnowledgeOperations {
     // Clamped to [0, 1] because a negative floor would be meaningless and a floor
     // above 1 would silently return nothing, which reads as a broken index.
     const minScore = Math.min(Math.max(options.minScore ?? 0, 0), 1)
+    // The pool comes from the stored strategy: the console must reproduce what the
+    // tool would really do, or its verdict is about a search that never runs.
+    const strategy = this.retrievalSettings(collectionId)
 
     const embedStarted = performance.now()
     const vector = await self.embedQuery(query)
@@ -1131,6 +1224,7 @@ export class KnowledgeOperations {
         vector,
         ...(options.denseOnly === true ? {} : { text: query }),
         topk,
+        candidates: strategy.candidates,
       }, minScore)
     })
     const searchedMs = performance.now() - searchStarted
@@ -1440,6 +1534,29 @@ function sameChunking(left: ChunkingConfig | null | undefined, right: ChunkingCo
     && left.minChunkTokens === right.minChunkTokens
     && left.preserveCodeBlocks === right.preserveCodeBlocks
     && left.splitTablesByRow === right.splitTablesByRow
+}
+
+/**
+ * 1-based line number holding a character offset.
+ *
+ * Counts newlines up to the offset rather than splitting the whole text: a source
+ * can be hundreds of kilobytes, and this runs once per hit. `\r\n` counts once
+ * because only `\n` is counted.
+ *
+ * An offset past the end returns the last line rather than throwing: a chunk range
+ * and the stored text can disagree by a character during a rebuild, and a citation
+ * pointing at the final line is still more useful than a failed search.
+ * @param text - the source text the offset refers to.
+ * @param offset - character offset, 0-based.
+ * @returns the 1-based line number.
+ */
+function lineOf(text: string, offset: number): number {
+  const end = Math.min(Math.max(offset, 0), text.length)
+  let line = 1
+  for (let i = 0; i < end; i += 1) {
+    if (text.charCodeAt(i) === 10) line += 1
+  }
+  return line
 }
 
 /** Removes a staging slot's contents; used by tests and recovery paths. */
