@@ -31,6 +31,7 @@ import type { KnowledgeBasePort, HostCollection, HostDocument } from './app.tsx'
 import type { PanelState, KnowledgeView } from './index.tsx'
 import { DocumentsPage, type PageDocument } from './pages/DocumentsPage.tsx'
 import { RetrievalPage } from './pages/RetrievalPage.tsx'
+import { RetrievalStrategyPage } from './pages/RetrievalStrategyPage.tsx'
 import {
   BuildPage,
   type BuildPageProps, type ChunkingDraft, type IndexDraft,
@@ -68,13 +69,18 @@ export interface KnowledgeBasePanelProps {
  * block cannot show, because it renders only what one query happened to match and
  * applies the score floor silently. KB-09's closing note anticipated exactly this
  * gap.
+ *
+ * 检索策略 is a third, distinct surface: it edits the query-time knobs the tool
+ * applies (floor, candidate pool, mode, hit cap). It is neither the index page's
+ * rebuild strategy nor the console's diagnostics — a rebuild knob cannot fix a
+ * recall floor, and a diagnostic reports a problem without changing it.
  */
 const VIEWS: { value: KnowledgeView, label: string }[] = [
   { value: 'overview', label: '总览' },
   { value: 'documents', label: '文档' },
   { value: 'build', label: '索引' },
   { value: 'retrieval', label: '检索验证' },
-  { value: 'settings', label: '设置' },
+  { value: 'settings', label: '检索策略' },
 ]
 
 /** Human labels for lifecycle states. */
@@ -121,9 +127,6 @@ const INITIAL_STAGES: StageView[] = [
   { id: 'index', label: '写入索引', state: 'pending' },
   { id: 'publish', label: '校验与发布', state: 'pending' },
 ]
-
-/** Views whose page is not part of this slice. */
-const PENDING_VIEWS: KnowledgeView[] = ['settings']
 
 /**
  * Debounce for the parameter-driven host calls, in milliseconds.
@@ -729,6 +732,24 @@ export function KnowledgeBasePanel({ state, port }: KnowledgeBasePanelProps): Re
                 run: (query, options) => port.retrieve!(selectedCollection, query, options),
               },
             })}
+            // The strategy editor lives on the 检索策略 page. The console *reads* the
+            // effective floor and pool — so its verdict is about the search that
+            // really runs — and links there to change them.
+            {...(port?.retrievalSettings === undefined || selectedCollection === null ? {} : {
+              settings: { read: () => port.retrievalSettings!(selectedCollection) },
+            })}
+            onConfigureStrategy={() => changeView('settings')}
+          />
+        ) : view === 'settings' ? (
+          <RetrievalStrategyPage
+            collectionId={selectedCollection}
+            collectionName={
+              collections.find(item => item.id === selectedCollection)?.name ?? null
+            }
+            // The knobs describe a search, so a collection with no published
+            // snapshot is guided to the index page rather than offered controls for
+            // a retrieval that cannot run.
+            hasSnapshot={collections.find(item => item.id === selectedCollection)?.builtAt != null}
             {...(port?.retrievalSettings === undefined || port?.setRetrievalSettings === undefined || selectedCollection === null ? {} : {
               settings: {
                 read: () => port.retrievalSettings!(selectedCollection),
@@ -740,9 +761,7 @@ export function KnowledgeBasePanel({ state, port }: KnowledgeBasePanelProps): Re
           <EmptyState
             icon="info"
             title={`${VIEWS.find(item => item.value === view)?.label ?? view} 尚未实现`}
-            description={PENDING_VIEWS.includes(view)
-              ? '设置页属于后续 issue 的范围。问答不在此处提供：请在 dsh 会话中直接提问，模型会调用 dsh_kb_search 并给出带引用的回答。'
-              : '该页面尚未实现。'}
+            description="该页面尚未实现。"
             action={<Button variant="secondary" onClick={() => changeView('overview')}>返回总览</Button>}
           />
         )}

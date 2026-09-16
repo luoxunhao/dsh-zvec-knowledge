@@ -123,7 +123,7 @@ try {
 
   // Save a floor of 0 — the console's "show everything" setting — and the same
   // tool call must return the hits the default was hiding.
-  await ops.setRetrievalSettings('kb_prod_2f8a', { minScore: 0, topk: 12 })
+  await ops.setRetrievalSettings('kb_prod_2f8a', { minScore: 0, topk: 12, candidates: 100, mode: 'hybrid' })
   const underSaved = await tool.execute({ query: '翁家翌', collection: 'kb_prod_2f8a' }, exec)
   check(
     'tool: the saved floor is applied, not the registration default',
@@ -139,7 +139,7 @@ try {
   // -------------------------------------------------------------------------
   // 3. Save, and the settings report themselves as the collection's own
   // -------------------------------------------------------------------------
-  const stored = await ops.setRetrievalSettings('kb_prod_2f8a', { minScore: 0.3, topk: 12 })
+  const stored = await ops.setRetrievalSettings('kb_prod_2f8a', { minScore: 0.3, topk: 12, candidates: 100, mode: 'hybrid' })
   check(
     'save: the stored settings are what was written',
     stored.minScore === 0.3 && stored.topk === 12 && stored.source === 'collection',
@@ -170,11 +170,20 @@ try {
   // 4. Validation refuses values that would silence the collection
   // -------------------------------------------------------------------------
   let refused = false
-  try { await ops.setRetrievalSettings('kb_prod_2f8a', { minScore: 3, topk: 12 }) } catch { refused = true }
+  try { await ops.setRetrievalSettings('kb_prod_2f8a', { minScore: 3, topk: 12, candidates: 100, mode: 'hybrid' }) } catch { refused = true }
   check('guard: a floor above 1 is refused', refused, 'minScore=3 rejected')
   refused = false
-  try { await ops.setRetrievalSettings('kb_prod_2f8a', { minScore: 0.3, topk: 500 }) } catch { refused = true }
+  try { await ops.setRetrievalSettings('kb_prod_2f8a', { minScore: 0.3, topk: 500, candidates: 100, mode: 'hybrid' }) } catch { refused = true }
   check('guard: a topk beyond 50 is refused', refused, 'topk=500 rejected')
+  // The candidate pool is a recall ceiling, so an out-of-range value must be
+  // refused rather than clamped: a silently clamped pool would make the stored
+  // value disagree with the effective one.
+  refused = false
+  try { await ops.setRetrievalSettings('kb_prod_2f8a', { minScore: 0.3, topk: 12, candidates: 5, mode: 'hybrid' }) } catch { refused = true }
+  check('guard: a candidate pool below the minimum is refused', refused, 'candidates=5 rejected')
+  refused = false
+  try { await ops.setRetrievalSettings('kb_prod_2f8a', { minScore: 0.3, topk: 12, candidates: 100, mode: 'sparse' }) } catch { refused = true }
+  check('guard: an unknown retrieval mode is refused', refused, "mode='sparse' rejected")
   // A refused write must not have been partially applied.
   const afterRefusal = ops.retrievalSettings('kb_prod_2f8a')
   check(
@@ -187,7 +196,7 @@ try {
   // 5. Two collections can hold different floors
   // -------------------------------------------------------------------------
   await second.createCollection({ name: 'Other', collectionId: 'kb_prod_0002', description: '' })
-  await second.setRetrievalSettings('kb_prod_0002', { minScore: 0.7, topk: 4 })
+  await second.setRetrievalSettings('kb_prod_0002', { minScore: 0.7, topk: 4, candidates: 50, mode: 'dense' })
   const a = second.retrievalSettings('kb_prod_2f8a')
   const b = second.retrievalSettings('kb_prod_0002')
   check(
@@ -196,26 +205,108 @@ try {
     `kb_prod_2f8a=${a.minScore} kb_prod_0002=${b.minScore}`,
   )
 
+  // -------------------------------------------------------------------------
+  // 6. The two knobs that bound recall are stored *and* applied
+  //
+  // `minScore` and `topk` were the whole strategy before this; `candidates` and
+  // `mode` are the ones that actually decide what the engine can reach. Storing
+  // them is not the claim — the claim is that the query path uses them, so each is
+  // asserted through a real search rather than by reading the metadata back.
+  // -------------------------------------------------------------------------
+  await ops.setRetrievalSettings('kb_prod_2f8a', { minScore: 0, topk: 50, candidates: 20, mode: 'hybrid' })
+  const narrow = ops.retrievalSettings('kb_prod_2f8a')
+  check(
+    'apply: the candidate pool is stored as given, not re-derived from topk',
+    narrow.candidates === 20,
+    `candidates=${narrow.candidates} with topk=${narrow.topk}`,
+  )
+
+  // A dense-only strategy must stop the full-text pass from contributing. The
+  // fixture's query is a bare proper name, which is exactly the case the full-text
+  // pass exists for, so the mode is observable as a change in what is found.
+  await ops.setRetrievalSettings('kb_prod_2f8a', { minScore: 0, topk: 12, candidates: 100, mode: 'hybrid' })
+  const hybridRun = await tool.execute({ query: '翁家翌', collection: 'kb_prod_2f8a' }, exec)
+  await ops.setRetrievalSettings('kb_prod_2f8a', { minScore: 0, topk: 12, candidates: 100, mode: 'dense' })
+  const denseRun = await tool.execute({ query: '翁家翌', collection: 'kb_prod_2f8a' }, exec)
+  check(
+    'apply: switching the stored mode to dense changes the reported mode',
+    denseRun.mode === 'dense',
+    `hybrid run mode=${hybridRun.mode}, dense run mode=${denseRun.mode}`,
+  )
+
+  // `topk` must follow the stored strategy when the caller omits the argument.
+  // This is the defect the settings page would otherwise expose: a value that saves,
+  // displays as in force, and is never read by the tool.
+  await ops.setRetrievalSettings('kb_prod_2f8a', { minScore: 0, topk: 2, candidates: 100, mode: 'hybrid' })
+  const capped = await tool.execute({ query: '上下文', collection: 'kb_prod_2f8a' }, exec)
+  check(
+    'apply: an omitted topk follows the stored strategy rather than the constant',
+    capped.hits.length <= 2,
+    `stored topk=2, hits=${capped.hits.length} (a constant 8 would allow up to 8)`,
+  )
+  // An explicit argument still wins: the caller is asking for a specific size.
+  const overridden = await tool.execute({ query: '上下文', collection: 'kb_prod_2f8a', topk: 12 }, exec)
+  check(
+    'apply: an explicit topk still overrides the stored default',
+    overridden.hits.length > capped.hits.length || overridden.hits.length === 12,
+    `explicit topk=12 returned ${overridden.hits.length}, stored topk=2 returned ${capped.hits.length}`,
+  )
+
   ops.dispose()
   second.dispose()
 } finally {
-  rmSync(scratch, { recursive: true, force: true })
+  // Best-effort cleanup. The zvec engine releases each collection's `LOCK` on a
+  // tick after `dispose()`, so a synchronous `rmSync` on Windows can still see an
+  // open handle and throw EPERM — which previously aborted the script *before* it
+  // printed its results, making a green suite look like a crash. Cleanup is not an
+  // assertion, so it retries briefly and then gives up rather than failing the run.
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    try {
+      rmSync(scratch, { recursive: true, force: true })
+      break
+    } catch {
+      await new Promise(resolve => setTimeout(resolve, 100))
+    }
+  }
 }
 
 // The UI must expose the editor; a backend channel with no surface is the
 // half-built state this feature started in.
+//
+// The editing surface moved from the retrieval console to its own 检索策略 page:
+// the console *measures* what the tool does, so it reads the strategy, while the
+// page owns changing it. There is one editing surface, and these assertions name
+// it so a future move cannot quietly leave the backend unreachable again.
 {
-  const { existsSync, readFileSync } = await import('node:fs')
-  const page = readFileSync(join(ROOT, 'src', 'client', 'pages', 'RetrievalPage.tsx'), 'utf8')
+  const { readFileSync } = await import('node:fs')
+  const page = readFileSync(join(ROOT, 'src', 'client', 'pages', 'RetrievalStrategyPage.tsx'), 'utf8')
   check(
-    'ui: the console exposes the effective settings editor',
-    /会话检索设置/.test(page) && /保存并生效/.test(page),
-    'a settings card with a save action is present',
+    'ui: the strategy page exposes the editor',
+    /分数下限/.test(page) && /候选池/.test(page) && /保存并生效/.test(page),
+    'a strategy editor with a save action is present',
   )
   check(
     'ui: it states which source is in force',
-    /部署默认值/.test(page) && /本知识库的检索设置/.test(page),
+    /部署默认值/.test(page) && /本库自有策略/.test(page),
     'the page says whether the value is the collection\'s or the default',
+  )
+  check(
+    'ui: every query-time knob is editable',
+    /minScore/.test(page) && /candidates/.test(page) && /mode/.test(page) && /topk/.test(page),
+    'floor, pool, mode and hit cap all have controls',
+  )
+  // The scope boundary matters: a green "已生效" must not imply a build problem is
+  // solved, because no query-time knob can recover a chunk that was never produced.
+  check(
+    'ui: it states that build problems are out of scope',
+    /索引/.test(page) && /重建/.test(page),
+    'the page points at the index page for build changes',
+  )
+  const console_ = readFileSync(join(ROOT, 'src', 'client', 'pages', 'RetrievalPage.tsx'), 'utf8')
+  check(
+    'ui: the console reads the strategy rather than duplicating the editor',
+    /会话检索策略/.test(console_) && !/保存并生效/.test(console_),
+    'the console reports the effective strategy and offers no second save',
   )
   const contract = readFileSync(join(ROOT, 'src', 'shared', 'contract.ts'), 'utf8')
   check(

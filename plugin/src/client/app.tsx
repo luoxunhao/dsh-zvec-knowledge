@@ -135,28 +135,25 @@ export interface KnowledgeBasePort {
    */
   strategyEvidence?: (collectionId: string, chunking: ChunkingDraft) => Promise<StrategyEvidenceView>
   /**
-   * The retrieval settings in force for a collection.
+   * The retrieval strategy in force for a collection.
    *
-   * `source` distinguishes "this collection's own setting" from "the deployment
+   * `source` distinguishes "this collection's own strategy" from "the deployment
    * default it falls back to", because editing the two means different things.
    */
-  retrievalSettings?: (collectionId: string) => Promise<{
-    minScore: number
-    topk: number
-    source: 'collection' | 'deployment'
-  }>
+  retrievalSettings?: (collectionId: string) => Promise<RetrievalStrategyView>
   /**
-   * Store retrieval settings for a collection, making them the ones the
+   * Store the retrieval strategy for a collection, making it the one the
    * `dsh_kb_search` tool applies from its next call.
    *
-   * Takes effect immediately — the floor is applied at query time, so this is a
+   * Takes effect immediately — every knob is applied at query time, so this is a
    * metadata write rather than an index change. That is the whole reason it
-   * belongs in the interface rather than in a config file.
+   * belongs in the interface rather than in a config file, and why it can fix a
+   * recall problem without a rebuild.
    */
   setRetrievalSettings?: (
     collectionId: string,
-    retrieval: { minScore: number, topk: number },
-  ) => Promise<{ minScore: number, topk: number, source: 'collection' }>
+    retrieval: RetrievalStrategyDraft,
+  ) => Promise<RetrievalStrategyView & { source: 'collection' }>
   /** The strategy a collection was last built with, for a pre-filled configurator. */
   storedStrategy?: (collectionId: string) => Promise<{ chunking: ChunkingDraft, index: IndexDraft } | null>
   /**
@@ -270,6 +267,32 @@ export interface RetrievalView {
   chunks: number
   /** Last successful build time, ISO-8601, or `null`. */
   builtAt: string | null
+}
+
+/**
+ * The retrieval strategy as the interface edits it.
+ *
+ * Mirrors the host's persisted shape. Declared in the client as well because the
+ * browser half may not import host code — the purity gate allows only the module
+ * table's entries, and `store/snapshot.ts` pulls in Node built-ins through
+ * `node:fs`. The two declarations are kept honest by the bridge, which is the only
+ * thing that carries values between them.
+ */
+export interface RetrievalStrategyDraft {
+  /** Normalized score floor in [0, 1]; hits below it are not returned. */
+  minScore: number
+  /** Hits returned when the caller names none, 1..50. */
+  topk: number
+  /** Candidates each pass contributes before fusion; bounds recall. */
+  candidates: number
+  /** Which passes run: both fused, or the dense pass alone. */
+  mode: 'hybrid' | 'dense'
+}
+
+/** A strategy plus where it came from, which decides what editing it means. */
+export type RetrievalStrategyView = RetrievalStrategyDraft & {
+  /** `collection` when the value is this collection's own, `deployment` when inherited. */
+  source: 'collection' | 'deployment'
 }
 
 /** One configuration setting and the evidence that it took effect. */

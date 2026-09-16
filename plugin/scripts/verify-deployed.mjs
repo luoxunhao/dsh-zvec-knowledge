@@ -131,12 +131,12 @@ if (!existsSync(DEPLOYED)) {
       (discovery.collections ?? []).map(c => `${c.id}:${c.built}`).join(' '),
     )
     // And the threshold channel the UI writes must resolve through the deployed copy.
-    await ops.setRetrievalSettings('kb_agentbook_5eed', { minScore: 0.3, topk: 5 })
+    await ops.setRetrievalSettings('kb_agentbook_5eed', { minScore: 0.3, topk: 5, candidates: 100, mode: 'hybrid' })
     const resolved = ops.retrievalSettings('kb_agentbook_5eed')
     check(
-      'deployed host: the UI-written floor resolves for the tool',
-      resolved.minScore === 0.3 && resolved.source === 'collection',
-      `minScore=${resolved.minScore} source=${resolved.source}`,
+      'deployed host: the UI-written strategy resolves for the tool',
+      resolved.minScore === 0.3 && resolved.candidates === 100 && resolved.source === 'collection',
+      `minScore=${resolved.minScore} candidates=${resolved.candidates} source=${resolved.source}`,
     )
   } finally {
     ops.dispose()

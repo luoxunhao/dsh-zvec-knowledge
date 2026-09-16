@@ -200,6 +200,15 @@ const readAbs = absolute => readFileSync(absolute, 'utf8')
   check('states: a completed build reports success', /log\('success'/.test(readFileSync(join(ROOT, 'src', 'store', 'build.ts'), 'utf8')), 'success log line emitted')
   check('states: a failed build reports the reason', /log\('error'/.test(readFileSync(join(ROOT, 'src', 'store', 'build.ts'), 'utf8')), 'error log line emitted')
 
+  // The retrieval-strategy page is a write surface too, so it must carry the same
+  // states: a reason-plus-range message on rejection, a confirmation on success,
+  // and a next-step empty state rather than a blank form.
+  const strategyPage = read('pages/RetrievalStrategyPage.tsx')
+  check('states: the strategy page confirms a successful save', /已生效/.test(strategyPage), 'the confirmation names the values now in force')
+  check('states: the strategy page announces failures as alerts', /role="alert"/.test(strategyPage), 'rejections are announced')
+  check('states: the strategy page empty state points onward', /尚未选择知识库/.test(strategyPage) && /总览/.test(strategyPage), 'explanation plus next step')
+  check('states: the strategy page states unsaved changes', /有未保存的修改/.test(strategyPage), 'the draft is distinguishable from the stored value')
+
   // Restricted: the quota state, reachable because a quota is configurable.
   const quotaNotice = read('components/QuotaNotice.tsx')
   check('states: restricted state names the limit source', /存储配额不足/.test(quotaNotice), 'wording states it is a quota')
@@ -224,7 +233,12 @@ const readAbs = absolute => readFileSync(absolute, 'utf8')
 // §8.3 按页唯一主操作 — one primary per page
 // ---------------------------------------------------------------------------
 {
-  const pages = ['pages/OverviewPage.tsx', 'pages/BuildPage.tsx', 'pages/DocumentsPage.tsx']
+  const pages = [
+    'pages/OverviewPage.tsx', 'pages/BuildPage.tsx', 'pages/DocumentsPage.tsx',
+    // The retrieval-strategy page owns a save action, so it is subject to the same
+    // one-primary rule as every other page rather than being exempt for being new.
+    'pages/RetrievalStrategyPage.tsx',
+  ]
   for (const page of pages) {
     const source = read(page)
     const primaries = (source.match(/variant="primary"/g) ?? []).length

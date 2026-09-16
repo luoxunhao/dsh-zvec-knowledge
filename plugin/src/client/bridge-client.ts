@@ -24,6 +24,7 @@ import {
 } from '../shared/contract.ts'
 import type {
   KnowledgeBasePort, HostCollection, HostDocument, BuildJobView, RetrievalView, StrategyEvidenceView,
+  RetrievalStrategyDraft, RetrievalStrategyView,
 } from './app.tsx'
 import type { BuildRecord } from './pages/OverviewPage.tsx'
 import type { StorageUsage } from './components/StorageUsageCard.tsx'
@@ -204,14 +205,13 @@ export function createHostPort(): KnowledgeBasePort {
     strategyEvidence: (collectionId: string, chunking: ChunkingDraft): Promise<StrategyEvidenceView> =>
       call<StrategyEvidenceView>('strategyEvidence', { collectionId, chunking }),
 
-    retrievalSettings: (collectionId: string): Promise<{
-      minScore: number, topk: number, source: 'collection' | 'deployment'
-    }> => call('retrievalSettings', { collectionId }),
+    retrievalSettings: (collectionId: string): Promise<RetrievalStrategyView> =>
+      call('retrievalSettings', { collectionId }),
 
     setRetrievalSettings: (
       collectionId: string,
-      retrieval: { minScore: number, topk: number },
-    ): Promise<{ minScore: number, topk: number, source: 'collection' }> =>
+      retrieval: RetrievalStrategyDraft,
+    ): Promise<RetrievalStrategyView & { source: 'collection' }> =>
       call('setRetrievalSettings', { collectionId, retrieval }),
 
     // The host stores only the index half of the build strategy, so the chunking

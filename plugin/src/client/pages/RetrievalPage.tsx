@@ -37,7 +37,7 @@ import { NumberField } from '../components/NumberField.tsx'
 import { StatusPill } from '../components/StatusPill.tsx'
 import { Switch } from '../components/Switch.tsx'
 import { TextField } from '../components/TextField.tsx'
-import type { RetrievalView } from '../app.tsx'
+import type { RetrievalView, RetrievalStrategyView } from '../app.tsx'
 import styles from './RetrievalPage.module.css'
 
 /** Score bands, with the wording the spec assigns them. */
@@ -83,17 +83,25 @@ export interface RetrievalPageProps {
     run: (query: string, options: { topk: number, minScore: number, denseOnly: boolean }) => Promise<RetrievalView>
   }
   /**
-   * Read and write the settings the conversation's `dsh_kb_search` tool applies.
+   * The retrieval strategy in force for this collection.
    *
-   * Omitted when the port has no settings channel, in which case the card shows
-   * nothing rather than an editor that cannot save.
+   * Read-only here, deliberately. The console *reports* what the tool will do — a
+   * diagnostic that ran with different knobs than the conversation uses would
+   * judge a search that never happens — but the editing surface is the 检索策略
+   * page, so there is one place a strategy is set and one place it is measured.
+   * Omitted when the port has no settings channel.
    */
   settings?: {
-    /** Read the settings in force, with their source. */
-    read: () => Promise<{ minScore: number, topk: number, source: 'collection' | 'deployment' }>
-    /** Store new settings, making them the tool's from its next call. */
-    save: (retrieval: { minScore: number, topk: number }) => Promise<{ minScore: number, topk: number, source: 'collection' }>
+    /** Read the strategy in force, with its source. */
+    read: () => Promise<RetrievalStrategyView>
   }
+  /**
+   * Open the retrieval-strategy page.
+   *
+   * Without it the read-out still renders, minus the link — a host that has the
+   * read channel but no navigation should lose the shortcut, not the information.
+   */
+  onConfigureStrategy?: () => void
 }
 
 /**
@@ -102,7 +110,7 @@ export interface RetrievalPageProps {
  * @returns the page.
  */
 export function RetrievalPage({
-  collectionId, hasSnapshot, transport, settings,
+  collectionId, hasSnapshot, transport, settings, onConfigureStrategy,
 }: RetrievalPageProps): React.JSX.Element {
   const [query, setQuery] = useState('')
   // Defaults chosen for validation rather than for answering: a floor of 0 shows
@@ -115,17 +123,13 @@ export function RetrievalPage({
   const [running, setRunning] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // The settings the tool actually applies. Loaded from the host, editable here,
-  // and saved back so tuning the console tunes the conversation too.
-  const [effective, setEffective] = useState<{ minScore: number, topk: number, source: 'collection' | 'deployment' } | null>(null)
-  const [draftFloor, setDraftFloor] = useState<number | null>(null)
-  const [draftTopk, setDraftTopk] = useState<number | null>(null)
-  const [saving, setSaving] = useState(false)
+  // The strategy the tool actually applies. Read-only: loaded so a verdict can be
+  // attributed to the knobs the conversation really uses, and so a miss caused by a
+  // high floor is distinguishable from one caused by the index.
+  const [effective, setEffective] = useState<RetrievalStrategyView | null>(null)
   const [settingsError, setSettingsError] = useState<string | null>(null)
-  const [savedNotice, setSavedNotice] = useState<string | null>(null)
 
-  // Load the effective settings when the collection changes, and seed the draft
-  // from them. Re-read after a save so `source` reflects the stored state.
+  // Load the effective strategy when the collection changes.
   useEffect(() => {
     const read = settings?.read
     if (read === undefined || collectionId === null) {
@@ -136,37 +140,13 @@ export function RetrievalPage({
     void (async () => {
       try {
         const next = await read()
-        if (cancelled) return
-        setEffective(next)
-        setDraftFloor(next.minScore)
-        setDraftTopk(next.topk)
+        if (!cancelled) setEffective(next)
       } catch (cause) {
         if (!cancelled) setSettingsError(String(cause instanceof Error ? cause.message : cause))
       }
     })()
     return () => { cancelled = true }
   }, [settings, collectionId])
-
-  /** Store the draft as the collection's settings. */
-  const saveSettings = async (): Promise<void> => {
-    const save = settings?.save
-    if (save === undefined || collectionId === null || draftFloor === null || draftTopk === null) return
-    setSaving(true)
-    setSettingsError(null)
-    setSavedNotice(null)
-    try {
-      const stored = await save({ minScore: draftFloor, topk: draftTopk })
-      setEffective(stored)
-      // Stated rather than implied: the point of the control is that this changes
-      // what the conversation's tool does, and saying so closes the loop.
-      setSavedNotice(`已生效：会话中的 dsh_kb_search 现在使用下限 ${stored.minScore.toFixed(2)}。`)
-    } catch (cause) {
-      // The store's validation message names the range, so it is shown as-is.
-      setSettingsError(String(cause instanceof Error ? cause.message : cause))
-    } finally {
-      setSaving(false)
-    }
-  }
 
   /** Run the query. */
   const run = useCallback(async (): Promise<void> => {
@@ -228,48 +208,44 @@ export function RetrievalPage({
             action. Kept narrow so the hit list gets the room it needs. */}
         <div className={styles.column}>
           {settings !== undefined && effective !== null && (
-            <section className={styles.controls} aria-label="会话检索设置">
-              <h4 className={styles.sectionTitle}>会话检索设置</h4>
+            <section className={styles.controls} aria-label="会话检索策略">
+              <h4 className={styles.sectionTitle}>会话检索策略</h4>
               <p className={styles.settingsHint}>
                 {effective.source === 'collection'
-                  ? '以下是本知识库的检索设置，会话中的 dsh_kb_search 按此过滤命中。'
-                  : '本知识库尚未单独设置，以下为部署默认值。修改后会保存为本知识库自己的设置。'}
+                  ? '会话中的 dsh_kb_search 按以下策略过滤与召回，本页的运行参数独立于它。'
+                  : '本知识库尚未单独设置策略，以下为部署默认值。'}
               </p>
-              <div className={styles.grid}>
-                <NumberField
-                  label="会话分数下限（minScore）"
-                  value={draftFloor ?? effective.minScore}
-                  onChange={setDraftFloor}
-                  min={0}
-                  max={1}
-                  step={0.05}
-                  hint="低于此分数的命中不会返回给会话"
-                />
-                <NumberField
-                  label="会话返回条数（topk）"
-                  value={draftTopk ?? effective.topk}
-                  onChange={setDraftTopk}
-                  min={1}
-                  max={50}
-                  hint="工具每次默认返回的命中数上限"
-                />
-              </div>
-              <div className={styles.actions}>
-                <Button
-                  variant="primary"
-                  onClick={() => { void saveSettings() }}
-                  loading={saving}
-                  loadingLabel="保存中…"
-                  disabled={draftFloor === effective.minScore && draftTopk === effective.topk}
-                >
-                  保存并生效
-                </Button>
-                {savedNotice !== null && <span className={styles.timing}>{savedNotice}</span>}
-              </div>
-              {settingsError !== null && (
-                <p className={styles.error} role="alert">
-                  <Icon name="alert" size={14} /> {settingsError}
-                </p>
+              {/* A read-out rather than an editor: these values are shown so a
+                  verdict can be attributed to the knobs the conversation really
+                  uses, while the one place they are *changed* stays the 检索策略
+                  page. Two editors would let the console display a floor the tool
+                  was not applying. */}
+              <dl className={styles.strategyGrid}>
+                <div className={styles.strategyItem}>
+                  <dt className={styles.strategyLabel}>分数下限</dt>
+                  <dd className={`kb-mono ${styles.strategyValue}`}>{effective.minScore.toFixed(2)}</dd>
+                </div>
+                <div className={styles.strategyItem}>
+                  <dt className={styles.strategyLabel}>候选池</dt>
+                  <dd className={`kb-mono ${styles.strategyValue}`}>{effective.candidates}</dd>
+                </div>
+                <div className={styles.strategyItem}>
+                  <dt className={styles.strategyLabel}>检索模式</dt>
+                  <dd className={`kb-mono ${styles.strategyValue}`}>
+                    {effective.mode === 'hybrid' ? '混合' : '仅稠密'}
+                  </dd>
+                </div>
+                <div className={styles.strategyItem}>
+                  <dt className={styles.strategyLabel}>返回条数</dt>
+                  <dd className={`kb-mono ${styles.strategyValue}`}>{effective.topk}</dd>
+                </div>
+              </dl>
+              {onConfigureStrategy !== undefined && (
+                <div className={styles.actions}>
+                  <Button variant="secondary" size="sm" onClick={onConfigureStrategy}>
+                    调整检索策略
+                  </Button>
+                </div>
               )}
             </section>
           )}

@@ -31,6 +31,26 @@ dsh plugin --profile <name> add <本包路径或仓库地址>
 安装后重启目标 profile。`dsh plugin` 会把本包 pnpm 安装进 profile，并按 `dsh.bundle`
 把 `cordis.patch.yml` 对账进 profile 的 `dsh.profile.bundles` 层列表。
 
+### 首次安装：必须放行 `@zvec/zvec` 的构建脚本
+
+pnpm ≥10 默认拦截依赖的安装脚本，`@zvec/zvec` 带有 `postinstall`
+（`node scripts/install.js`，用于解析预编译原生绑定 `zvec_node_binding.node`）。
+被拦截时 `dsh plugin add` 会以 `ERR_PNPM_IGNORED_BUILDS` 失败，**且 `dsh.profile.bundles`
+不会对账**（依赖已写进 `dependencies`，但插件层缺失，表现为重启后界面什么都不出现）。
+
+在 profile 的 `pnpm-workspace.yaml` 中把 `@zvec/zvec` 加进 `onlyBuiltDependencies` 与
+`allowBuilds`，然后重跑 `add`：
+
+```yaml
+onlyBuiltDependencies:
+  - "@zvec/zvec"
+allowBuilds:
+  "@zvec/zvec": true
+```
+
+该脚本是良性的：绑定已随包存在时它直接 `exit 0`，既不编译也不下载任意代码
+（见 `node_modules/@zvec/zvec/scripts/install.js`）。
+
 ## 开发
 
 ```sh

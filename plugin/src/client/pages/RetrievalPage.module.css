@@ -89,6 +89,38 @@
   color: var(--kb-text-tertiary);
 }
 
+/* The session strategy read-out. A definition grid rather than the control grid:
+ * these values are reported, not edited, so they are set as label/value pairs and
+ * the columns stay legible at four items. */
+.strategyGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--kb-space-3);
+  margin: 0;
+}
+
+.strategyItem {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kb-space-1);
+  margin: 0;
+}
+
+.strategyLabel {
+  margin: 0;
+  font-size: var(--kb-size-caption);
+  line-height: var(--kb-leading-caption);
+  color: var(--kb-text-tertiary);
+}
+
+.strategyValue {
+  margin: 0;
+  font-size: var(--kb-size-body);
+  line-height: var(--kb-leading-body);
+  font-weight: 600;
+  color: var(--kb-text-primary);
+}
+
 /* `minmax(0, 1fr)` rather than a `minmax(Npx, 1fr)` auto-fit: a bare pixel minimum
  * is a size literal the token gate rightly rejects, and the fixed-column form with a
  * breakpoint is what the sibling pages use. */
@@ -272,6 +304,7 @@
   }
 
   .grid,
+  .strategyGrid,
   .healthGrid {
     grid-template-columns: minmax(0, 1fr);
   }

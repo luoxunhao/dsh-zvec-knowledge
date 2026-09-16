@@ -1,0 +1,192 @@
+/* RetrievalStrategyPage — 知识库检索策略.
+ *
+ * Layout follows the sibling strategy pages: a header, then stacked cards in a
+ * single readable column. A single column rather than the two-column split the
+ * console uses, because this page is a *form*: the reader moves through the knobs
+ * in the order they bound recall, and side-by-side tracks would invite reading them
+ * as independent when the page's whole point is that they interact. */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kb-space-5);
+  /* A form reads poorly when stretched across the whole panel, so the column keeps
+   * the narrower single-column token rather than running fluid. There is no
+   * dedicated form-width token, and inventing one would be a size literal the gate
+   * rejects. */
+  max-width: var(--kb-panel-max-width);
+  min-width: 0;
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--kb-space-4);
+  flex-wrap: wrap;
+}
+
+.headerText {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kb-space-1);
+  min-width: 0;
+}
+
+.title {
+  margin: 0;
+  font-size: var(--kb-size-title);
+  line-height: var(--kb-leading-title);
+  font-weight: 600;
+  color: var(--kb-text-primary);
+}
+
+.description {
+  margin: 0;
+  font-size: var(--kb-size-body-sm);
+  line-height: var(--kb-leading-body-sm);
+  color: var(--kb-text-secondary);
+}
+
+/* The tool name is a wire identifier, so it is set as code rather than prose. */
+.code {
+  padding: 0 var(--kb-space-1);
+  border-radius: var(--kb-radius-sm);
+  background: var(--kb-bg-subtle);
+  font-family: var(--kb-font-mono);
+  font-size: var(--kb-size-caption);
+  color: var(--kb-text-primary);
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kb-space-3);
+  padding: var(--kb-space-4);
+  border: 1px solid var(--kb-border-subtle);
+  border-radius: var(--kb-radius-lg);
+  background: var(--kb-bg-surface);
+}
+
+.cardHead {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kb-space-1);
+}
+
+.cardTitle {
+  margin: 0;
+  font-size: var(--kb-size-body);
+  line-height: var(--kb-leading-body);
+  font-weight: 600;
+  color: var(--kb-text-primary);
+}
+
+.cardHint {
+  margin: 0;
+  font-size: var(--kb-size-caption);
+  line-height: var(--kb-leading-caption);
+  color: var(--kb-text-tertiary);
+}
+
+/* `minmax(0, 1fr)` rather than a pixel minimum: a bare size literal is what the
+ * token gate rejects, and this matches the sibling pages' form grid. */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--kb-space-3);
+}
+
+.row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kb-space-2);
+}
+
+.fieldLabel {
+  font-size: var(--kb-size-body-sm);
+  line-height: var(--kb-leading-body-sm);
+  font-weight: 600;
+  color: var(--kb-text-primary);
+}
+
+/* Explanatory notes about a knob's failure mode. Set apart from the control's own
+ * hint because these describe consequences, not the accepted range. */
+.tip {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--kb-space-2);
+  margin: 0;
+  padding: var(--kb-space-3);
+  border-radius: var(--kb-radius-sm);
+  background: var(--kb-bg-subtle);
+  font-size: var(--kb-size-caption);
+  line-height: var(--kb-leading-caption);
+  color: var(--kb-text-secondary);
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: var(--kb-space-3);
+  flex-wrap: wrap;
+}
+
+.saved {
+  font-size: var(--kb-size-caption);
+  line-height: var(--kb-leading-caption);
+  color: var(--kb-status-ready-text);
+}
+
+.dirtyHint {
+  font-size: var(--kb-size-caption);
+  color: var(--kb-text-tertiary);
+}
+
+.notice {
+  display: flex;
+  align-items: center;
+  gap: var(--kb-space-2);
+  margin: 0;
+  padding: var(--kb-space-3) var(--kb-space-4);
+  border: 1px solid var(--kb-border-subtle);
+  border-radius: var(--kb-radius-md);
+  background: var(--kb-bg-subtle);
+  color: var(--kb-text-secondary);
+  font-size: var(--kb-size-body-sm);
+  line-height: var(--kb-leading-body-sm);
+}
+
+.error {
+  display: flex;
+  align-items: center;
+  gap: var(--kb-space-2);
+  margin: 0;
+  padding: var(--kb-space-3) var(--kb-space-4);
+  border: 1px solid var(--kb-status-failed-border);
+  border-radius: var(--kb-radius-md);
+  background: var(--kb-status-failed-bg);
+  color: var(--kb-status-failed-text);
+  font-size: var(--kb-size-body-sm);
+  line-height: var(--kb-leading-body-sm);
+}
+
+/* The boundary between this page and the index page. Reads as a footnote rather
+ * than a card, because it is a scope statement and not a control. */
+.scope {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--kb-space-2);
+  margin: 0;
+  font-size: var(--kb-size-caption);
+  line-height: var(--kb-leading-caption);
+  color: var(--kb-text-tertiary);
+}
+
+/* One column once the panel is narrow. 720px is the ladder's own breakpoint and
+ * cannot come from a token: `@media` rejects `var()`. */
+@media (max-width: 720px) {
+  .grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

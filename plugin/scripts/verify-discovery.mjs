@@ -140,7 +140,7 @@ try {
     // The floor is set to 0 for this probe: the claim under test is the *routing*
     // (one built collection searched directly), not the score scale, and the
     // synthetic embedder's scores are not comparable to a real model's.
-    await singleOps.setRetrievalSettings('kb_only_0003', { minScore: 0, topk: 8 })
+    await singleOps.setRetrievalSettings('kb_only_0003', { minScore: 0, topk: 8, candidates: 100, mode: 'hybrid' })
     const singleTool = defineKbSearchTool(singleOps, 0.55)
     const single = await singleTool.execute({ query: '上下文' }, exec)
     check(

@@ -40,6 +40,9 @@ import {
   chunkRowFromDoc, confidenceBand, toMatchScore,
   type ChunkRow, type ConfidenceBand,
 } from './collection.ts'
+// The strategy defaults live with the metadata that persists them, so the tool,
+// the editor and the query path cannot disagree about what an unset value means.
+import { RETRIEVAL_STRATEGY_DEFAULTS } from './snapshot.ts'
 /** One retrieval hit, as the tool and the UI both consume it. */
 export interface SearchHit {
   /** Source document id. */
@@ -69,7 +72,15 @@ export interface SearchRequest {
   text?: string
   /** Maximum hits to return. */
   topk: number
-  /** Candidates each sub-query contributes before fusion. */
+  /**
+   * Candidates each sub-query contributes before fusion.
+   *
+   * A hard bound on recall rather than a performance knob: the fusion sees only
+   * this many rows per pass, so a chunk outside the pool cannot be returned no
+   * matter how low the floor goes. Callers pass the collection's configured value;
+   * omitting it takes the strategy's default, which is what an unconfigured
+   * collection means and keeps a hand-written call site honest.
+   */
   candidates?: number
 }
 
@@ -122,7 +133,14 @@ export const FTS_ONLY_SCORE = 0.2
  * @returns hits with normalized scores, best first.
  */
 export function search(collection: ZVecCollection, request: SearchRequest, minScore: number): SearchResult {
-  const candidates = request.candidates ?? Math.max(request.topk * 4, 20)
+  // The pool is taken as given rather than derived from `topk`. The previous
+  // `max(topk * 4, 20)` expression welded two independent knobs together: asking
+  // for a shorter answer silently shrank the candidate pool that bounds recall,
+  // so a "make the output smaller" edit could lose hits the floor could not
+  // recover. The floor is the only thing that may drop a candidate.
+  //
+  // Floored at `topk` because a pool smaller than the answer cannot fill it.
+  const candidates = Math.max(request.candidates ?? RETRIEVAL_STRATEGY_DEFAULTS.candidates, request.topk)
   const dense = collection.querySync({
     fieldName: VECTOR_FIELD,
     vector: request.vector,
@@ -251,6 +269,7 @@ const MAX_COUNT_HITS = 1_000_000
  * @param vector - query vector.
  * @param topk - maximum hits.
  * @param minScore - normalized floor.
+ * @param candidates - candidate pool; defaults to the strategy's own default.
  * @returns hits with normalized scores.
  */
 export function searchDense(
@@ -258,8 +277,9 @@ export function searchDense(
   vector: Float32Array | number[],
   topk: number,
   minScore: number,
+  candidates: number = RETRIEVAL_STRATEGY_DEFAULTS.candidates,
 ): SearchResult {
-  return search(collection, { vector, topk }, minScore)
+  return search(collection, { vector, topk, candidates }, minScore)
 }
 
 /**

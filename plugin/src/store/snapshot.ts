@@ -86,21 +86,90 @@ export interface SnapshotMeta {
   /** Documents in the active snapshot. */
   docs: number
   /**
-   * Retrieval settings for this collection: the score floor the `dsh_kb_search`
-   * tool applies, and the default hit count.
+   * Retrieval strategy for this collection: the knobs `dsh_kb_search` applies
+   * when it recovers evidence from this index.
    *
-   * Per-collection rather than only in deployment configuration because the right
-   * floor depends on the embedding model — and the model is a property of this
-   * collection's schema. A deployment that swaps models would otherwise need a
-   * config edit and a restart to make its own index answerable, when the floor is
-   * exactly the thing the retrieval console exists to tune and verify.
+   * Per-collection rather than only in deployment configuration because every one
+   * of these values depends on the corpus and the embedding model — and the model
+   * is a property of this collection's schema. A deployment hosting two
+   * collections built by different models needs two floors, which one global value
+   * cannot express.
    *
    * `null` for a collection written before this field existed; retrieval then
-   * falls back to the deployment config's value, which keeps an old store
+   * falls back to the deployment config's values, which keeps an old store
    * behaving exactly as before until someone chooses to change it.
    */
-  retrieval: { minScore: number, topk: number } | null
+  retrieval: RetrievalStrategy | null
 }
+
+/**
+ * The retrieval strategy persisted per collection.
+ *
+ * These are the knobs that decide *what the tool can possibly recover*, as
+ * opposed to the build strategy (`chunking` / `index`), which decides what is in
+ * the index at all. The split matters because the two take effect differently: a
+ * retrieval knob applies at query time and is live on the next tool call, while a
+ * build knob needs a rebuild.
+ *
+ * **Why each field is here, and what it costs recall:**
+ *
+ * - `minScore` — the score floor. Hits below it are counted but never returned,
+ *   so a floor set above the corpus's real score distribution silently empties
+ *   every answer. This is the single largest recall lever, and the reason the
+ *   default (0.55) is flagged in the issue list as needing regression against the
+ *   real corpus rather than being trusted.
+ * - `topk` — how many hits the tool returns when the caller does not override it.
+ *   A cap, not a filter: it bounds the answer's size, and a value below the number
+ *   of chunks a question actually spans truncates evidence the model needs.
+ * - `candidates` — the pre-fusion candidate pool each sub-query contributes. This
+ *   is a *hard bound on recall*: a chunk that does not reach the candidate set can
+ *   never be returned, however low the floor is. The engine fusion sees only
+ *   `candidates` rows per pass, so too small a pool is an invisible, unfixable-by-
+ *   floor recall ceiling — which is exactly why it is configurable rather than a
+ *   formula hidden in the query path.
+ * - `mode` — `hybrid` runs the dense and full-text passes and fuses them with the
+ *   engine's RRF; `dense` runs vectors alone. Hybrid is what lets an exact token
+ *   match survive a query the embedding model scores poorly, so switching it off
+ *   costs recall on proper nouns and rare terms specifically.
+ *
+ * `fixedTopk` is deliberately absent: a caller that passes `topk` is asking for a
+ * specific size, and the settings supply the default for callers that do not.
+ */
+export interface RetrievalStrategy {
+  /** Normalized score floor in [0, 1]; hits below it are not returned. */
+  minScore: number
+  /** Default number of hits returned when the caller names none, 1..50. */
+  topk: number
+  /** Candidates each retrieval pass contributes before fusion; bounds recall. */
+  candidates: number
+  /** Which passes run: both fused, or the dense pass alone. */
+  mode: 'hybrid' | 'dense'
+}
+
+/**
+ * The values a collection inherits when it has no strategy of its own.
+ *
+ * `candidates: 100` is not the query path's old `max(topk * 4, 20)` formula: that
+ * expression made the recall ceiling a function of the *returned* count, so
+ * lowering `topk` to get a shorter answer also silently shrank the candidate pool
+ * — two independent knobs welded together, with the second one invisible. An
+ * explicit default decouples them and makes the pool a thing an operator can see
+ * and raise when a rebuild seems to have "lost" recall.
+ */
+export const RETRIEVAL_STRATEGY_DEFAULTS: RetrievalStrategy = {
+  minScore: 0.55,
+  topk: 8,
+  candidates: 100,
+  mode: 'hybrid',
+}
+
+/** Bounds the strategy editor and the store both enforce. */
+export const RETRIEVAL_BOUNDS = {
+  /** Candidate pool: high enough for real recall, low enough to bound query cost. */
+  candidates: { min: 20, max: 1000 },
+  /** Hit count ceiling, matching the tool's own `MAX_TOPK`. */
+  topk: { min: 1, max: 50 },
+} as const
 
 /** Pointer and collection metadata file. */
 export const SNAPSHOT_META_FILE = 'meta.json'
@@ -397,36 +466,50 @@ export async function renameCollection(storeRoot: string, id: string, name: stri
 }
 
 /**
- * Update a collection's retrieval settings.
+ * Update a collection's retrieval strategy.
  *
- * This is the UI's write path for the score floor and default hit count. The
- * values are validated here as well as at the bridge because the store is the
- * one place a malformed write would be irreversible: a floor of 3 would make the
+ * This is the UI's write path for every query-time knob the tool applies. The
+ * values are validated here as well as at the bridge because the store is the one
+ * place a malformed write would be irreversible: a floor of 3 would make the
  * collection answer nothing, and nothing else would ever read the raw value to
  * notice.
  * @param storeRoot - absolute store root.
  * @param id - collection identifier.
- * @param retrieval - the new settings.
+ * @param retrieval - the new strategy.
  * @returns updated metadata.
  * @throws {Error} when the collection does not exist or a value is out of range.
  */
 export async function updateRetrieval(
   storeRoot: string,
   id: string,
-  retrieval: { minScore: number, topk: number },
+  retrieval: RetrievalStrategy,
 ): Promise<SnapshotMeta> {
-  const { minScore, topk } = retrieval
-  if (!(minScore >= 0 && minScore <= 1)) {
+  const { minScore, topk, candidates, mode } = retrieval
+  if (!(typeof minScore === 'number' && minScore >= 0 && minScore <= 1)) {
     throw new Error(`分数下限必须是 0 到 1 之间的数，收到 ${String(minScore)}`)
   }
-  if (!(Number.isInteger(topk) && topk >= 1 && topk <= 50)) {
-    throw new Error(`返回条数必须是 1 到 50 之间的整数，收到 ${String(topk)}`)
+  if (!(Number.isInteger(topk) && topk >= RETRIEVAL_BOUNDS.topk.min && topk <= RETRIEVAL_BOUNDS.topk.max)) {
+    throw new Error(
+      `返回条数必须是 ${RETRIEVAL_BOUNDS.topk.min} 到 ${RETRIEVAL_BOUNDS.topk.max} 之间的整数，收到 ${String(topk)}`,
+    )
+  }
+  // The candidate pool is validated rather than clamped: a pool below the
+  // requested `topk` cannot fill the answer, and silently raising it would make
+  // the stored value disagree with the effective one — the exact
+  // "saved but not what runs" failure this write path exists to prevent.
+  if (!(Number.isInteger(candidates) && candidates >= RETRIEVAL_BOUNDS.candidates.min && candidates <= RETRIEVAL_BOUNDS.candidates.max)) {
+    throw new Error(
+      `候选池大小必须是 ${RETRIEVAL_BOUNDS.candidates.min} 到 ${RETRIEVAL_BOUNDS.candidates.max} 之间的整数，收到 ${String(candidates)}`,
+    )
+  }
+  if (mode !== 'hybrid' && mode !== 'dense') {
+    throw new Error(`检索模式必须是 hybrid 或 dense，收到 ${String(mode)}`)
   }
   const dir = collectionDir(storeRoot, assertCollectionId(id))
   return withFileLock(dir, () => {
     const meta = readMeta(storeRoot, id)
     if (meta === null) throw new Error(`collection ${id} does not exist under ${storeRoot}`)
-    const updated: SnapshotMeta = { ...meta, retrieval: { minScore, topk } }
+    const updated: SnapshotMeta = { ...meta, retrieval: { minScore, topk, candidates, mode } }
     writeMeta(storeRoot, updated)
     return updated
   })

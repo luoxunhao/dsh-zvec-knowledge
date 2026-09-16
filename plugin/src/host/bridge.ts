@@ -353,11 +353,12 @@ export async function dispatch(
       )
 
     case 'storedStrategy': {
-      const index = await operations.storedStrategy(requireString(args.collectionId, 'collectionId'))
-      // The client's configurator holds a chunking draft and an index draft
-      // together. Only the index half is stored, so the chunking half comes from
-      // the plugin config's defaults rather than being invented here.
-      return { index, chunking: null }
+      // Both halves of the build strategy, as the collection was actually built.
+      // The chunking half used to be hardcoded to `null` here on the belief that
+      // only the index was persisted — but `publishSlot` records the chunking
+      // parameters too, so that `null` discarded a value the store had and made the
+      // configurator show defaults for a collection built with something else.
+      return await operations.storedStrategy(requireString(args.collectionId, 'collectionId'))
     }
 
     case 'retrievalSettings':
@@ -369,14 +370,21 @@ export async function dispatch(
 
     case 'setRetrievalSettings': {
       const collectionId = requireString(args.collectionId, 'collectionId')
-      const retrieval = args.retrieval as { minScore?: unknown, topk?: unknown }
-      if (typeof retrieval?.minScore !== 'number' || typeof retrieval?.topk !== 'number') {
-        throw new Error('参数 retrieval 必须包含 minScore 与 topk')
+      const retrieval = args.retrieval as {
+        minScore?: unknown, topk?: unknown, candidates?: unknown, mode?: unknown
       }
-      // The store validates the ranges; the bridge only checks presence.
+      // Presence only; the store owns the ranges and the mode's enum. Checking
+      // types here as well keeps a malformed body from reaching the store and
+      // becoming a half-described write.
+      if (typeof retrieval?.minScore !== 'number' || typeof retrieval?.topk !== 'number'
+        || typeof retrieval?.candidates !== 'number' || typeof retrieval?.mode !== 'string') {
+        throw new Error('参数 retrieval 必须包含 minScore、topk、candidates 与 mode')
+      }
       return operations.setRetrievalSettings(collectionId, {
         minScore: retrieval.minScore,
         topk: retrieval.topk,
+        candidates: retrieval.candidates,
+        mode: retrieval.mode as 'hybrid' | 'dense',
       })
     }
 
