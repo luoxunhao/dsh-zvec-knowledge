@@ -24,6 +24,11 @@ plugin/zvec-smoke-report.json
 # are regenerable from `scripts/render-visual.mjs` and are not sources.
 .dsh-vision-router/
 
+# AgentTeams runtime state: team rosters, task graphs and mailboxes belonging to a
+# live coordinator, not to this repo. It is machine- and session-specific, and a
+# committed copy would be overwritten by the next team the coordinator stages.
+.agent-teams/
+
 # Pipeline intermediates. Excluded by CONTENTS rather than by directory, because
 # a directory-level exclusion cannot be re-included by a later rule — git will
 # not descend into an ignored directory to find the negation.
