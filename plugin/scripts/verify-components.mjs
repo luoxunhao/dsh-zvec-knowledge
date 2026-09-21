@@ -130,6 +130,7 @@ const TIERS = new Map([
   ['RetrievalPage.module.css', { tier: 'container', why: 'diagnostic console layout: query form, health summary and hit cards; the field, switch and button inside carry their own states' }],
   ['RetrievalStrategyPage.module.css', { tier: 'container', why: 'page layout for the retrieval-strategy editor: cards, a form grid and explanatory notes; the number fields, segmented control and save button inside carry their own states' }],
   ['SearchToolView.module.css', { tier: 'container', why: 'in-turn tool call card; its expand toggle is a button inside and the citation rows are markers' }],
+  ['CitationTabView.module.css', { tier: 'container', why: 'right-Sidebar citation reader: a header, the line list and the provenance footer; the pane has no control of its own — the tab chrome belongs to the shell — and the cited-line and chunk-span rules are marks, not states' }],
   ['QuotaNotice.module.css', { tier: 'container', why: 'restricted-state banner; it reports the quota and names the remedy, and its meter is a marker' }],
   ['CreateCollectionDialog.module.css', { tier: 'container', why: 'dialog frame; its close control and fields carry their own states' }],
 ])

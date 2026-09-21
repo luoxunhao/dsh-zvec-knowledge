@@ -18,6 +18,8 @@
  *    to disk. The token check is therefore load-bearing, not decorative.
  * 3. **The token reaches the page.** A check that only made the route reject
  *    everything would pass a naive "is it authorized" test while breaking the UI.
+ * 4. **The declared method list and the dispatch table name the same operations.**
+ *    See section 6; the two had already drifted by two names.
  *
  * Usage: node scripts/verify-bridge.mjs
  */
@@ -251,6 +253,53 @@ check(
   } else {
     check('bundle: the built client exists', false, `${bundlePath} is missing — run the build first`)
   }
+}
+
+// ---------------------------------------------------------------------------
+// 6. The shared method list is the route's dispatch table
+//
+// `KB_API_METHODS` reads as the authoritative list of operations the channel
+// carries, and `KbApiMethod` is derived from it, so a name missing there is a
+// hole in the contract rather than a cosmetic omission. Two methods were served by
+// the route while absent from the list — `getEmbeddingInfo` and
+// `getQuantizerOptions` — because nothing compared the two sides. A set comparison
+// in both directions catches either failure: a served method that the contract
+// does not declare, and a declared method the route cannot answer.
+// ---------------------------------------------------------------------------
+{
+  const declaredBlock = /KB_API_METHODS\s*=\s*\[([\s\S]*?)\]\s*as const/.exec(contract)
+  const declared = declaredBlock === null
+    ? []
+    : [...declaredBlock[1].matchAll(/'([a-zA-Z][a-zA-Z0-9]*)'/g)].map(match => match[1])
+  const served = [...bridge.matchAll(/\bcase '([a-zA-Z][a-zA-Z0-9]*)'/g)].map(match => match[1])
+
+  check(
+    'contract: the method list is parsed from the shared contract',
+    declaredBlock !== null && declared.length > 0,
+    `${declared.length} names between the array brackets`,
+  )
+  check(
+    'contract: the route has dispatch cases to compare against',
+    served.length > 0,
+    `${served.length} case labels in src/host/bridge.ts`,
+  )
+  const undeclared = served.filter(name => !declared.includes(name))
+  const unanswered = declared.filter(name => !served.includes(name))
+  check(
+    'contract: every served method is declared',
+    undeclared.length === 0,
+    undeclared.length === 0 ? 'no method answers without being listed' : `served but missing: ${undeclared.join(', ')}`,
+  )
+  check(
+    'contract: every declared method is served',
+    unanswered.length === 0,
+    unanswered.length === 0 ? 'no name is promised that the route rejects' : `declared but unhandled: ${unanswered.join(', ')}`,
+  )
+  check(
+    'contract: neither side lists a name twice',
+    new Set(served).size === served.length && new Set(declared).size === declared.length,
+    `served ${served.length} unique / declared ${declared.length} unique`,
+  )
 }
 
 console.log(`\nKB-12 bridge acceptance: ${passes.length} passed, ${failures.length} failed\n`)

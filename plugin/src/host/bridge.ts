@@ -450,6 +450,26 @@ export async function dispatch(
       )
     }
 
+    case 'readCitation': {
+      // The right sidebar reader's read. It resolves a citation the answer
+      // printed into the passage it actually came from, so a claim can be checked
+      // against its evidence without leaving the conversation.
+      const range = args.chunkRange as { start?: unknown, end?: unknown } | undefined
+      const chunkRange = typeof range?.start === 'number' && typeof range?.end === 'number'
+        ? { start: range.start, end: range.end }
+        : null
+      return operations.readCitation(
+        requireString(args.collectionId, 'collectionId'),
+        requireString(args.docId, 'docId'),
+        typeof args.line === 'number' ? args.line : 1,
+        chunkRange,
+        // Bounded so one click cannot ask the host to serialize an entire book.
+        // The reader shows an excerpt by design; this is the ceiling that makes
+        // that design a guarantee rather than a convention.
+        typeof args.contextLines === 'number' ? Math.min(Math.max(args.contextLines, 0), 200) : 40,
+      )
+    }
+
     default:
       throw new Error(`未知的桥接方法：${method}`)
   }

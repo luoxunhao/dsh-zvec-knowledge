@@ -156,6 +156,49 @@ check('contract: the row is registered into sidebar.panellist', /name: 'sidebar\
   }
 }
 
+// The citation tab body registers into the right Sidebar's keyed tab seat, and
+// its key is the tab type's *id* — not its kind. That distinction is the one this
+// check exists for: a kind is a shared discriminator an extension may take over
+// from a builtin, while an id is unique per implementation, and registering under
+// the wrong one produces a tab whose body silently never renders.
+{
+  const entry = slotEntry('sidebar.right.pane.tab')
+  check('harness: sidebar.right.pane.tab exists', entry !== null, entry === null ? 'not in the catalogue' : 'present in the catalogue')
+  if (entry !== null) {
+    check(
+      'harness: the citation tab seat is keyed and session-scoped',
+      /kind: "keyed"/.test(entry) && /scope: "session"/.test(entry),
+      'kind=keyed, scope=session',
+    )
+  }
+
+  // The registered key must be the exported id constant, and the body must be
+  // injected rather than registered outright: the right Sidebar is mounted by its
+  // own package and activation order between plugins is not guaranteed.
+  check(
+    'contract: the citation body is keyed by the tab id, not the kind',
+    /name: 'sidebar\.right\.pane\.tab', key: CITATION_ID/.test(entrySource),
+    'keyed by CITATION_ID',
+  )
+  check(
+    'contract: the citation body waits for the seat declaration',
+    /ctx\.slots\.inject\('sidebar\.right\.pane\.tab'/.test(entrySource),
+    'registered through inject',
+  )
+
+  // The tab type must be registered against the same id the body uses. A split
+  // here is the second silent failure mode: the registry would dispatch a key no
+  // body answers.
+  const definition = readFileSync(resolve(ROOT, 'src/client/citation-definition.ts'), 'utf8')
+  const tabId = /CITATION_ID = '([^']+)'/.exec(readFileSync(resolve(ROOT, 'src/client/citation-tab.ts'), 'utf8'))?.[1]
+  check('contract: the tab type registers under the body key', /kind: CITATION_KIND/.test(definition) && tabId !== undefined, `id=${tabId}`)
+  check(
+    'contract: the tab type claims only its own scheme',
+    /\$\{CITATION_SCHEME\}\*\*/.test(definition),
+    'glob is scoped to the citation scheme',
+  )
+}
+
 console.log(`\nHarness integration: ${passes.length} passed, ${failures.length} failed`)
 console.log(`  harness  ${harness}\n`)
 for (const line of passes) console.log(`  PASS  ${line}`)

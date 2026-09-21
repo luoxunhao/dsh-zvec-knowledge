@@ -1,0 +1,210 @@
+/* CitationTabView — the right Sidebar's citation reader.
+ *
+ * The tab body is narrow (the right column docks at a fraction of the viewport),
+ * so this file assumes nothing about width: the header wraps, the line list owns
+ * its own horizontal overflow rather than forcing the column wider, and every
+ * fixed size comes from the token set.
+ *
+ * The two highlights are deliberately different treatments, because they are
+ * different facts: the citation's own line is a left rail in the link colour (the
+ * precise locator the answer printed), and the retrieved chunk's span is a
+ * background tint (what retrieval actually returned). A reader can therefore see
+ * when a citation names a line outside its own chunk — which is a real state, not
+ * a rendering bug, and one a single merged highlight would hide. */
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kb-space-3);
+  height: 100%;
+  min-height: 0;
+  padding: var(--kb-space-3);
+  overflow: auto;
+  font-family: var(--kb-font-sans);
+  font-size: var(--kb-size-body-sm);
+  line-height: var(--kb-leading-body-sm);
+  color: var(--kb-text-primary);
+  background: var(--kb-bg-surface);
+}
+
+.header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kb-space-1);
+  flex: none;
+}
+
+.docName {
+  margin: 0;
+  font-size: var(--kb-size-body);
+  line-height: var(--kb-leading-h3);
+  font-weight: 600;
+  color: var(--kb-text-primary);
+  /* A long document name must not force the column wider; two lines is the
+   * budget, and the title attribute carries the rest. */
+  overflow-wrap: anywhere;
+}
+
+.position {
+  margin: 0;
+  font-size: var(--kb-size-caption);
+  color: var(--kb-text-tertiary);
+}
+
+.badges {
+  display: flex;
+  align-items: center;
+  gap: var(--kb-space-2);
+  margin: 0;
+}
+
+.band {
+  padding: 0 var(--kb-space-2);
+  border: 1px solid var(--kb-border-subtle);
+  border-radius: var(--kb-radius-full);
+  font-size: var(--kb-size-caption);
+  line-height: var(--kb-pill-height-dense);
+  height: var(--kb-pill-height-dense);
+  color: var(--kb-text-secondary);
+}
+
+/* Band colours reuse the score ramp the rest of the plugin draws scores with, so
+ * "fair" reads the same here as it does in the tool card and the console. */
+.band[data-band='strong'] {
+  color: var(--kb-score-strong);
+  border-color: var(--kb-score-strong);
+}
+
+.band[data-band='relevant'] {
+  color: var(--kb-score-relevant);
+  border-color: var(--kb-score-relevant);
+}
+
+.band[data-band='fair'] {
+  color: var(--kb-score-fair);
+  border-color: var(--kb-score-fair);
+}
+
+.band[data-band='low'] {
+  color: var(--kb-score-low);
+  border-color: var(--kb-score-low);
+}
+
+.score {
+  font-size: var(--kb-size-caption);
+  color: var(--kb-text-tertiary);
+}
+
+/* The line list. `start` is set from the window's first line number so the
+ * browser's own numbering matches the document's — the plugin does not draw its
+ * own numbers inside the text. */
+.lines {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 0;
+  padding: var(--kb-space-2) 0;
+  list-style: none;
+  border: 1px solid var(--kb-border-subtle);
+  border-radius: var(--kb-radius-md);
+  background: var(--kb-bg-canvas);
+  overflow: auto;
+}
+
+.line {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--kb-space-3);
+  padding: 0 var(--kb-space-3);
+  /* Lines are shown un-wrapped so a code block's indentation survives; the list
+   * scrolls horizontally instead. */
+  white-space: pre;
+}
+
+.lineNo {
+  /* Sticky so the number stays with its line while scrolling a long passage. */
+  position: sticky;
+  left: 0;
+  padding-right: var(--kb-space-2);
+  color: var(--kb-text-tertiary);
+  background: var(--kb-bg-canvas);
+  text-align: right;
+  user-select: none;
+}
+
+/* The retrieved chunk: a background tint across the whole span. */
+.line[data-in-chunk='true'] {
+  background: var(--kb-brand-tint);
+}
+
+/* The cited line: the precise locator, marked with a rail so it stays legible
+ * even where it overlaps the chunk tint. Declared after the chunk rule because
+ * the cited line usually sits inside the chunk and must win. */
+.line[data-cited='true'] {
+  background: var(--kb-brand-tint-hover);
+  box-shadow: inset 2px 0 0 0 var(--kb-brand-link);
+}
+
+.line[data-cited='true'] .lineNo {
+  color: var(--kb-brand-link);
+  font-weight: 600;
+  background: var(--kb-brand-tint-hover);
+}
+
+.lineText {
+  color: var(--kb-text-primary);
+}
+
+.truncation {
+  flex: none;
+  margin: 0;
+  padding: 0 var(--kb-space-1);
+  font-size: var(--kb-size-caption);
+  color: var(--kb-text-tertiary);
+}
+
+.notice {
+  margin: 0;
+  padding: var(--kb-space-3);
+  border: 1px solid var(--kb-border-subtle);
+  border-radius: var(--kb-radius-md);
+  background: var(--kb-bg-subtle);
+  color: var(--kb-text-secondary);
+}
+
+.error {
+  margin: 0;
+  padding: var(--kb-space-3);
+  border: 1px solid var(--kb-status-failed-border);
+  border-radius: var(--kb-radius-md);
+  background: var(--kb-status-failed-bg);
+  color: var(--kb-status-failed-text);
+}
+
+.provenance {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--kb-space-1);
+  padding-top: var(--kb-space-2);
+  border-top: 1px solid var(--kb-divider-card);
+}
+
+.provenanceRow {
+  display: flex;
+  gap: var(--kb-space-2);
+  margin: 0;
+  font-size: var(--kb-size-caption);
+  align-items: baseline;
+}
+
+.provenanceLabel {
+  flex: none;
+  color: var(--kb-text-tertiary);
+}
+
+.provenanceValue {
+  color: var(--kb-text-secondary);
+  /* The store path is long and unresolvable by eye; wrapping it keeps it readable
+   * without making the column scroll sideways. */
+  overflow-wrap: anywhere;
+}

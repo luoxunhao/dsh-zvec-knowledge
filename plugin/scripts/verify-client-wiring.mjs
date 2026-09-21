@@ -68,11 +68,76 @@ globalThis.Node = class {}
 await import(new URL('../lib/client.js', import.meta.url).href)
 check('bundle: registers itself with the module loader', typeof loaded.factory === 'function', `id=${String(loaded.id)}`)
 
+/**
+ * State cells and setters recorded by the stub's `useState`.
+ *
+ * The citation list lives behind a disclosure, so the only way to assert on it is
+ * to be able to open it. Tracking the setters is what makes that possible without
+ * a real reconciler.
+ */
+/**
+ * The hook state, keyed per component layer and per hook index.
+ *
+ * React persists `useState` across renders; a stub that mints a fresh cell each
+ * call cannot be driven, because flipping a setter would write to a cell the next
+ * render never reads. The cells are therefore held per *layer* — one array per
+ * depth in the element chain — since each component in that chain is its own
+ * instance with its own hook list.
+ */
+const hookCellsByLayer = []
+const stateSetters = new Set()
+let hookCursor = 0
+let hookLayer = 0
+
+/** Begin a render pass for one component layer. */
+function beginRender(layer) {
+  hookLayer = layer
+  hookCursor = 0
+}
+
+/**
+ * Every setter the last render pass recorded.
+ *
+ * The disclosure's setter is the one that opens the card; the test flips them all
+ * and re-renders, which is what makes the collapsed subtree reachable.
+ * @returns the setters, in registration order.
+ */
+function setters() {
+  return [...stateSetters]
+}
+
+/**
+ * Forget every hook cell and setter, for a fresh component instance.
+ *
+ * A new element chain is a new instance: carrying the previous one's cells over
+ * would let an earlier block's expanded state leak into a later assertion, which
+ * is the kind of cross-test coupling that makes a gate pass for the wrong reason.
+ */
+function resetHookState() {
+  hookCellsByLayer.length = 0
+  stateSetters.clear()
+}
+
 const mod = loaded.factory((specifier) => {
   if (specifier === 'react') {
     return {
       createElement: jsx,
-      useState: (initial) => [typeof initial === 'function' ? initial() : initial, () => {}],
+      useState: (initial) => {
+        const cells = hookCellsByLayer[hookLayer] ?? (hookCellsByLayer[hookLayer] = [])
+        const index = hookCursor
+        hookCursor += 1
+        if (cells[index] === undefined) {
+          cells[index] = typeof initial === 'function' ? initial() : initial
+        }
+        const setter = (next) => {
+          cells[index] = typeof next === 'function' ? next(cells[index]) : next
+        }
+        // Recorded when the hook is *created*, not when the setter is called: the
+        // test needs the setter in order to call it at all, so registering it
+        // lazily would leave the list empty exactly when it is first needed.
+        stateSetters.add(setter)
+        return [cells[index], setter]
+      },
       useEffect: () => {}, useMemo: (fn) => fn(), useCallback: (fn) => fn,
       useRef: (value) => ({ current: value }), Fragment: 'Fragment',
     }
@@ -208,13 +273,258 @@ function driveComposer(result) {
   check('degraded: the button is still registered', click.present === true, click.present ? 'present' : 'absent')
 }
 
+/**
+ * Render a component to the depth the citation assertions need.
+ *
+ * Each component layer gets its own hook cursor, because hooks belong to the
+ * component instance that called them: sharing one cursor across layers would let
+ * an outer component's `useState` overwrite an inner one's. A stub runtime does not
+ * reconcile, so this walks the element chain explicitly.
+ * @param element - the element to render.
+ * @param depth - how many component layers to expand.
+ * @returns the expanded tree.
+ */
+function renderDeep(element, depth = 4) {
+  let node = element
+  for (let level = 0; level < depth; level += 1) {
+    if (node == null || typeof node !== 'object') break
+    if (typeof node.type !== 'function') break
+    beginRender(level)
+    const before = node
+    node = node.type(node.props)
+    if (node === before) break
+  }
+  return node
+}
+
+/** Every click handler reachable from a rendered tree. */
+function handlersOf(node) {
+  const found = []
+  const walk = value => {
+    if (value == null || typeof value !== 'object') return
+    if (typeof value.props?.onClick === 'function') found.push(value.props.onClick)
+    for (const child of Object.values(value)) walk(child)
+  }
+  walk(node)
+  return found
+}
+
+/** Serialize a tree for textual assertions. */
+function treeOf(node) {
+  return JSON.stringify(node, (key, value) => (typeof value === 'function' ? '[fn]' : value))
+}
+
 // Every registration this plugin makes must still be present.
 {
   const result = drive()
   const names = result.slots.map(entry => entry.options.name).sort()
-  for (const expected of ['main', 'sidebar.panellist', 'tool.call.toolview', 'conversation.input.right']) {
+  for (const expected of ['main', 'sidebar.panellist', 'tool.call.toolview', 'conversation.input.right', 'sidebar.right.pane.tab']) {
     check(`slot: ${expected} is registered`, names.includes(expected), names.join(', '))
   }
+}
+
+// ---------------------------------------------------------------------------
+// The citation chain, driven end to end.
+//
+// This is the part no textual gate can see. The chain is
+//   rendered tool result → parsed hit → citation reference → openTab call,
+// and every link is a *shape* fact: whether the regex recovered the path, whether
+// the document id came out of it, whether the service lookup found what the
+// harness really exposes. Driving it catches a broken link; grepping cannot.
+// ---------------------------------------------------------------------------
+
+/**
+ * Drive apply() with the right Sidebar exposed, and capture what it registers.
+ * @returns the drive result plus the captured tab types and opens.
+ */
+function driveWithSidebar() {
+  const tabTypes = []
+  const opens = []
+  const sidebarRight = {
+    registerTabType: (definition) => { tabTypes.push(definition); return () => {} },
+    openTab: (kind, options) => { opens.push({ kind, options }) },
+  }
+  const sources = []
+  const slots = []
+  const slotsService = {
+    inject: (_key, callback) => { const dispose = callback(); return typeof dispose === 'function' ? dispose : () => {} },
+    register: (options, component) => { slots.push({ options, component }); return () => {} },
+  }
+  const ctx = {
+    slots: slotsService,
+    sidebarRight,
+    inputTriggers: { registerSource: (source) => { sources.push(source); return () => {} }, sessionOf: () => undefined },
+    effect: (fn) => { const dispose = fn(); return typeof dispose === 'function' ? dispose : () => {} },
+    get: (name) => (name === 'slots' ? slotsService : undefined),
+  }
+  let error = null
+  try { mod.apply(ctx) } catch (cause) { error = String(cause?.message ?? cause) }
+  return { error, tabTypes, opens, slots }
+}
+
+/** The rendered result text for a real `dsh_kb_search` call, as the model reads it. */
+const RESULT_TEXT = [
+  '查询「LangGraph 是什么」在 kb_agentbook_5eed 命中 2 条（稠密 + 全文混合）。',
+  '1. [fair 0.73] .dsh-kb-zvec/kb_agentbook_5eed/sources/doc_ffb5b037.md:374 (字符 23252-24156)',
+  '   | **LangChain / LangGraph** | 通用 LLM 应用框架 | 工作流 + 自主 |',
+  '2. [fair 0.61] .dsh-kb-zvec/kb_agentbook_5eed/sources/doc_f51780f4.md:110 (字符 5595-6067)',
+  '   MCP 是 Anthropic 于 2024 年底发布的开放标准。',
+].join('\n')
+
+{
+  const result = driveWithSidebar()
+  check('citation: apply() accepts a context with the right Sidebar', result.error === null, result.error ?? 'ok')
+  check('citation: the tab type is registered', result.tabTypes.length === 1, `${result.tabTypes.length} type(s)`)
+
+  const definition = result.tabTypes[0]
+  check('citation: the type declares the citation kind', definition?.kind === 'kb-citation', String(definition?.kind))
+  check(
+    'citation: the type claims the citation scheme at extension band',
+    Array.isArray(definition?.patterns) && definition.patterns.every(pattern => pattern.startsWith('dsh-kb-citation://'))
+      && definition?.priority === 'extension',
+    JSON.stringify(definition?.patterns),
+  )
+
+  // The body registration must be keyed by the type's id — the silent-failure
+  // case this whole seam turns on.
+  const body = result.slots.find(entry => entry.options.name === 'sidebar.right.pane.tab')
+  check('citation: the body is registered under the seat', body !== undefined, body === undefined ? 'absent' : 'present')
+  check(
+    'citation: the body key is the type id, not the kind',
+    body?.options.key === definition?.id && definition?.id !== definition?.kind,
+    `key=${body?.options.key} kind=${definition?.kind}`,
+  )
+
+  // The tool view, rendered from the real result text.
+  //
+  // The citation list sits behind the card's disclosure, so the card's own state
+  // is driven open first — clicking its toggle — and then the tree is re-rendered.
+  // Asserting on a collapsed card would assert on the wrong subtree.
+  const toolView = result.slots.find(entry => entry.options.name === 'tool.call.toolview')
+  const renderCard = () => {
+    const card = toolView.component({
+      callId: 'call-1',
+      toolName: 'dsh_kb_search',
+      block: {
+        arguments: JSON.stringify({ query: 'LangGraph 是什么', collection: 'kb_agentbook_5eed' }),
+        content: [{ type: 'text', text: RESULT_TEXT }],
+      },
+    })
+    return renderDeep(card, 3)
+  }
+
+  resetHookState()
+  let expanded = renderCard()
+  // The disclosure starts closed; open it, then re-render so the list is present.
+  const toggles = handlersOf(expanded)
+  check('citation: the card opens with a disclosure toggle', toggles.length >= 1, `${toggles.length} handler(s)`)
+  for (const setter of setters()) setter(value => !value)
+  expanded = renderCard()
+
+  const tree = treeOf(expanded)
+
+  check('citation: the tool card renders', expanded != null, expanded == null ? 'null' : 'rendered')
+  check(
+    'citation: the locatable form is recovered as a path, not a display name',
+    tree.includes('doc_ffb5b037') && tree.includes('doc_f51780f4'),
+    'both document ids recovered from the rendered paths',
+  )
+  check(
+    'citation: the unresolvable fallback is not used for a resolvable hit',
+    !tree.includes('#374') && !/\b#50\b/.test(tree),
+    'the `name #ordinal` form is absent for located hits',
+  )
+
+  // Now click the first citation and see where it goes.
+  check('citation: nothing is opened before a click', result.opens.length === 0, `${result.opens.length} open(s)`)
+
+  // The card's own toggle is first in document order; the citation rows follow.
+  const all = handlersOf(expanded)
+  check('citation: each citation row is a real control', all.length >= 3, `${all.length} click handler(s)`)
+  const citationClicks = all.slice(1)
+
+  if (citationClicks.length > 0) {
+    citationClicks[0]()
+    check('citation: clicking a citation opens a tab', result.opens.length === 1, `${result.opens.length} open(s)`)
+    const opened = result.opens[0]
+    check('citation: it opens the citation kind', opened?.kind === 'kb-citation', String(opened?.kind))
+    check(
+      'citation: the address carries the collection, document and line',
+      opened?.options?.contentId === 'dsh-kb-citation://kb_agentbook_5eed/doc_ffb5b037#L374',
+      String(opened?.options?.contentId),
+    )
+    check(
+      'citation: the chunk range travels as a navigation param',
+      opened?.options?.params?.chunkRange?.start === 23252 && opened?.options?.params?.chunkRange?.end === 24156,
+      JSON.stringify(opened?.options?.params?.chunkRange),
+    )
+    check(
+      'citation: the query is carried so the pane is self-describing',
+      opened?.options?.params?.query === 'LangGraph 是什么',
+      String(opened?.options?.params?.query),
+    )
+    check('citation: an already-open citation is revealed, not duplicated',
+      opened?.options?.revealIfOpened === true, String(opened?.options?.revealIfOpened))
+
+    // Two citations of DIFFERENT documents must address two different tabs.
+    if (citationClicks.length >= 2) {
+      citationClicks[1]()
+      check('citation: a different document addresses a different tab',
+        result.opens.length === 2 && result.opens[1].options.contentId !== result.opens[0].options.contentId,
+        `${result.opens[1]?.options?.contentId}`)
+    }
+  }
+}
+
+// A deployment without the right column must lose the link, never the card.
+{
+  const sources = []
+  const slots = []
+  const slotsService = {
+    inject: (_key, callback) => { const dispose = callback(); return typeof dispose === 'function' ? dispose : () => {} },
+    register: (options, component) => { slots.push({ options, component }); return () => {} },
+  }
+  const ctx = {
+    slots: slotsService,
+    inputTriggers: { registerSource: (source) => { sources.push(source); return () => {} }, sessionOf: () => undefined },
+    effect: (fn) => { const dispose = fn(); return typeof dispose === 'function' ? dispose : () => {} },
+    get: (name) => (name === 'slots' ? slotsService : undefined),
+  }
+  let error = null
+  try { mod.apply(ctx) } catch (cause) { error = String(cause?.message ?? cause) }
+  check('degraded: no sidebarRight does not throw', error === null, error ?? 'ok')
+
+  // A fresh component instance: the hook cells from the previous block belong to
+  // a different render chain, and reusing them would carry its expanded state in.
+  resetHookState()
+  const toolView = slots.find(entry => entry.options.name === 'tool.call.toolview')
+  const renderCard = () => renderDeep(toolView.component({
+    callId: 'call-1',
+    toolName: 'dsh_kb_search',
+    block: {
+      arguments: JSON.stringify({ query: 'x', collection: 'kb_agentbook_5eed' }),
+      content: [{ type: 'text', text: RESULT_TEXT }],
+    },
+  }), 3)
+  let expanded = renderCard()
+  for (const setter of setters()) setter(value => !value)
+  expanded = renderCard()
+
+  // The card's own expand toggle is still a button, so the citation rows are
+  // what must be gone. Counted against the with-sidebar case: 2 citations + 1
+  // toggle there, so a bare toggle here.
+  check(
+    'degraded: citations render as plain text, not dead links',
+    handlersOf(expanded).length === 1,
+    `${handlersOf(expanded).length} click handler(s) (expect only the expand toggle)`,
+  )
+  const tree = treeOf(expanded)
+  check('degraded: the citation text is still shown', tree.includes('doc_ffb5b037'), 'the row still names its source')
+  check(
+    'degraded: the source path is still printed for a reader to follow by hand',
+    tree.includes('sources/doc_ffb5b037.md'),
+    'the citation remains traceable without the column',
+  )
 }
 
 // ---------------------------------------------------------------------------

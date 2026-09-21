@@ -24,7 +24,7 @@ import {
 } from '../shared/contract.ts'
 import type {
   KnowledgeBasePort, HostCollection, HostDocument, BuildJobView, RetrievalView, StrategyEvidenceView,
-  RetrievalStrategyDraft, RetrievalStrategyView,
+  RetrievalStrategyDraft, RetrievalStrategyView, CitationView,
 } from './app.tsx'
 import type { BuildRecord } from './pages/OverviewPage.tsx'
 import type { StorageUsage } from './components/StorageUsageCard.tsx'
@@ -258,6 +258,22 @@ export function createHostPort(): KnowledgeBasePort {
 
     retrieve: (collectionId: string, query: string, options): Promise<RetrievalView> =>
       call<RetrievalView>('retrieve', { collectionId, query, ...options }),
+
+    // The right sidebar reader's read. `null` is a real answer — the document is
+    // gone — so it passes through unchanged rather than being turned into an error
+    // the reader would have to interpret.
+    readCitation: (
+      collectionId: string,
+      docId: string,
+      line: number,
+      chunkRange: { start: number, end: number } | null,
+      signal?: AbortSignal,
+    ): Promise<CitationView | null> =>
+      call<CitationView | null>(
+        'readCitation',
+        { collectionId, docId, line, ...(chunkRange === null ? {} : { chunkRange }) },
+        signal,
+      ),
   }
 }
 

@@ -132,6 +132,71 @@ export interface HitView {
   band: 'strong' | 'relevant' | 'fair' | 'low'
 }
 
+/**
+ * One cited passage as the right sidebar's reader consumes it.
+ *
+ * The shape is a *window*, not a whole document: a reader arrives here from a
+ * citation, which names one place, and handing them 400 KB of Markdown to scroll
+ * through would make the citation a worse locator than the line number it came
+ * with. {@link CitationView.totalLines} is what lets the reader say "line 374 of
+ * 471" rather than implying the excerpt is the document.
+ */
+export interface CitationView {
+  /** Collection the citation belongs to. */
+  collectionId: string
+  /** Document id, i.e. the record's own id. */
+  docId: string
+  /** Original file name, as uploaded. */
+  docName: string
+  /** Lower-case extension without the dot. */
+  ext: string
+  /** Workspace-relative path of the stored snapshot text. */
+  sourcePath: string
+  /** 1-based line the citation points at. */
+  line: number
+  /** Total lines in the document, so "374 / 471" is sayable. */
+  totalLines: number
+  /**
+   * The excerpt's lines, already split.
+   *
+   * Split host-side because the highlight range is expressed in line numbers and
+   * recomputing them client-side would mean re-deriving the same newline scan the
+   * host just did — two implementations of one rule, which is how a highlight
+   * lands on the wrong line.
+   */
+  lines: CitationLine[]
+  /** First line number in {@link lines}, 1-based. */
+  windowStart: number
+  /**
+   * Character range of the *cited chunk* within the whole document.
+   *
+   * Carried so the reader can mark the retrieved passage, not merely the line a
+   * citation happened to name: a chunk spans a range, and showing only its first
+   * line understates what was actually retrieved.
+   */
+  chunkCharStart: number
+  /** End character offset of the cited chunk. */
+  chunkCharEnd: number
+}
+
+/** One line of a cited excerpt. */
+export interface CitationLine {
+  /** 1-based line number in the full document. */
+  number: number
+  /** The line's text, without its terminator. */
+  text: string
+  /**
+   * Whether this line is the citation's own line.
+   *
+   * Distinct from {@link inChunk}: the citation line is the precise locator, while
+   * the chunk span is the retrieved passage. Both are marked so a reader can tell
+   * "this is the line the citation named" from "this is the passage it came from".
+   */
+  isCitedLine: boolean
+  /** Whether this line overlaps the cited chunk's character range. */
+  inChunk: boolean
+}
+
 /** Options for {@link KnowledgeOperations}. */
 export interface OperationsOptions {
   /**
@@ -1153,6 +1218,105 @@ export class KnowledgeOperations {
     const first = vectors[0]
     if (first === undefined) throw new Error('嵌入模型未返回向量')
     return first
+  }
+
+  /**
+   * Read the passage a citation points at, for the right sidebar's reader.
+   *
+   * **Why an excerpt and not the file.** A citation is a *locator*: the reader
+   * already knows where to look, and the whole reason they clicked is that they
+   * want to see the evidence for one claim in the answer. Serving the full
+   * document would answer a question nobody asked while making the cited line
+   * harder to find. The window is therefore centred on the cited line and the
+   * response says which lines it covers, so "this is an excerpt" is explicit
+   * rather than something the reader has to infer from a truncated scroll.
+   *
+   * **Why the stored text and not the original upload.** The indexed text is what
+   * the answer was actually built from. The original may have moved, changed, or
+   * been deleted since upload, and quoting a *different revision* back to the
+   * reader would make the citation unfalsifiable — the one property a citation
+   * has to have. So this reads the same snapshot text the chunker cut, which is
+   * also what makes {@link CitationView.lines} agree with the chunk offsets.
+   *
+   * @param collectionId - collection identifier.
+   * @param docId - the cited document's id.
+   * @param line - 1-based line the citation named.
+   * @param chunkRange - the cited chunk's character range, when known.
+   * @param contextLines - lines of context to include on each side.
+   * @returns the excerpt, or `null` when the document is unknown.
+   * @throws {Error} when the collection does not exist.
+   */
+  readCitation(
+    collectionId: string,
+    docId: string,
+    line: number,
+    chunkRange: { start: number, end: number } | null = null,
+    contextLines = 40,
+  ): CitationView | null {
+    const self = this.bound()
+    const root = self.storeRoot
+    if (readMeta(root, collectionId) === null) throw new Error(`知识库 ${collectionId} 不存在`)
+
+    const record = listDocuments(root, collectionId).find(item => item.id === docId)
+    // `null` rather than a throw: a document can be removed between the answer
+    // being written and the reader clicking, and "this source is gone" is a state
+    // the reader can understand, unlike a failed request.
+    if (record === undefined) return null
+
+    const text = record.text
+    // Split on \r\n | \n | \r so a CRLF document's line numbers match `lineOf`,
+    // which counts only \n. A lone \r is treated as a terminator too because a
+    // classic-Mac export would otherwise collapse to a single line.
+    const lines = text.split(/\r\n|\n|\r/)
+
+    const total = lines.length
+    const citedLine = Math.min(Math.max(Math.trunc(line), 1), total)
+    const span = Math.max(Math.trunc(contextLines), 0)
+    const windowStart = Math.max(citedLine - span, 1)
+    const windowEnd = Math.min(citedLine + span, total)
+
+    // Character offset where each line begins, so a chunk range can be mapped to
+    // line numbers without a second scan per line.
+    const starts: number[] = new Array<number>(total)
+    let offset = 0
+    for (let index = 0; index < total; index += 1) {
+      starts[index] = offset
+      // +1 for the terminator the split removed. Approximate for CRLF (one char
+      // short per line), which shifts a chunk boundary by at most the number of
+      // preceding lines — acceptable because the mark is a highlight, and it is
+      // the *cited line* that carries the precise locator.
+      offset += (lines[index] as string).length + 1
+    }
+    const rangeStart = chunkRange === null ? -1 : Math.min(chunkRange.start, chunkRange.end)
+    const rangeEnd = chunkRange === null ? -1 : Math.max(chunkRange.start, chunkRange.end)
+
+    const excerpt: CitationLine[] = []
+    for (let number = windowStart; number <= windowEnd; number += 1) {
+      const lineStart = starts[number - 1] as number
+      const lineEnd = lineStart + (lines[number - 1] as string).length
+      excerpt.push({
+        number,
+        text: lines[number - 1] as string,
+        isCitedLine: number === citedLine,
+        // Overlap, not containment: a chunk boundary can fall mid-line, and a line
+        // it clips into is part of the retrieved passage.
+        inChunk: rangeStart >= 0 && lineEnd > rangeStart && lineStart <= rangeEnd,
+      })
+    }
+
+    return {
+      collectionId,
+      docId,
+      docName: record.name,
+      ext: record.ext,
+      sourcePath: self.relativeSourcePath(root, collectionId, record),
+      line: citedLine,
+      totalLines: total,
+      lines: excerpt,
+      windowStart,
+      chunkCharStart: rangeStart,
+      chunkCharEnd: rangeEnd,
+    }
   }
 
   /**

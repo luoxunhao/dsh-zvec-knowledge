@@ -25,13 +25,22 @@
 
 import { useState } from 'react'
 import { Icon } from './components/Icon.tsx'
+import { openCitation, citationOpener } from './citation-opener.ts'
+import type { CitationRef } from './citation-tab.ts'
 import styles from './SearchToolView.module.css'
 
 /** One hit as the tool's output reports it. */
 interface ToolHitView {
   /** Source file name. */
   file: string
-  /** Source document id. */
+  /**
+   * Workspace-relative path of the stored snapshot, when the renderer printed it.
+   *
+   * Recovered from the rendered line rather than from a structured field: the
+   * result reaches a view as *content blocks*, so the text is what this view has.
+   */
+  source_path?: string
+  /** Source document id, recovered from the path's file stem. */
   doc_id: string
   /** Chunk ordinal. */
   ordinal: number
@@ -113,6 +122,32 @@ const BAND_LABEL: Record<string, string> = {
 }
 
 /**
+ * Build the citation a hit row opens, when the row can be opened at all.
+ *
+ * Returns `null` — leaving the row as plain text — in three cases, all of which
+ * are real rather than defensive:
+ *
+ * 1. **No collection.** The summary's collection could not be parsed, so there is
+ *    nothing to read the document *from*. Opening would need a collection id and
+ *    guessing one is how a link lands on the wrong corpus.
+ * 2. **No document id.** The renderer fell back to the unresolved form, so the
+ *    source was never resolvable in the first place; the row's `file` is a display
+ *    name and `doc_id` is empty.
+ * 3. **No right column.** The deployment did not load it, so the control would do
+ *    nothing when clicked. A disabled-looking link is worse than an honest plain
+ *    row, because the reader keeps trying it.
+ *
+ * @param collection - the collection the search ran against, when known.
+ * @param hit - the hit row.
+ * @returns the citation, or `null` when this row cannot be opened.
+ */
+function citationRefOf(collection: string | undefined, hit: ToolHitView): CitationRef | null {
+  if (collection === undefined || hit.doc_id === '') return null
+  if (!citationOpener()?.available()) return null
+  return { collectionId: collection, docId: hit.doc_id, line: hit.ordinal }
+}
+
+/**
  * Parse the model's raw JSON arguments without throwing.
  *
  * The arguments arrive as the model produced them, so a truncated or malformed
@@ -139,10 +174,16 @@ export function parseArgs(raw: string | undefined): ToolArgsView {
  * model reads.
  *
  * That is workable and not a shortcut, because the rendered text is deliberately
- * structured: each hit line is `N. [band score] file #ordinal (字符 a-b)`, which is
- * exactly the citation information the spec wants displayed. Parsing it back means
- * the view shows precisely what the model saw — if the two disagreed, the user
- * would be judging a different result set than the answer was built from.
+ * structured: each hit line is either
+ * `N. [band score] <path>:<line> (字符 a-b)` when the store resolved a source, or
+ * `N. [band score] <docName> #<ordinal> (字符 a-b)` when it could not. Parsing it
+ * back means the view shows precisely what the model saw — if the two disagreed,
+ * the user would be judging a different result set than the answer was built from.
+ *
+ * The *resolvable* form is what the reader can follow, so it is captured
+ * separately from the display name: the path is what the citation tab needs, and
+ * `file` alone (a display name that may repeat across a set) cannot identify a
+ * document.
  *
  * @param content - the settled content blocks.
  * @returns the recoverable output.
@@ -155,9 +196,38 @@ export function parseResult(content: { type?: string, text?: string }[] | undefi
   if (text === '') return {}
 
   const hits: ToolHitView[] = []
-  // `1. [strong 0.91] guide.md #3 (字符 120-460)`
-  const line = /^(\d+)\.\s+\[(\w+)\s+([\d.]+)\]\s+(.+?)\s+#(\d+)\s+\(字符\s+(\d+)-(\d+)\)/gm
-  for (const match of text.matchAll(line)) {
+  // The resolvable form first: `1. [strong 0.91] .dsh-kb-zvec/kb_x/sources/doc_a.md:374 (字符 120-460)`.
+  // `(.+?)` is lazy and anchored on the trailing `:line (字符`, so a path carrying
+  // a colon (a Windows drive letter) still parses — the last colon before the
+  // parenthetical is the line separator.
+  const located = /^(\d+)\.\s+\[(\w+)\s+([\d.]+)\]\s+(.+?):(\d+)\s+\(字符\s+(\d+)-(\d+)\)/gm
+  const seen = new Set<number>()
+  for (const match of text.matchAll(located)) {
+    const index = Number(match[1])
+    seen.add(index)
+    const path = match[4] as string
+    hits.push({
+      file: path.split('/').pop() ?? path,
+      source_path: path,
+      doc_id: docIdFromPath(path),
+      // The line the renderer printed *is* the hit's line: the host derived it
+      // from the stored text, so re-deriving it here would be a second
+      // implementation of one rule.
+      ordinal: Number(match[5]),
+      char_start: Number(match[6]),
+      char_end: Number(match[7]),
+      text: '',
+      match_score: Number(match[3]),
+      band: match[2] as string,
+    })
+  }
+
+  // The unresolved form: `1. [fair 0.61] chapter1.md #50 (字符 27564-28167)`.
+  // Kept so a hit the store could not resolve still renders — it is a weaker
+  // citation, not an absent one.
+  const unlocated = /^(\d+)\.\s+\[(\w+)\s+([\d.]+)\]\s+(.+?)\s+#(\d+)\s+\(字符\s+(\d+)-(\d+)\)/gm
+  for (const match of text.matchAll(unlocated)) {
+    if (seen.has(Number(match[1]))) continue
     hits.push({
       file: match[4] as string,
       doc_id: '',
@@ -182,6 +252,22 @@ export function parseResult(content: { type?: string, text?: string }[] | undefi
     ...(belowFloor === null ? {} : { below_floor: Number(belowFloor[1]) }),
     ...(notFound ? { reason: 'empty_result' as const } : {}),
   }
+}
+
+/**
+ * Recover a document id from a stored source path.
+ *
+ * The store names each document's snapshot `<docId>.<ext>`, so the file stem *is*
+ * the document id. This is what lets a citation tab ask the host for the right
+ * document without a second lookup: the path already carries the identity.
+ * @param path - a workspace-relative source path.
+ * @returns the document id, or an empty string when the path is not a source.
+ */
+export function docIdFromPath(path: string): string {
+  const base = path.split('/').pop() ?? ''
+  const at = base.lastIndexOf('.')
+  const stem = at <= 0 ? base : base.slice(0, at)
+  return stem.startsWith('doc_') ? stem : ''
 }
 
 /**
@@ -275,20 +361,60 @@ export function SearchToolView({ block, toolName }: SearchToolViewProps): React.
             // The citation list is the reference-tracing surface: numbering,
             // file, location and score, so a claim in the answer can be checked
             // against the chunk it came from.
+            //
+            // Each row with a resolvable source *is* a button that opens the
+            // right column's reader at the cited line. A row without one stays
+            // plain text rather than becoming a dead link: a citation that cannot
+            // be opened is still a citation, and its path and line are what a
+            // reader follows by hand.
             <ol className={styles.citations} aria-label="引用来源">
-              {citations.map(hit => (
-                <li key={`${hit.file}-${hit.ordinal}`} className={styles.citation}>
-                  <span className={`kb-mono ${styles.citationIndex}`}>[{hit.ordinal}]</span>
-                  <span className={styles.citationFile}>{hit.file}</span>
-                  <span className={`kb-mono ${styles.citationLoc}`}>
-                    #{hit.ordinal} · 字符 {hit.char_start}-{hit.char_end}
-                  </span>
-                  <span className={styles.citationBand} data-band={hit.band}>
-                    {BAND_LABEL[hit.band] ?? hit.band}
-                  </span>
-                  <span className={`kb-mono ${styles.citationScore}`}>{hit.match_score.toFixed(2)}</span>
-                </li>
-              ))}
+              {citations.map((hit, index) => {
+                const ref = citationRefOf(result.collection, hit)
+                const label = (
+                  <>
+                    <span className={`kb-mono ${styles.citationIndex}`}>[{index + 1}]</span>
+                    <span className={styles.citationFile}>{hit.file}</span>
+                    <span className={`kb-mono ${styles.citationLoc}`}>
+                      :{hit.ordinal} · 字符 {hit.char_start}-{hit.char_end}
+                    </span>
+                    <span className={styles.citationBand} data-band={hit.band}>
+                      {BAND_LABEL[hit.band] ?? hit.band}
+                    </span>
+                    <span className={`kb-mono ${styles.citationScore}`}>{hit.match_score.toFixed(2)}</span>
+                  </>
+                )
+                return (
+                  <li key={`${hit.file}-${hit.ordinal}-${index}`} className={styles.citation}>
+                    {ref === null ? (
+                      <span className={styles.citationStatic}>{label}</span>
+                    ) : (
+                      <button
+                        type="button"
+                        className={styles.citationLink}
+                        // The label states the destination, because a screen
+                        // reader announcing five identical "链接" controls tells
+                        // the reader nothing about which source is which.
+                        aria-label={`在侧边栏查看 ${hit.file} 第 ${hit.ordinal} 行`}
+                        title={`在侧边栏打开 ${hit.source_path ?? hit.file}:${hit.ordinal}`}
+                        onClick={() => {
+                          openCitation(ref, {
+                            chunkRange: { start: hit.char_start, end: hit.char_end },
+                            band: hit.band,
+                            score: hit.match_score,
+                            docName: hit.file,
+                            ...(args.query === undefined ? {} : { query: args.query }),
+                          })
+                        }}
+                      >
+                        {label}
+                        <span className={styles.citationOpen} aria-hidden="true">
+                          <Icon name="external-link" size={12} />
+                        </span>
+                      </button>
+                    )}
+                  </li>
+                )
+              })}
             </ol>
           )}
         </div>

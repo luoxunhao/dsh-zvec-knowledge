@@ -167,6 +167,70 @@
   background: var(--kb-bg-surface);
 }
 
+/* A citation the reader can follow. The button resets the user agent's styling
+ * and carries the row's own layout, so the link and the static row are the same
+ * shape — a reader should not be able to tell them apart except by the
+ * affordance, which is what stops a non-openable row looking broken. */
+.citationLink,
+.citationStatic {
+  display: flex;
+  align-items: center;
+  gap: var(--kb-space-2);
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+}
+
+.citationLink {
+  cursor: pointer;
+}
+
+.citationLink:hover {
+  color: var(--kb-brand-link);
+}
+
+.citationLink:hover .citationFile {
+  color: var(--kb-brand-link);
+  text-decoration: underline;
+}
+
+.citationLink:focus-visible {
+  outline: var(--kb-outline-focus);
+  outline-offset: 2px;
+  border-radius: var(--kb-radius-xs);
+  box-shadow: var(--kb-shadow-focus);
+}
+
+/* The open-in-sidebar mark. Hidden until the row is hovered or focused so the
+ * list stays quiet, but never removed from the accessibility tree — the button's
+ * aria-label is what names the destination. */
+.citationOpen {
+  display: flex;
+  flex: none;
+  color: var(--kb-text-tertiary);
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.citationLink:hover .citationOpen,
+.citationLink:focus-visible .citationOpen {
+  opacity: 1;
+  color: var(--kb-brand-link);
+}
+
+/* Reduced motion: the mark appears without a fade, so it is present for anyone
+ * who has asked the system to avoid animation. */
+@media (prefers-reduced-motion: reduce) {
+  .citationOpen {
+    transition: none;
+  }
+}
+
 .citationIndex {
   flex: none;
   color: var(--kb-text-tertiary);

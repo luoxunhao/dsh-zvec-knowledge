@@ -28,6 +28,12 @@ import './styles/base.css'
 import { KnowledgeBasePanel } from './panel.tsx'
 import { createHostPort } from './bridge-client.ts'
 import { SearchToolView, type SearchToolViewProps } from './SearchToolView.tsx'
+import { CitationTabView } from './CitationTabView.tsx'
+import { CITATION_ID, CITATION_KIND, citationAddress, citationTitle } from './citation-tab.ts'
+import { citationDefinition } from './citation-definition.ts'
+import { installCitationOpener, type CitationOpener } from './citation-opener.ts'
+import type { SidebarRightTabBodyProps } from './slots.ts'
+import { sidebarRightOf } from './sidebar-right.ts'
 import { KbButton } from './composer/KbButton.tsx'
 import { createKbTriggerSource, kbCandidates, reportClientDiagnostics, triggerRegistryOf } from './kb-trigger.tsx'
 import {
@@ -87,6 +93,16 @@ export { formatBytes } from './components/StorageUsageCard.tsx'
 export { formatCount } from './components/CollectionCard.tsx'
 export { KnowledgeBasePanel } from './panel.tsx'
 export { RetrievalPage, type RetrievalPageProps } from './pages/RetrievalPage.tsx'
+export { CitationTabView, type CitationTabViewProps, type CitationReader } from './CitationTabView.tsx'
+export {
+  CITATION_ID, CITATION_KIND, CITATION_SCHEME, citationAddress, citationTitle, parseCitationAddress,
+  type CitationParams, type CitationRef,
+} from './citation-tab.ts'
+export { citationDefinition, type CitationTabDefinition } from './citation-definition.ts'
+export {
+  citationOpener, installCitationOpener, openCitation, resetCitationOpener, type CitationOpener,
+} from './citation-opener.ts'
+export { sidebarRightOf, type SidebarRightLike, type OpenTabOptions } from './sidebar-right.ts'
 export {
   KNOWLEDGE_LABEL, KNOWLEDGE_ORDER, KNOWLEDGE_PANEL_KEY, KNOWLEDGE_SIDEBAR_ID,
   type MainPanelId,
@@ -256,6 +272,57 @@ export function apply(ctx: ClientContext): void {
       },
     ))
 
+    // The right Sidebar's citation tab: a tab *type* registered at `extension`
+    // band, plus its body. Both are owned by this effect, so unloading the plugin
+    // withdraws the type and every open citation tab goes with it.
+    //
+    // Registered through `ctx.slots.inject` like the other seams: the right
+    // Sidebar is mounted by its own package and activation order between plugins
+    // is not guaranteed, so registering into an undeclared slot would throw.
+    const disposeCitationTab = ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register(
+      { name: 'sidebar.right.pane.tab', key: CITATION_ID },
+      (props: SidebarRightTabBodyProps) => (
+        <CitationTabView {...props} reader={port.readCitation === undefined ? undefined : {
+          // Bound here so the component receives a plain function and never sees
+          // the port, which keeps it testable with a stub.
+          read: (collectionId, docId, line, range, signal) =>
+            port.readCitation!(collectionId, docId, line, range, signal),
+        }} />
+      ),
+    ))
+
+    // The tab *type* itself: which addresses it claims and what its chip says.
+    // Separate from the body registration above because the registry is a service
+    // (`ctx.sidebarRight`), not a slot, and it is what makes `openTab` able to
+    // resolve the kind at all.
+    const sidebarRight = sidebarRightOf(ctx)
+    let disposeTabType: (() => void) | undefined
+    if (sidebarRight !== undefined) {
+      disposeTabType = sidebarRight.registerTabType(citationDefinition(CITATION_ID))
+    }
+
+    // Install the opener the tool view calls. `openTab` is used rather than
+    // `openResource` because a citation is a *page*: the registry ranks resource
+    // claimants by glob and this type's own kind is what should win, not a
+    // ranking accident.
+    const disposeOpener = installCitationOpener({
+      available: () => sidebarRight !== undefined,
+      open: (ref, params) => {
+        if (sidebarRight === undefined) return
+        sidebarRight.openTab(CITATION_KIND, {
+          // The address carries the citation, so clicking two lines of one
+          // document re-navigates one tab instead of opening a tab per line.
+          params,
+          contentId: citationAddress(ref),
+          title: citationTitle(citationAddress(ref)),
+          // Reveal an already-open citation rather than duplicating it, which is
+          // what makes a second click on the same citation a no-op rather than a
+          // second identical pane.
+          revealIfOpened: true,
+        })
+      },
+    })
+
     return () => {
       // The panel is disposed first: with the row gone, nothing can select a
       // panel that is no longer registered. The tool view goes last because it is
@@ -265,8 +332,14 @@ export function apply(ctx: ClientContext): void {
       disposeButton()
       disposeTrigger?.()
       disposeToolView()
+      // The opener goes before the tab type and the body: with the opener gone no
+      // citation can be opened, so nothing can reach a type that is being
+      // withdrawn.
+      disposeOpener()
+      disposeTabType?.()
+      disposeCitationTab()
     }
-  }, 'zvec-knowledge: sidebar entry, main panel, composer control and retrieval tool view')
+  }, 'zvec-knowledge: sidebar entry, main panel, composer control, retrieval tool view and citation tab')
 
   // Stylesheet presence marker. It gives the browser half one observable,
   // disposable effect, which is what makes its lifecycle testable, and later

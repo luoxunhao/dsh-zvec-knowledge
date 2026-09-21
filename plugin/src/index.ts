@@ -31,6 +31,7 @@ import { disposeAll, openHandleCount } from './store/registry.ts'
 import { disposeJobs } from './store/job.ts'
 import { KnowledgeOperations } from './host/operations.ts'
 import { registerKbBridge, mintBridgeToken, type WebServerLike } from './host/bridge.ts'
+import { registerKbSkills, type SkillRegistryLike } from './host/skill-bundle.ts'
 // The web-server declaration shim, for its `declare module` side effect.
 import './host/services.ts'
 import { defineKbSearchTool, KB_SEARCH_TOOL } from './host/search-tool.ts'
@@ -62,6 +63,10 @@ export {
   type EmbedFn, type RunningBuild, type StageId, type StageState,
 } from './store/build.ts'
 export { search, searchDense, countChunksForDocument, deleteChunksForDocument, type SearchHit, type SearchResult } from './store/retrieval.ts'
+export {
+  registerKbSkills, parseSkillMarkdown, defaultSkillsDir,
+  type SkillMarkdown, type SkillRegistryLike, type SkillRegistrationResult,
+} from './host/skill-bundle.ts'
 export { openHandleCount } from './store/registry.ts'
 
 /** Plugin name, as the loader reports it and the patch layer mounts it. */
@@ -80,6 +85,10 @@ export const name = 'zvec-knowledge'
  * `ctx.inject`, so a headless profile with no web server still loads this plugin
  * and keeps `dsh_kb_search` working. Requiring it here would make the tool
  * unavailable in exactly the deployments that have no UI to serve.
+ *
+ * `skills` is bound the same lazy way for the same reason: it comes from an opt-in
+ * harness plugin, and this plugin's point is retrieval, not the skill catalog. See
+ * `host/skill-bundle.ts`.
  */
 export const inject: string[] = ['tools']
 
@@ -91,14 +100,18 @@ export const inject: string[] = ['tools']
  * at load when it is self-contained, and every check in {@link assertValidConfig}
  * is decidable from the configuration alone.
  *
- * Two effects are registered, in the documented disposer order — stop admitting
- * work, then release resources:
+ * Two effects are registered unconditionally, in the documented disposer order —
+ * stop admitting work, then release resources:
  *
  * 1. the `dsh_kb_search` tool registration, removed on unload so a session cannot
  *    call a tool whose store has gone;
  * 2. the store's pooled handles, closed because the engine's directory locks
  *    outlive the plugin otherwise and the next load would fail on a lock it cannot
  *    see the owner of.
+ *
+ * Two more hang off services the deployment may not have — the bridge route (when
+ * a web server exists) and the bundled RAG skills (when the skill plugin does) —
+ * and are omitted entirely otherwise.
  * @param ctx - registrant context; both effects are owned by this fiber.
  * @param config - resolved deployment configuration.
  */
@@ -128,6 +141,20 @@ export function apply(ctx: Context, config: Config): void {
       () => registerKbBridge(webCtx, server, () => operations, token),
       'zvec-knowledge: host bridge route',
     )
+  })
+
+  // The RAG skills this package ships, registered into the harness skill registry.
+  // Bound through `ctx.inject` for the same reason as `webServer`: `skills` comes
+  // from an opt-in harness plugin, and a profile without it must still load this
+  // plugin and keep its retrieval tool. See `host/skill-bundle.ts` for why a
+  // discovery root and `customSkillDirs` cannot express a package-relative path.
+  ctx.inject(['skills'], (skillCtx) => {
+    const registry = skillCtx.get('skills') as SkillRegistryLike | undefined
+    if (registry === undefined) return
+    skillCtx.effect(() => {
+      const registered = registerKbSkills(registry, { logger: skillCtx.logger })
+      return () => registered.dispose()
+    }, 'zvec-knowledge: bundled RAG skills')
   })
 
   ctx.effect(() => {

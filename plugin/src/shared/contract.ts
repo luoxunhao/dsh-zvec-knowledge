@@ -69,11 +69,18 @@ export const KB_UPLOAD_SIZE_HEADER = 'x-kb-file-size'
  * operation: the browser half then has exactly one fetch call site, and the host
  * one dispatch table. Adding an operation cannot introduce a second path that some
  * deployment's reverse proxy might treat differently.
+ *
+ * This list is the complete set of names the route answers for: the host's
+ * `case` labels in `src/host/bridge.ts` must agree with it in both directions, and
+ * `scripts/verify-bridge.mjs` fails the build when they do not. Order carries no
+ * meaning — the two halves and the gate compare sets, not sequences.
  */
 export const KB_API_METHODS = [
   'listCollections',
   'listBuilds',
   'getUsage',
+  'getEmbeddingInfo',
+  'getQuantizerOptions',
   'getQuota',
   'createCollection',
   'deleteCollection',
@@ -91,6 +98,7 @@ export const KB_API_METHODS = [
   'cancelBuild',
   'embedQuery',
   'retrieve',
+  'readCitation',
 ] as const
 
 /** One bridge method name. */

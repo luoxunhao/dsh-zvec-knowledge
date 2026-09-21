@@ -78,9 +78,10 @@ const slotsTs = read('slots.ts')
   // statement as its inject call. A register on a line of its own would run
   // immediately and throw whenever the owning entry has not mounted yet.
   const nestedRegisters = (entryCode.match(/ctx\.slots\.inject\([^)]*\(\) => ctx\.slots\.register\(/g) ?? []).length
-  // Four contributions: the knowledge panel, its sidebar row, the retrieval
-  // call's view inside a turn (KB-08), and the composer's knowledge-base button.
-  check('KB-04 integration: all four slots registered through inject', injectCalls === 4, `${injectCalls} ctx.slots.inject call(s)`)
+  // Five contributions: the knowledge panel, its sidebar row, the retrieval
+  // call's view inside a turn (KB-08), the composer's knowledge-base button, and
+  // the right Sidebar's citation tab body (the reader a citation opens).
+  check('KB-04 integration: all five slots registered through inject', injectCalls === 5, `${injectCalls} ctx.slots.inject call(s)`)
   check('KB-04 integration: every register runs inside an inject callback', nestedRegisters === injectCalls && injectCalls > 0, `${nestedRegisters} of ${injectCalls} injected`)
   // The trigger registry is declared alongside slots: without it the composer
   // button and @ menu are silently absent, which is why it is asserted required.

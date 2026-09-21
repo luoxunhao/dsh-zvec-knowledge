@@ -230,6 +230,61 @@ export interface KnowledgeBasePort {
     query: string,
     options: { topk?: number, minScore?: number, denseOnly?: boolean },
   ) => Promise<RetrievalView>
+  /**
+   * Read the passage one citation points at, for the right sidebar's reader.
+   *
+   * Returns `null` when the document is gone rather than throwing: between the
+   * answer being written and the reader clicking, a collection can be rebuilt or a
+   * document removed, and "this source is no longer stored" is a fact the reader
+   * can understand — unlike a failed request.
+   */
+  readCitation?: (
+    collectionId: string,
+    docId: string,
+    line: number,
+    chunkRange: { start: number, end: number } | null,
+    signal?: AbortSignal,
+  ) => Promise<CitationView | null>
+}
+
+/**
+ * One cited passage, as the host reports it.
+ *
+ * Mirrors `host/operations.ts`'s `CitationView`. Restated because the client
+ * bundle may not import host code; the two meet at the wire.
+ */
+export interface CitationView {
+  /** Collection the citation belongs to. */
+  collectionId: string
+  /** Document id. */
+  docId: string
+  /** Original file name, as uploaded. */
+  docName: string
+  /** Lower-case extension without the dot. */
+  ext: string
+  /** Workspace-relative path of the stored snapshot text. */
+  sourcePath: string
+  /** 1-based line the citation points at. */
+  line: number
+  /** Total lines in the document. */
+  totalLines: number
+  /** The excerpt's lines. */
+  lines: {
+    /** 1-based line number in the full document. */
+    number: number
+    /** The line's text. */
+    text: string
+    /** Whether this is the citation's own line. */
+    isCitedLine: boolean
+    /** Whether this line overlaps the cited chunk. */
+    inChunk: boolean
+  }[]
+  /** First line number in `lines`. */
+  windowStart: number
+  /** Character range of the cited chunk within the document. */
+  chunkCharStart: number
+  /** End character offset of the cited chunk. */
+  chunkCharEnd: number
 }
 
 /** One diagnostic retrieval result, as the host reports it. */

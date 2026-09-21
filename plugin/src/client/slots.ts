@@ -135,6 +135,24 @@ export interface KnowledgeSlotMap {
     scope: 'session'
     owner: ComposerControlOwnerProps
   }
+  /**
+   * One right-Sidebar tab's body, dispatched with the id of the tab type in force.
+   *
+   * Restated from `dsh-client-ui-sidebar-right`'s slot contract. This is the seam
+   * that lets a citation open as a *tab* in the right column rather than as a
+   * dialog: the column already owns docking, splitting, floating and per-session
+   * state, and a second overlay surface would duplicate all of it.
+   *
+   * The key is the tab type's `id` (this package's name), not its `kind` — a kind
+   * is a shared discriminator an extension may take over from a builtin, while an
+   * id is unique per implementation. Registered under the wrong one, the body
+   * silently never renders because nothing dispatches it.
+   */
+  'sidebar.right.pane.tab': {
+    kind: 'keyed'
+    scope: 'session'
+    owner: SidebarRightTabBodyProps
+  }
 }
 
 /**
@@ -186,7 +204,70 @@ export interface ToolCallOwnerProps {
 }
 
 /** A slot key this plugin addresses. */
-export type KnowledgeSlotKey = 'sidebar.panellist' | 'main' | 'tool.call.toolview' | 'conversation.input.right'
+export type KnowledgeSlotKey =
+  | 'sidebar.panellist'
+  | 'main'
+  | 'tool.call.toolview'
+  | 'conversation.input.right'
+  | 'sidebar.right.pane.tab'
+
+/**
+ * Owner share of a right-Sidebar tab body.
+ *
+ * Restated from `SidebarRightTabInfo`, narrowed to what this tab's body reads.
+ * The full share also carries pane identity, presentation state and the tab
+ * record; this body needs the navigation it was opened with and the tab's live
+ * signal, so declaring only those keeps the dependency honest.
+ *
+ * `navigation.params` is typed `unknown`: the params map is merge-extensible and
+ * filled by the tab type that declares them, and this plugin's own declaration
+ * (below) is where the real shape lives. The body narrows it once, at the edge.
+ */
+export interface SidebarRightTabBodyProps {
+  /**
+   * The tab's live information: the seat passes these as the body's owner share.
+   *
+   * Optional because the seat's exact prop composition is not restated here; the
+   * body falls back to its navigation params when it is absent rather than
+   * crashing a pane that the user cannot dismiss.
+   */
+  tab?: SidebarRightTabLiveInfo
+  /** The same information under the name the seat's hook context exposes. */
+  tabInfo?: SidebarRightTabLiveInfo
+}
+
+/** The live subset of a tab's information this body reads. */
+export interface SidebarRightTabLiveInfo {
+  /** Where the tab was last navigated to, carrying the opener's params. */
+  navigation?: {
+    /** The address opened. */
+    address?: string
+    /** The opener's parameters, shaped by the tab kind. */
+    params?: unknown
+  }
+  /** Aborted when the record disappears or the plugin unloads. */
+  signal?: AbortSignal
+  /** Dismiss this tab. */
+  actions?: {
+    /** Close this tab. */
+    close?: () => void
+  }
+}
+
+/**
+ * Options for a `sidebar.right.pane.tab` (keyed) registration.
+ *
+ * Separate from {@link KeyedRegisterOptions} because this slot is owned by the
+ * right Sidebar rather than the layout shell, and its dispatch key is a tab
+ * type's `id`. Folding the two together would let a caller pass a tab id to the
+ * main panel, which the layout would ignore silently.
+ */
+export interface RightTabRegisterOptions {
+  /** Target slot key. */
+  name: 'sidebar.right.pane.tab'
+  /** The tab type's `id`, which is what the seat dispatches on. */
+  key: string
+}
 
 /** Options for a `main` or `tool.call.toolview` (keyed) registration. */
 export interface KeyedRegisterOptions {
@@ -238,7 +319,7 @@ export interface SlotRegistry {
    * @returns a disposer removing the contribution.
    */
   register(
-    options: KeyedRegisterOptions | ListRegisterOptions | ComposerControlRegisterOptions,
+    options: KeyedRegisterOptions | ListRegisterOptions | ComposerControlRegisterOptions | RightTabRegisterOptions,
     component: (props: never) => ReactNode,
   ): () => void
   /**
