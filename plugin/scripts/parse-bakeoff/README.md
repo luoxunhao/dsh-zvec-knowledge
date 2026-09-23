@@ -107,12 +107,18 @@ length, because `pymupdf4llm` rejects a page list that runs past the end.
 
 20 pages on both sides; `pymupdf` 1.28.2.
 
-| document | hanzi ours/base | coverage | headings ours/base | recovery | structure | verdict |
+| document | hanzi ours/base | coverage (ours/base) | headings ours/base | recovery | structure | verdict |
 |---|---|---|---|---|---|---|
 | AI-Agents-in-Depth-zh-CN.pdf | 14669 / 14669 | 100.0% | 19 / 18 | 105.6% | inferred | PASS |
-| bits_cn.pdf | 164 / 35 | 100.0% | 6 / 5 | 120.0% | inferred | PASS |
+| bits_cn.pdf | 164 / 35 | **468.6%** | 6 / 5 | 120.0% | inferred | PASS |
 | bpftrace_cn.pdf | 545 / 545 | 100.0% | 15 / 12 | 125.0% | inferred | PASS |
-| hermes_cli_cheat_sheet_cn.pdf | 1863 / 1767 | 100.0% | 12 / 32 | **37.5%** | inferred | FAIL |
+| hermes_cli_cheat_sheet_cn.pdf | 1863 / 1767 | **105.4%** | 12 / 32 | **37.5%** | inferred | FAIL |
+
+Coverage is the briefed ratio `ours/base`. It exceeds 100% where the baseline
+misses text we recover — `bits_cn` is the extreme case, because the baseline
+mis-decodes that file badly (35 hanzi against our 164). `verdict.mjs` also
+prints a `shared` column (`ours/max(ours,base)`), which is a reference figure
+only and floors at 100% by construction; do not read it as the criterion.
 
 Criterion 1 and criterion 3 pass; criterion 2 fails on the dense multi-block
 cheat sheet, which needs a real block-segmentation stage rather than a threshold.

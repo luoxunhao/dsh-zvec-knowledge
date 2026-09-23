@@ -216,14 +216,23 @@ check(
 
 // And the same shape, reached the other way: aborting a document that is already
 // mid-conversion, which is the case the report showed returning a bare success.
+//
+// The assertion must demand a failure, not merely allow one: an earlier version
+// of this check read `failed === true || text.length > 0`, which any successful
+// conversion satisfies, so it could not tell "the cancel was honoured" from
+// "the cancel never happened". `midFlight.abort()` below is synchronous with
+// respect to the conversion's first await, so the signal is already aborted
+// when the converter starts, and a cancel-honouring converter must fail.
 const midFlight = new AbortController()
 const slow = convertPdf(SIMPLE, { ...opts, signal: midFlight.signal })
-setTimeout(() => midFlight.abort(), 0)
+midFlight.abort()
 const slowResult = await slow
 check(
-  '转换途中取消同样记 failed',
-  slowResult.failed === true || slowResult.text.trim().length > 0,
-  `failed=${slowResult.failed} text=${slowResult.text.length}`,
+  '转换途中取消同样记 failed，且不得产出正文',
+  slowResult.failed === true
+    && typeof slowResult.error === 'string' && slowResult.error.length > 0
+    && slowResult.text.trim().length === 0,
+  `failed=${slowResult.failed} error=${slowResult.error} text=${slowResult.text.length}`,
 )
 
 console.log(`\n${pass} passed, ${fail} failed`)
