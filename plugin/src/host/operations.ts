@@ -1761,18 +1761,18 @@ function markPublished(
     // a transient cause is re-converted on a full build and comes back with fresh
     // text, so its record is no longer `failed` and its stale error must go.
     //
-    // **`error` is cleared only when the build actually re-embedded the document.**
-    // `chunksByDoc` is the chunking stage's own plan for what this build embedded, so
-    // its presence is proof that text was produced *now*. Without that condition a
-    // document the build merely carried along — an incremental build's untouched
-    // documents — would have its error erased while its state was never re-examined,
-    // which is how a broken document comes to display as fine with nothing anywhere
-    // saying otherwise.
-    //
     // Read from `record` and **not** from `rebuilt`, the pre-build snapshot the
     // caller handed in: reading the stale copy is what made an earlier version of
     // this guard look correct and do nothing, because at launch time the document was
     // `pending` and the check never fired.
+    //
+    // Note the guard below carries no `indexed` condition, while the success return
+    // clears `error` under one. That asymmetry is deliberate but the two paths are
+    // mutually redundant today: a failed record embeds nothing, so it is always
+    // absent from `chunksByDoc`. An earlier version tested `indexed` here too, which
+    // a gate proved to be a tautology rather than a safeguard — inverting it reddens
+    // "a still-broken document stays failed", because the branch is reachable. If
+    // either clear is ever removed, check the other still covers the case.
     const indexed = chunksByDoc[record.id]
     if (record.status === 'failed') {
       return { ...record, chunks: null, error: record.error ?? rebuilt.error }
@@ -1784,6 +1784,11 @@ function markPublished(
       // for this document (a document whose text was empty, say). Falling back to
       // `null` instead would put the row back into 待构建 for no reason.
       chunks: indexed ?? rebuilt.chunks ?? record.chunks,
+      // The surviving half of the pair described above: `chunksByDoc` is the chunking
+      // stage's own plan for what this build embedded, so presence is proof that text
+      // was produced *now*. Without it, a document the build merely carried along —
+      // an incremental build's untouched ones — would have its error erased while its
+      // state was never re-examined.
       ...(indexed === undefined ? {} : { error: undefined }),
       builtAt: at,
     }

@@ -883,13 +883,8 @@ try {
   // `verify:incremental` at 19/0 and this gate at 58/0. The cost is real and the
   // gates were blind to it.
   //
-  // So the instrument here is the conversion itself. A document that is *not*
-  // re-read cannot be observed from outside, so the check measures the one thing a
-  // re-read must do: spend time. Three real PDF conversions are not free, and the
-  // ratio between "converted 3 documents" and "converted none" is far wider than
-  // any timer noise on a fixture this small — asserted loosely on purpose, so the
-  // check pins the *shape* (nothing was re-read) without being flaky about
-  // milliseconds.
+  // The instrument is `parsedAt` — see the note at the assertion below for why a
+  // stopwatch was tried first and abandoned.
   {
     const cheap = mkdtempSync(join(tmpdir(), 'kb-parse-cheap-'))
     const cheapOps = new KnowledgeOperations({
@@ -901,8 +896,8 @@ try {
     })
     try {
       await cheapOps.createCollection({ name: '增量', collectionId: 'kb_prod_d2e3', description: '' })
-      // Four PDFs: enough that re-converting all of them is clearly slower than
-      // converting none, and few enough to stay fast.
+      // Three PDFs: enough that re-converting all of them is clearly distinguishable
+      // from converting none, and few enough to stay fast.
       for (const name of ['a.pdf', 'b.pdf', 'c.pdf']) {
         await upload(cheapOps, 'kb_prod_d2e3', name, LATIN)
       }
