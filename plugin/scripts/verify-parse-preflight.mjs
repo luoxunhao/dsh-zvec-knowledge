@@ -150,10 +150,22 @@ check('加密 PDF remedy 说明导出去权限副本', /副本/.test(locked?.rem
 // ---------------------------------------------------------------------------
 const everyEntry = [...ACCEPTED_EXTENSIONS].map(ext => [`${ext}`, extractionSupport(`a.${ext}`)])
 const stuck = everyEntry.filter(([, support]) => support.kind === 'needs-conversion')
+// Two separate assertions rather than one `a || b`: with the table empty today
+// (every advertised format is verbatim or converted) a combined condition would
+// short-circuit on the first half and never evaluate the remedy rule, so that
+// rule could rot unobserved until the day an entry appears.
 check(
-  '清单内没有会静默产出空索引的 needs-conversion 条目',
-  stuck.length === 0 || stuck.every(([, support]) => (support.remedy ?? '') !== ''),
+  '当前清单里没有 needs-conversion 条目（每个广告过的格式都有处理器）',
+  stuck.length === 0,
   stuck.map(([ext]) => ext).join(', ') || '(none)',
+)
+// Holds vacuously today by design: it is the invariant that must be true on the
+// day someone adds a `needs-conversion` entry, which is exactly when a missing
+// remedy would silently strand the user.
+check(
+  '任何 needs-conversion 条目都必须带 remedy（当前为空表，断言恒真）',
+  stuck.every(([, support]) => (support.remedy ?? '') !== ''),
+  stuck.map(([ext]) => ext).join(', ') || '(no needs-conversion entries)',
 )
 // Unknown extensions are `unsupported`, never `needs-conversion`: there is no
 // remedy to name for a format nobody claims to handle.

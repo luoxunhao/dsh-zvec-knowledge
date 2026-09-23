@@ -315,9 +315,14 @@ interface PreflightSurface {
  * ones a converter will handle, whose text does not exist until the build
  * pipeline's `parse` stage runs. A conversion format reaching here is therefore a
  * programming error rather than user input.
+ *
+ * It does not re-check that: this function decodes whatever bytes it is handed.
+ * The format decision belongs to the caller, which is the only place that knows
+ * which document is being uploaded; repeating it here would put the same rule in
+ * two places and let them drift.
  * @param file - absolute path of the stored original.
  * @returns the decoded text.
- * @throws {Error} when the file cannot be read or is not a verbatim format.
+ * @throws {Error} when the file cannot be read.
  */
 export function extractVerbatim(file: string): string {
   const buffer = readFileSync(file)
