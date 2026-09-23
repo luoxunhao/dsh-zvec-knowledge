@@ -31,6 +31,7 @@ import { adopt, releaseSlot } from './registry.ts'
 import { listDocuments, patchDocument, type DocumentRecord } from './documents.ts'
 import { gradeMarkdown, type StructureLevel } from './parse/grade.ts'
 import { convertPdf, type ParseOptions, type ParseResult } from './parse/pdf.ts'
+import { convertHtml } from './parse/html.ts'
 import { admit, type Quota } from './quota.ts'
 import type { ConverterId } from './extract.ts'
 
@@ -696,8 +697,15 @@ async function convertOne(
   switch (source.converter) {
     case 'pdf':
       return convertPdf(source.file, options)
+    case 'html':
+      // `.html` and `.htm` both land here — `extract.ts` gives them one
+      // converter id on purpose, since they are one format. The DOCX converter
+      // (Task 5) does **not** come through this case: it reads the OOXML itself
+      // and hands mammoth's HTML to `htmlToMarkdown`, so it owns its own
+      // envelope and its own failure modes.
+      return convertHtml(source.file, options)
     default:
-      // docx / html / xlsx / csv / json are declared by `extract.ts` and have no
+      // docx / xlsx / csv / json are declared by `extract.ts` and have no
       // implementation yet. Returning an empty success here would be the worst
       // available outcome: the build reports the document as parsed, indexes no
       // text for it, and nothing says why.

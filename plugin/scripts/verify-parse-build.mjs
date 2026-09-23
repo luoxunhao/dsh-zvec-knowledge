@@ -40,11 +40,21 @@
  *
  * **Why an unimplemented converter id is asserted, not skipped.** `extract.ts`
  * advertises `docx` / `html` / `xlsx` / `csv` / `json` and gives each a converter
- * id, but only `pdf` has an implementation until Tasks 4-6. The failure mode that
+ * id. `pdf` was implemented by Task 1 and `html` by Task 4; `docx` / `xlsx` /
+ * `csv` / `json` still have none. The failure mode that
  * would otherwise ship is the worst available one: the upload is accepted, the
  * build succeeds, and the document indexes nothing with no way to tell it apart
  * from a document that was legitimately empty. The check pins that a `docx`
  * document *fails*, naming the missing converter, rather than producing silence.
+ *
+ * **Why the case still uses `docx` now that `html` is real.** §4b below asserts
+ * the *implemented* side of the same dispatch, and it deliberately does not
+ * replace this one: the two are different facts. This case proves the `default`
+ * arm still fails loudly, which is what every remaining unimplemented id relies
+ * on; §4b proves the `html` arm reaches the new converter. Retargeting this case
+ * at `html` would have deleted the coverage of the arm that Tasks 5/6 still
+ * depend on, and — measured — would have kept passing for the wrong reason, since
+ * `pending.html` fed to the new converter fails too (it is not HTML).
  *
  * Runs offline: a committed fixture, a local engine and a deterministic
  * in-process embedding. No API key and no network.
@@ -456,6 +466,69 @@ try {
     'unimplemented converter: no empty snapshot was published',
     readMeta(scratch, 'kb_prod_3a7e').active === null,
     `active=${readMeta(scratch, 'kb_prod_3a7e').active}`,
+  )
+
+  // =========================================================================
+  // 4b. An *implemented* converter is reached, and reached with its own verdict
+  // =========================================================================
+  // The positive half of the same dispatch table, added with Task 4. Without it
+  // the `html` arm was covered by no gate at all: §4 above proves the `default`
+  // arm fails, and retargeting §4 at `html` would have looked like coverage while
+  // proving nothing — a document named `pending.html` whose bytes are not HTML
+  // fails under the *new* converter too, so the old assertion would have kept
+  // passing after the arm became real. That is precisely the accident the brief
+  // asked to be made deliberate, so the two arms are now asserted separately.
+  //
+  // `.htm` is used rather than `.html` because `extract.ts` gives both the same
+  // converter id and the extension-to-id mapping is asserted once in
+  // `verify-parse-preflight.mjs`; going through `.htm` here also confirms the
+  // second spelling of the format reaches the same code.
+  await ops.createCollection({ name: '中文页面', collectionId: 'kb_prod_1a2b', description: '' })
+  const htmlBody = '<h1>章节一</h1><p>正文段落。</p>'
+    + '<table><tr><th>列A</th><th>列B</th></tr><tr><td>1</td><td>2</td></tr></table>'
+    + '<pre><code class="language-ts">const x = 1</code></pre>'
+  await ops.addDocumentStream(
+    'kb_prod_1a2b', 'page.htm',
+    Buffer.byteLength(htmlBody), (async function* () { yield Buffer.from(htmlBody) })(),
+  )
+
+  await ops.buildIndex('kb_prod_1a2b', STRATEGY, { onProgress: () => {}, onLog: () => {} })
+  const htmlBuild = await awaitJob(ops, 'kb_prod_1a2b')
+  const htmlDoc = (await ops.listDocuments('kb_prod_1a2b'))[0]
+  const htmlRecord = readLog(scratch, 'kb_prod_1a2b')[0]
+
+  check(
+    'implemented converter: an .htm document builds rather than failing',
+    htmlDoc?.status === 'ready' && (htmlDoc?.chunks ?? 0) > 0,
+    `status=${htmlDoc?.status} chunks=${htmlDoc?.chunks} error=${htmlDoc?.error ?? '-'}`,
+  )
+  check(
+    'implemented converter: the record names the html converter',
+    htmlRecord?.converter === 'html',
+    `converter=${htmlRecord?.converter ?? '(absent)'}`,
+  )
+  // The structure verdict is the whole point of the converter: a document whose
+  // headings and table survived must be reported as `structured`, not flattened.
+  check(
+    'implemented converter: the verdict reports the structure the HTML carried',
+    htmlRecord?.structure === 'structured',
+    `structure=${htmlRecord?.structure}`,
+  )
+  // The product must be the converter's Markdown — asserted on all three format
+  // criteria at once, so a regression in any one of them (a dropped table, a
+  // setext heading, an indented fence) turns this red rather than passing.
+  check(
+    'implemented converter: the stored text is ATX headings, a pipe table and a fence',
+    /^# 章节一$/m.test(htmlRecord?.text ?? '')
+      && /^\|[\s:|-]*-\s*\|/m.test(htmlRecord?.text ?? '')
+      && /^```ts$/m.test(htmlRecord?.text ?? '')
+      && !(htmlRecord?.text ?? '').includes('\r'),
+    JSON.stringify((htmlRecord?.text ?? '').slice(0, 160)),
+  )
+  check(
+    'implemented converter: the published index holds its chunks',
+    htmlBuild.ok === true && htmlBuild.chunks > 0,
+    `ok=${htmlBuild.ok} chunks=${htmlBuild.chunks} error=${htmlBuild.error ?? '-'}`,
   )
 
   // =========================================================================

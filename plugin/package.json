@@ -80,6 +80,7 @@
     "verify:parse-pdf": "node scripts/verify-parse-pdf.mjs",
     "verify:parse-preflight": "node scripts/verify-parse-preflight.mjs",
     "verify:parse-build": "node scripts/verify-parse-build.mjs",
+    "verify:parse-html": "node scripts/verify-parse-html.mjs",
     "smoke:zvec": "node scripts/zvec-smoke.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json --noEmit",
     "build": "node scripts/clean-build.mjs && node scripts/gen-tokens.mjs && tsc -p tsconfig.json && tsc -p tsconfig.client.json && tsdown",
@@ -91,6 +92,10 @@
   },
   "dependencies": {
     "@zvec/zvec": "^0.7.1",
+    "hast-util-from-html": "2.0.3",
+    "hast-util-to-mdast": "10.1.2",
+    "mdast-util-gfm-table": "2.0.0",
+    "mdast-util-to-markdown": "2.1.2",
     "unpdf": "^1.8.1"
   },
   "peerDependencies": {
