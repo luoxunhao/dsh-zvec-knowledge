@@ -752,6 +752,25 @@ function admitParsedText(
 
 /**
  * Record a successful parse on the document and in the build log.
+ *
+ * **This write is the document's verdict, so it must clear a previous failure.**
+ * `failOne` writes `status: 'failed'` and a reason; a document that is later
+ * re-converted successfully — which is the whole point of a full rebuild re-reading
+ * the stored original — has to come back out of that state, or the record holds
+ * perfectly good text while still displaying the previous build's error. Measured
+ * before this was fixed: after repairing a stored original and rebuilding, the record
+ * held 63 characters of text and the build had indexed two chunks for it, yet the
+ * status still read `failed` with the old reason.
+ *
+ * `error: undefined` is written explicitly rather than omitted: `patch` merges, so
+ * leaving the key out would preserve the old message. `JSON.stringify` drops an
+ * undefined value, so the field is genuinely removed from the record, not written as
+ * `null`.
+ *
+ * The status is set back to `pending`, not straight to `ready`: a build's own parse
+ * stage does not decide that a document is *published*. `markPublished` does that
+ * after the snapshot is live, and a document that failed to be embedded must not be
+ * marked ready by the stage that merely produced its text.
  * @param request - the build request, for the log target.
  * @param document - the parsed document.
  * @param text - the produced Markdown.
@@ -767,6 +786,8 @@ function keep(
     text,
     structure,
     parsedAt: new Date().toISOString(),
+    status: 'pending',
+    error: undefined,
     ...(document.source === undefined ? {} : { converter: document.source.converter }),
   })
 }

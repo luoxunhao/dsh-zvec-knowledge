@@ -1127,19 +1127,30 @@ export class KnowledgeOperations {
           // `verbatim` document records no converter, so it arrives with its text
           // already present and the parse stage converts nothing.
           //
-          // `reparse: false` because a rebuild is not the place to re-derive text
-          // that already exists: a converter change is what makes reparsing
-          // meaningful, and that is a full rebuild triggered by
-          // `incrementalViability` — not something a per-document flag should
-          // silently force on every build, which would re-parse an entire PDF
-          // corpus each time one document was added.
+          // **`reparse` is exactly "was this build asked for in full"**, and that is
+          // the whole distinction. A *full* rebuild re-reads every document with a
+          // converter and a source and re-judges it, whether or not the document
+          // currently holds text: the stored original is authoritative, and a
+          // document whose file broke *after* it was successfully parsed is otherwise
+          // never noticed — it keeps serving text derived from a revision that no
+          // longer exists on disk, reports `ready`, and (before this) had its error
+          // silently cleared by the publish.
+          //
+          // An *incremental* rebuild converts nothing that already has text. That is
+          // the budget saving the whole incremental path exists for: re-parsing a
+          // corpus of PDFs every time one document is added would cost minutes where
+          // the design promises seconds.
+          //
+          // `useIncremental` rather than `mode` because a full build the host
+          // *downgraded* to — the caller asked for incremental but the strategy
+          // changed — must behave as the full build it actually became.
           ...(record.converter === undefined
             ? {}
             : {
                 source: {
                   file: sourcePath(root, collectionId, record.id, record.ext),
                   converter: record.converter as ConverterId,
-                  reparse: false,
+                  reparse: !useIncremental,
                 },
               }),
         })),
@@ -1736,37 +1747,34 @@ function markPublished(
   const updated = current.map(record => {
     const rebuilt = builtById.get(record.id)
     if (rebuilt === undefined) return record
-    // **A failure recorded by *this* build survives the publish; one left over from
-    // an earlier build does not.**
+    // **A failure recorded by *this* build survives the publish; a stale failure
+    // from an earlier build is replaced by the fresh verdict.**
     //
-    // The distinction is carried by `chunksByDoc`: it is the chunking stage's own
-    // plan for the documents this build actually embedded, so a document present in
-    // it produced text and was indexed *now*. A document absent from it that the log
-    // still calls `failed` either was not converted this time (the incremental skip)
-    // or failed again this time — and in both cases the log's verdict is already the
-    // right one, so it is kept.
+    // `record` is the log as it stands *now*, after the parse stage wrote this
+    // build's verdict into it, so `record.status === 'failed'` means "this build
+    // failed this document" and its reason is current. It must survive the sweep
+    // below, which would otherwise mark a document 已构建 while it holds no text and
+    // no chunks.
     //
-    // Why the stale-failure case matters: a failure is often transient (a partial
-    // upload, an ENOSPC, a converter bug fixed in the next release), and a full
-    // rebuild re-converts and re-judges such a document. The parse stage rewrites its
-    // text and clears nothing else, so a publish that merely *kept* the old `failed`
-    // would leave a document holding perfectly good text while displaying the previous
-    // build's error — the reparse would appear to have failed when it in fact
-    // succeeded. Measured before this fix: after restoring a good original and
-    // rebuilding, the record held 63 characters of text and the build had indexed 2
-    // chunks for it, yet the status still read `failed` with the old reason.
+    // A document that is *not* failed in the log goes `ready`. That covers both the
+    // ordinary success and the recovered case — a document whose previous failure had
+    // a transient cause is re-converted on a full build and comes back with fresh
+    // text, so its record is no longer `failed` and its stale error must go.
     //
-    // And the reason this guard exists at all: the publish sweeps every embedded
-    // document to `ready`, which would erase the verdict of a document that just
-    // failed, leaving it looking built while holding no text and no chunks.
+    // **`error` is cleared only when the build actually re-embedded the document.**
+    // `chunksByDoc` is the chunking stage's own plan for what this build embedded, so
+    // its presence is proof that text was produced *now*. Without that condition a
+    // document the build merely carried along — an incremental build's untouched
+    // documents — would have its error erased while its state was never re-examined,
+    // which is how a broken document comes to display as fine with nothing anywhere
+    // saying otherwise.
     //
-    // Read from `record` — the log as it stands *now*, after the build wrote its
-    // verdict — and **not** from `rebuilt`, the pre-build snapshot the caller handed
-    // in. Reading the stale copy is what made an earlier version of this guard look
-    // correct and do nothing: at launch time the document was `pending`, so the check
-    // never fired.
+    // Read from `record` and **not** from `rebuilt`, the pre-build snapshot the
+    // caller handed in: reading the stale copy is what made an earlier version of
+    // this guard look correct and do nothing, because at launch time the document was
+    // `pending` and the check never fired.
     const indexed = chunksByDoc[record.id]
-    if (record.status === 'failed' && indexed === undefined) {
+    if (record.status === 'failed') {
       return { ...record, chunks: null, error: record.error ?? rebuilt.error }
     }
     return {

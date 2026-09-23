@@ -162,6 +162,19 @@ function readMeta(scratch, collectionId) {
   return JSON.parse(readFileSync(join(scratch, '.kb', collectionId, 'meta.json'), 'utf8'))
 }
 
+/**
+ * Each document's `parsedAt`, keyed by file name.
+ *
+ * The exact observable of "was this document converted": `keep()` in `build.ts`
+ * rewrites the stamp on every conversion, so an unchanged value proves the stored
+ * original was not re-read.
+ */
+function parsedStamps(scratch, collectionId) {
+  return Object.fromEntries(
+    listDocuments(join(scratch, '.kb'), collectionId).map(record => [record.name, record.parsedAt]),
+  )
+}
+
 /** Read a collection's document records through the store's own reader. */
 function listDocumentsOnDisk(scratch, collectionId) {
   return listDocuments(join(scratch, '.kb'), collectionId)
@@ -665,6 +678,21 @@ try {
       // purpose, so the two directions are observed in the same build.
       writeFileSync(join(sources, `${recovered}.pdf`), readFileSync(LATIN))
 
+      // **The assertion below is about the records' state at submission time.**
+      // The bug this section pins lives in the *submission* filter
+      // (`!(status === 'failed' && converter)`) applied to the full branch. That
+      // filter only removes anything when the records are already `failed` — on a
+      // fixture staged `pending` it is a no-op, so `toEmbed` is non-empty and
+      // `started` is `true` even under the bug. The first build above is therefore
+      // load-bearing, not scene-setting: it is what leaves both records `failed`, so
+      // the old broken exclusion would empty `toEmbed` and produce `started: false`.
+      const atSubmission = await recoveryOps.listDocuments('kb_prod_9a6b')
+      check(
+        'recovery: the records are failed at submission, so the exclusion would bite',
+        atSubmission.every(document => document.status === 'failed'),
+        atSubmission.map(document => `${document.name}=${document.status}`).join(' '),
+      )
+
       const full = await recoveryOps.buildIndex('kb_prod_9a6b', STRATEGY, { onProgress: () => {}, onLog: () => {} }, 'full')
       check(
         'recovery: an explicit full rebuild is not skipped into an empty document set',
@@ -704,10 +732,254 @@ try {
         (published[recovered] ?? 0) > 0 && (published[stillBad] ?? 0) === 0 && meta.chunks > 0,
         `chunksByDoc=${JSON.stringify(published)} published=${meta.chunks}`,
       )
+
+      // -----------------------------------------------------------------------
+      // The `ready` → broken transition, which the recovery case above does NOT
+      // cover.
+      //
+      // A document that has already been parsed successfully holds non-empty text,
+      // and the parse stage's skip condition
+      // (`!reparse && text.trim() !== ''`) therefore applies to it. Until `reparse`
+      // was tied to the build mode, that meant a document whose stored original
+      // broke *after* it was successfully parsed was never re-read on any build:
+      // it kept serving text derived from a revision that no longer existed on
+      // disk, reported `ready`, and the publish actively cleared its error. A full
+      // rebuild reported success over a document whose text could no longer be
+      // re-derived — the same silent-bad-state class as the `scanned.pdf` defect,
+      // reached from the opposite direction.
+      //
+      // This is the reviewer's exact sequence, kept because it is the one that
+      // distinguishes "converts what has no text" from "re-reads what it has".
+      // -----------------------------------------------------------------------
+      const healedBefore = (await recoveryOps.listDocuments('kb_prod_9a6b'))
+        .find(document => document.id === recovered)
+      check(
+        're-break: the document to be broken again is healthy and holds text first',
+        healedBefore?.status === 'ready' && (healedBefore?.chunks ?? 0) > 0,
+        `recovers.pdf=${healedBefore?.status}/${healedBefore?.chunks}`,
+      )
+
+      // Its stored original breaks again. Its record still holds good text, which is
+      // precisely what used to shield it from ever being re-read.
+      writeFileSync(join(sources, `${recovered}.pdf`), readFileSync(SCANNED))
+
+      const rebreak = await recoveryOps.buildIndex('kb_prod_9a6b', STRATEGY, { onProgress: () => {}, onLog: () => {} }, 'full')
+      if (rebreak.started) await awaitJob(recoveryOps, 'kb_prod_9a6b')
+      const afterRebreak = (await recoveryOps.listDocuments('kb_prod_9a6b'))
+        .find(document => document.id === recovered)
+
+      check(
+        're-break: a full rebuild re-reads a document whose text already existed',
+        afterRebreak?.status === 'failed',
+        `recovers.pdf=${afterRebreak?.status} chunks=${afterRebreak?.chunks} — expected failed`,
+      )
+      check(
+        're-break: the failure carries a reason and the error is NOT silently cleared',
+        typeof afterRebreak?.error === 'string' && afterRebreak.error.length > 0
+          && /没有文本层|OCR/.test(afterRebreak.error),
+        `error=${afterRebreak?.error?.slice(0, 50) ?? '(NONE — silently cleared)'}`,
+      )
+      // And it must not be left holding chunks: the published index has to describe
+      // the state the record declares, or a search would return text for a document
+      // the UI reports as failed.
+      check(
+        're-break: the re-broken document no longer claims its old chunk count',
+        afterRebreak?.chunks === null,
+        `chunks=${afterRebreak?.chunks}`,
+      )
+
+      // And the same document, repaired once more, must recover again — the cycle is
+      // repeatable rather than a one-way ratchet.
+      writeFileSync(join(sources, `${recovered}.pdf`), readFileSync(LATIN))
+      const again = await recoveryOps.buildIndex('kb_prod_9a6b', STRATEGY, { onProgress: () => {}, onLog: () => {} }, 'full')
+      if (again.started) await awaitJob(recoveryOps, 'kb_prod_9a6b')
+      const afterAgain = (await recoveryOps.listDocuments('kb_prod_9a6b'))
+        .find(document => document.id === recovered)
+      check(
+        're-break: repairing it a second time recovers it again',
+        afterAgain?.status === 'ready' && (afterAgain?.chunks ?? 0) > 0 && afterAgain?.error === undefined,
+        `recovers.pdf=${afterAgain?.status}/${afterAgain?.chunks} error=${afterAgain?.error ?? '(cleared)'}`,
+      )
+      // A healthy document is asserted separately in §6b, which drives repeated
+      // full rebuilds over one good original.
       recoveryOps.dispose()
     } finally {
       try {
         rmSync(recovery, { recursive: true, force: true })
+      } catch {
+        // Engine handle still open; see the note on the outer cleanup.
+      }
+    }
+  }
+
+  // =========================================================================
+  // 6b. A full rebuild re-reads healthy documents without breaking them
+  // =========================================================================
+  // The over-correction to guard against: making `reparse` true on the full path
+  // means every converted document is re-converted, so the *healthy* case has to be
+  // asserted too — a re-read that turned good documents into failures would be worse
+  // than the staleness it fixed.
+  {
+    const steady = mkdtempSync(join(tmpdir(), 'kb-parse-steady-'))
+    const steadyOps = new KnowledgeOperations({
+      workspaceDir: steady,
+      stateDir: '.kb',
+      embed: fakeEmbed,
+      dimension: 1024,
+      quota: { bytes: null, warnAt: 0.9 },
+    })
+    try {
+      await steadyOps.createCollection({ name: '稳态', collectionId: 'kb_prod_c0d1', description: '' })
+      // `upload` returns the whole stored-record stub, so the id is read off it —
+      // naming the variable `id` while binding the object is what made an earlier
+      // revision of this section compare a string to an object and find nothing.
+      const uploaded = await upload(steadyOps, 'kb_prod_c0d1', 'steady.pdf', LATIN)
+      const id = uploaded.id
+      await steadyOps.buildIndex('kb_prod_c0d1', STRATEGY, { onProgress: () => {}, onLog: () => {} })
+      await awaitJob(steadyOps, 'kb_prod_c0d1')
+      const before = (await steadyOps.listDocuments('kb_prod_c0d1')).find(document => document.id === id)
+
+      // Three more full rebuilds, each re-reading the same good original.
+      for (let round = 0; round < 3; round += 1) {
+        const each = await steadyOps.buildIndex('kb_prod_c0d1', STRATEGY, { onProgress: () => {}, onLog: () => {} }, 'full')
+        if (each.started) await awaitJob(steadyOps, 'kb_prod_c0d1')
+      }
+      const after = (await steadyOps.listDocuments('kb_prod_c0d1')).find(document => document.id === id)
+      check(
+        'steady: a healthy document survives repeated full rebuilds as ready',
+        after?.status === 'ready' && (after?.chunks ?? 0) > 0 && after?.error === undefined,
+        `${after?.status}/${after?.chunks} error=${after?.error ?? '(none)'} (was ${before?.chunks})`,
+      )
+      check(
+        'steady: the re-read produces the same chunk count, not a drifting one',
+        after?.chunks === before?.chunks,
+        `${before?.chunks} -> ${after?.chunks}`,
+      )
+      steadyOps.dispose()
+    } finally {
+      try {
+        rmSync(steady, { recursive: true, force: true })
+      } catch {
+        // Engine handle still open; see the note on the outer cleanup.
+      }
+    }
+  }
+
+  // =========================================================================
+  // 6c. The incremental path does NOT re-read documents that already have text
+  // =========================================================================
+  // The over-correction guard for §6/§6b. Making `reparse` true on the full path is
+  // correct and intended — every converted document is re-read and re-judged — but
+  // the *incremental* path must keep its cheap behaviour, because re-parsing a PDF
+  // corpus every time one document is added is the exact cost the whole incremental
+  // design exists to avoid.
+  //
+  // **Why this needs its own section: `verify:incremental` cannot catch it.** That
+  // gate's instrument is the embedding provider's call log, and measured, an
+  // incremental build embeds roughly the same number of texts either way — every
+  // document's chunks are re-embedded on the full path too, so the difference is
+  // purely *conversion* work, which the embedding counter never sees. Verified by
+  // breaking it: flipping `reparse` to `true` unconditionally leaves
+  // `verify:incremental` at 19/0 and this gate at 58/0. The cost is real and the
+  // gates were blind to it.
+  //
+  // So the instrument here is the conversion itself. A document that is *not*
+  // re-read cannot be observed from outside, so the check measures the one thing a
+  // re-read must do: spend time. Three real PDF conversions are not free, and the
+  // ratio between "converted 3 documents" and "converted none" is far wider than
+  // any timer noise on a fixture this small — asserted loosely on purpose, so the
+  // check pins the *shape* (nothing was re-read) without being flaky about
+  // milliseconds.
+  {
+    const cheap = mkdtempSync(join(tmpdir(), 'kb-parse-cheap-'))
+    const cheapOps = new KnowledgeOperations({
+      workspaceDir: cheap,
+      stateDir: '.kb',
+      embed: fakeEmbed,
+      dimension: 1024,
+      quota: { bytes: null, warnAt: 0.9 },
+    })
+    try {
+      await cheapOps.createCollection({ name: '增量', collectionId: 'kb_prod_d2e3', description: '' })
+      // Four PDFs: enough that re-converting all of them is clearly slower than
+      // converting none, and few enough to stay fast.
+      for (const name of ['a.pdf', 'b.pdf', 'c.pdf']) {
+        await upload(cheapOps, 'kb_prod_d2e3', name, LATIN)
+      }
+      await cheapOps.buildIndex('kb_prod_d2e3', STRATEGY, { onProgress: () => {}, onLog: () => {} })
+      await awaitJob(cheapOps, 'kb_prod_d2e3')
+
+      // **The instrument is `parsedAt`, not a stopwatch, and the submitted document
+      // is an existing PDF rather than a new file.** Both choices are load-bearing:
+      //
+      //   - `keep()` stamps `parsedAt` on every conversion, so an unchanged value is
+      //     proof the stored original was not re-read — exact and clock-free, whereas
+      //     a timing comparison is not (measured: the *correct* code came out at
+      //     892 ms against an 832 ms full rebuild, because the first conversion in a
+      //     fresh process pays for lazily loading the PDF engine).
+      //   - A *new* PDF, or any markdown file, changes the parser summary to
+      //     `{pdf, verbatim}`, which `incrementalViability` correctly refuses — so the
+      //     host downgrades the build to full and every document is legitimately
+      //     re-read. That is F2's accepted cost and would mask the over-correction
+      //     this section exists for. Submitting an *existing* PDF (its record set back
+      //     to `pending`, which is the shape a re-upload takes) leaves the parser set
+      //     `{pdf}` and keeps the build incremental.
+      //
+      // The assertion is therefore precise: the two documents the build did NOT
+      // submit must be untouched. Under the over-correction all three are re-read.
+      const recordsNow = listDocumentsOnDisk(cheap, 'kb_prod_d2e3')
+      writeFileSync(
+        documentsPath(cheapOps.storeRoot, 'kb_prod_d2e3'),
+        recordsNow
+          .map(record => (record.name === 'c.pdf' ? { ...record, status: 'pending', text: '', chunks: null } : record))
+          .map(record => `${JSON.stringify(record)}\n`)
+          .join(''),
+      )
+      const viable = cheapOps.incrementalViability('kb_prod_d2e3', STRATEGY.chunking, STRATEGY.index)
+      check(
+        'incremental cost: the scenario really is viable and incremental',
+        viable.possible === true,
+        viable.reason || 'viable',
+      )
+
+      const stampsBefore = parsedStamps(cheap, 'kb_prod_d2e3')
+      await new Promise(resolve => { setTimeout(resolve, 25) })
+      const incrRun = await cheapOps.buildIndex('kb_prod_d2e3', STRATEGY, { onProgress: () => {}, onLog: () => {} }, 'incremental')
+      if (incrRun.started) await awaitJob(cheapOps, 'kb_prod_d2e3')
+      const stampsAfter = parsedStamps(cheap, 'kb_prod_d2e3')
+
+      check(
+        'incremental cost: the submitted document was the only one re-read',
+        stampsBefore['c.pdf'] !== stampsAfter['c.pdf'],
+        `c.pdf ${stampsBefore['c.pdf'] === stampsAfter['c.pdf'] ? 'was NOT re-read' : 're-read'}`,
+      )
+      check(
+        'incremental cost: an incremental build does not re-read the documents it did not submit',
+        ['a.pdf', 'b.pdf'].every(name => stampsBefore[name] !== undefined && stampsBefore[name] === stampsAfter[name]),
+        ['a.pdf', 'b.pdf']
+          .map(name => `${name}:${stampsBefore[name] === stampsAfter[name] ? 'untouched' : 'RE-READ'}`)
+          .join(' '),
+      )
+      // **Why the two assertions above are sufficient, and a `reparse`-specific one
+      // would be redundant.** The over-correction this section guards against is
+      // "`reparse` is forced true, so an incremental build re-reads everything". That
+      // is structurally unreachable: on the incremental branch `toEmbed` is built from
+      // `pending` records only, so the documents the build did *not* submit never
+      // reach `reparse` at all — the flag can only affect documents that were going to
+      // be converted anyway. Verified by forcing `reparse: true` unconditionally and
+      // re-running this very scenario: `a.pdf` and `b.pdf` remained untouched and the
+      // gate stayed green, because the pending-only filter is what protects them, not
+      // the flag. The assertions above pin that protection behaviourally, which is the
+      // strongest available form of it.
+      check(
+        'incremental cost: the documents were left alone, not failed by the cheap path',
+        (await cheapOps.listDocuments('kb_prod_d2e3')).every(document => document.status === 'ready'),
+        (await cheapOps.listDocuments('kb_prod_d2e3')).map(document => `${document.name}=${document.status}`).join(' '),
+      )
+      cheapOps.dispose()
+    } finally {
+      try {
+        rmSync(cheap, { recursive: true, force: true })
       } catch {
         // Engine handle still open; see the note on the outer cleanup.
       }
