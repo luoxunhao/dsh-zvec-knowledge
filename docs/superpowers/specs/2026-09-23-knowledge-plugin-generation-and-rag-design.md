@@ -1,8 +1,9 @@
-# 知识库插件 · 模板驱动的文档生成（含 rag 问答并列入口）
+# 知识库插件 · 文档生成、rag 问答与文档解析
 
-> 定位：`dsh-zvec-knowledge` 同时服务**两个并列入口**——
-> **①rag 问答**（会话里问答，已有 `dsh_kb_search`）与
-> **②领域文档生成**（按模板产出成稿，由 agent team / workflow 的 DAG 编排）。
+> 定位：`dsh-zvec-knowledge` 服务**三个面**——
+> **①rag 问答**（会话里问答，已有 `dsh_kb_search`，本设计不改）、
+> **②领域文档生成**（按模板产出成稿，由 agent team / workflow 的 DAG 编排）、
+> **③文档解析**（PDF/DOCX/HTML/XLSX/CSV/JSON 入索引，②的语料前提）。
 > 插件是**原子能力提供方**，不是编排者。
 >
 > 状态：设计已确认，待实现计划。基准：`master` @ `689b216`。
@@ -13,12 +14,19 @@
 混合检索、切分策略、5 个管理页面、`dsh_kb_search` 工具、引用可点击回原文、
 两份随包 Skill。验证体系 896 项断言全绿。
 
-**入口①（rag 问答）已经够用**，本设计不改它。
+**面①（rag 问答）已经够用**，本设计不改它。
 
-**入口②（文档生成）不存在**，这是本设计的主题。用户的真实诉求是
+**面②（文档生成）不存在**，这是本设计的主题。用户的真实诉求是
 「基于我的资料，给我一份 XX 领域的报告」，而现在的路径是：用户自己判断该检索什么、
 自己反复调 `dsh_kb_search`、自己组织成稿。`dsh_kb_search` 的契约是
 「一个问题 → 一批证据」，它不表达「一份文档 → 一组章节 → 每章节各自的证据」。
+
+**面③（文档解析）是从面②反推出来的前提**。现有 `extract.ts` 只收 Markdown/TXT，
+对 PDF / DOCX / HTML / XLSX / CSV / JSON 一律以 `needs-conversion` 拒绝——
+而真实领域文档绝大多数是 PDF 与 DOCX。**没有面③，面②建在空语料上**：
+模板再合理、落盘校验再严，检索不到东西就写不出成稿。
+`issues/文档解析-技术方案调研.md`（658 行）已给出逐格式选型与阶段 0–4 方案，
+本设计**不重新研究，只做集成**（§8）。
 
 ### 1.1 编排权归 DAG，不归插件
 
@@ -54,6 +62,7 @@ DAG 节点能否调用插件工具，是整个方案的前提。已从已安装�
 3. 成稿的引用可回溯：编造的引用在落盘时被拒绝。
 4. 复用会话模型写作——插件**不接 LLM**，不新增端点与密钥。
 5. rag 问答入口（`dsh_kb_search`）行为不变。
+6. **语料入口打开**：PDF / DOCX / HTML / XLSX / CSV / JSON 从「上传即拒」变为可索引（§11）。
 
 ### 非目标（本次明确不做）
 
@@ -63,10 +72,11 @@ DAG 节点能否调用插件工具，是整个方案的前提。已从已安装�
 | 插件内置 DAG 工作流脚本 | 编排描述随用户/团队走，不随插件分发。插件内置会把"怎么生成"的知识焊死在包里，而它是领域相关的 |
 | 面板内写作区 / 富文本编辑 | 产物是落盘文件，写作发生在会话里；在浏览器里跑生成需要插件自接 LLM 或反向驱动会话模型，两者都与现有架构冲突 |
 | 插件内 LLM 调用 | 复用会话模型，零新增密钥与成本面 |
-| PDF / DOCX / HTML / CSV / JSON 解析 | **最大的现实缺口**：真实领域文档多为 PDF/DOCX，当前仅 Markdown/TXT 可入库。`issues/文档解析-技术方案调研.md` 已有 92KB 调研与分阶段方案，独立立项 |
+| **扫描件 OCR** | 无可用纯 JS 路线：`tesseract.js` 带 `postinstall`（新增 allowlist 项）且语言模型需联网取，直接违反「装完即用」与「门禁无外网」。**诚实拒绝**，见 §8.4 |
+| **`docling` / 内置 `pandoc`** | 需外部运行时或模型下载，违反进程内约束；只保留为 opt-in 外部适配器（§8.8 阶段 4） |
 | 重排现有面板信息架构 | 检索页/策略页/配额服务的是"把语料搞对"，是生成质量的前提。先用真实成稿证明哪些管理面没人打开，再裁决 |
 | 改 rag 问答链路 | 入口①已够用 |
-| 修 §8 列出的过度设计 | "先取证再砍"，不在本设计范围 |
+| 修 §9 列出的过度设计 | "先取证再砍"，不在本设计范围 |
 
 ## 3 数据模型
 
@@ -242,6 +252,8 @@ operations 只接真正属于"用例集合"的模板 CRUD。这是刻意抑制�
 
 **`dsh_kb_search` 不改动**——入口①的契约稳定，本设计要求它的既有 896 项断言全部保持。
 
+文档解析的新增模块见 §8.7（`store/parse/` 目录，与本表分开以便独立评审）。
+
 ## 5 客户端设计
 
 **模板管理页**，挂进现有面板。
@@ -297,7 +309,165 @@ operations 只接真正属于"用例集合"的模板 CRUD。这是刻意抑制�
 （agent team 或 workflow，章节 ≥3）来判定"模型能否自行定位模板"。
 若不能，则补 `dsh_kb_templates` 工具。**这项在实现计划里排为验证任务，不是设计缺口。**
 
-## 8 已识别但本次不动的过度设计
+## 8 文档解析
+
+**为什么必须在本次设计内**：生成链路的质量上限由语料决定。现在 `extract.ts` 对
+PDF / DOCX / HTML / CSV / JSON 一律以 `needs-conversion` 拒绝，只有 Markdown / TXT 能入库——
+而真实领域文档绝大多数是 PDF 与 DOCX。**没有这一节，前面的模板与落盘都建在空语料上。**
+
+技术选型不重新研究：`issues/文档解析-技术方案调研.md`（v1.0.0，658 行）已给出
+逐格式候选矩阵、许可与安装面核查、以及阶段 0–4 的落地顺序与门禁清单。
+**本节只做集成**：把那份调研的结论接进本设计的范围、顺序与验收。
+
+### 8.1 硬约束（调研 §1.1，直接门禁化）
+
+| # | 约束 | 依据 |
+|---|---|---|
+| P1 | 产物必须是 Markdown 且带 **ATX 标题**（`#`–`######`）。无 `#` 的文档在 heading 模式下退化成整篇，章节级检索失效 | `chunk.ts:283` |
+| P2 | 表格必须是**管道表 + 表头行 + 分隔行**（切分器靠分隔行定位） | `chunk.ts:405-425,548-556` |
+| P3 | 代码块必须是**围栏**（``` / ~~~）；缩进式不被识别 | `chunk.ts:279-281` |
+| P4 | 换行必须是 `\n`（CRLF 是已记录的静默故障） | `chunk.ts:115-121` |
+| P5 | 许可证须与 MIT 组合（本包 MIT 且以源码分发） | `plugin/package.json:32` |
+| P6 | **不得新增安装摩擦**：任何带 `install`/`postinstall`、node-gyp、装期下载二进制的依赖都会把 `@zvec/zvec` 那道 allowlist 手续复制一遍 | `README.md:82-100` |
+| P7 | 门禁须在**无外网、无 API key** 下可跑 | `README.md:108-111` |
+| P8 | 进程内、本地、无外部程序强制依赖 | 产品立场 |
+
+**P6 是选型的实际支配约束**：它直接否决了 `xlsx@0.18.5`（CVE-2023-30533 无修补版）、
+`tesseract.js`（`postinstall`）、`pdf-parse`（硬依赖原生 canvas）、`hummus`（node-gyp）。
+
+### 8.2 选型（调研 §4.0，逐格式）
+
+| 格式 | 选型 | 结构来源 | 与 P6 |
+|---|---|---|---|
+| `md`/`txt` | 现状不变（`verbatim`） | 原件即文本 | — |
+| `html` | `hast-util-from-html` → `hast-util-to-mdast` → `mdast-util-to-markdown` + `mdast-util-gfm-table` | `<h1..h6>`→ATX；`<table>`→管道表；`<pre><code>`→围栏 | 纯 JS，无安装脚本 |
+| `docx` | `mammoth.convertToHtml`（推导式 styleMap）→ 上面的 HTML→MD 主干 | 段落样式→`h1..h6` | 纯 JS，tarball 安装不执行 prepare |
+| `xlsx` | `read-excel-file` → 本地 `rowsToMarkdownTable` | 工作表/行/列 | 纯 JS，零安装脚本 |
+| `csv` | `papaparse`（或 40 行本地实现）→ **同一个** `rowsToMarkdownTable` | 表头行 + 分隔行 | 零运行时依赖 |
+| `json` | **本地函数**，不引依赖 | 整篇围栏 或 键路径标题 | — |
+| `pdf` | `pdfjs-dist@6.3.289` + 自研行重建 + tagged 优先 + 字号聚类兜底 | 结构树（若有）→ ATX | 纯 JS；`cmaps/`/`standard_fonts/`/`wasm/` **随包**，可离线（满足 P7） |
+
+**选 unified 而非 turndown 的决定性理由**：unified 的默认值**就是**切分器要读的东西
+（ATX + 强制围栏），因此"忘记配置"不会静默降级；turndown 的三个默认值全反
+（setext 标题、缩进代码、不处理表格），正好命中 `extract.ts` 点名的最坏情形。
+
+**PDF 是唯一需要自研结构推断的格式**：`getTextContent()` 只给带位置矩阵的 `TextItem`
+列表，官方类型**未承诺**顺序，也未承诺任何标题语义。因此必须自己实现行重建、
+tagged 结构标签优先、字号聚类兜底三段。推断产物一律记 `structure: 'inferred'`，
+**不得当原文标题使用**。
+
+### 8.3 与生成链路的接口（本节的集成要点）
+
+调研已定：**上传时只做廉价预检，真正解析移到构建流水线的 `parse` 阶段**。
+这与本设计的 `dsh_kb_commit` 引用校验有直接耦合，必须说清：
+
+1. **`parse` 阶段本就是为空文本过滤留的位**，四阶段流水线（parse/chunk/index/publish）
+   已有阶段名、进度与 `cancel()`。解析插进去不需要新阶段。
+2. **引用可回溯性依赖派生文本的稳定性**。KB-13 的 `readCitation` 读的是**入库快照文本**
+   （`documents.jsonl` 的 `text`），因此：
+   - 解析器版本或 `structure` 变化必须**强制全量重建**（并入 `incrementalViability` 的理由），
+     否则新旧解析产物混排会让行号引用漂移。
+   - 这条直接保护 §4.2 校验二（引用有效性）——若文本可静默改变，引用校验就失去意义。
+3. **原件字节级保留、派生文本可重算**（P9/C9）是既有设计前提：
+   `sources/doc_<hash>.<ext>` 存原件，所以"以后加了转换器可全库重跑而不用重新上传"
+   在本设计里**必须真的兑现**——阶段 4 的"重新解析全部文档"是验收项。
+4. **单篇解析失败绝不使整场构建失败**（调研 §5.3 的关键不变量）：每篇包在自己的
+   `try/catch` 内，失败记到该文档上；只有系统性错误（存储不可写、配额）才让构建整体失败。
+   现有实现是抛错即丢弃槽并整体失败，**这是必须改的**。
+5. **配额两段式**：上传期按原件字节记账，解析回填时按真实文本字节二次 `admit`；
+   不足则该篇 `failed`。保持"不超额提交"这条既有性质。
+6. **扩展名清单三处同源**：`documents.ts` 的 `ACCEPTED_EXTENSIONS`、
+   `DocumentsPage.tsx`、`extract.ts` 的 `SUPPORT` 键集——现状已是复制品，门禁须断言三者一致。
+
+### 8.4 诚实降级（不做 OCR）
+
+| 情形 | 行为 |
+|---|---|
+| 扫描件 PDF（文本运行数 ≈ 0） | **上传即拒**，remedy 明说本插件不含 OCR，请先离线 OCR |
+| 加密 / 需口令 PDF | 上传即拒，请导出去除口令的副本 |
+| 有文本层但结构不可恢复 | 接受；构建后记 `structure: 'flat-text'`，**如实上报** |
+| 解析器抛错 | 该篇 `failed` + 错误与建议，其余文档继续 |
+| 解析后 `trim() === ''` | `failed`，文案与现有 `addDocument` 同名文案一致 |
+
+**判据自动测量**：调研 §1.2 的五条判据（标题数、管道表头+分隔行、围栏成对、
+无 `\r`、降级标记为 `flat-text`）是实现产物的**可执行验收**，不是文档描述。
+`strategy-evidence` 面板的「本文档未涉及」语义正好承载 `flat-text`，**不需要新增 UI 概念**。
+
+### 8.5 数据结构改动（最小集）
+
+| 位置 | 改动 | 为什么必须 |
+|---|---|---|
+| `DocumentRecord` | 新增可选 `structure?: StructureLevel`、`parsedAt?: string`、`converter?: string` | 未解析 ≠ 空文档：`chunks: null` 已在区分"未测量"与 0，同一思路要求 `text: ''` 只表示"还没解析" |
+| `ExtractionKind` | 新增 `'converted'`；**不新增第四个 kind** | 语义收窄为"字节到文本的处理方式"，"结构保真度"是**正交维度**（`StructureLevel = 'structured' \| 'inferred' \| 'flat-text'`） |
+| `documents.jsonl` | 解析成功后回填 `text`/`structure`/`parsedAt` | 走现成的 `patchDocument` |
+| 增量资格 | 把"`structure` 或 converter 版本变化"并入强制全量理由 | 见 §8.3 第 2 条 |
+
+### 8.6 资源边界（不能假定第三方解析器有界）
+
+调研点明 mammoth 自述"恶意文档可造成病态性能的高 CPU/内存，且对源文档不做任何净化"。
+因此以下全部作为**可校验 Config 字段**而非源码常量，默认值待阶段 3 实测后定：
+
+- 单文档解析墙钟超时 → 该篇 `failed`，让位下一篇
+- PDF 页数上限、派生文本字节上限、HTML DOM 规模双限、**ZIP 解压上限（zip-bomb）**
+- 取消检查点：每篇、PDF 每页（现有 `controller.signal` 已具备，缺的是 parse 内部检查点）
+
+**异步形态用 `await` + 协作让位，不预先引入 `worker_threads`**：
+后者带来新的生命周期与句柄所有权问题。若实测证明单个大 PDF 仍长时间独占循环，
+再升级——这一步由"事件循环最大间隔"断言决定，不预先付复杂度。
+
+### 8.7 新增模块
+
+| 模块 | 职责 |
+|---|---|
+| `store/parse/index.ts` | `convert(source, converter)` 派发 + 超时与取消 |
+| `store/parse/markdown-grade.ts` | §8.4 五条判据的可执行实现（阶段 0 先做，不改产品行为） |
+| `store/parse/html.ts` | 共享主干 HTML→Markdown（服务 html 直传与 docx） |
+| `store/parse/docx.ts` | mammoth + 推导式 styleMap |
+| `store/parse/pdf.ts` | pdfjs 行重建 + tagged 优先 + 字号聚类 |
+| `store/parse/tabular.ts` | `rowsToMarkdownTable` + xlsx/csv |
+| `store/parse/json.ts` | 本地 JSON 渲染 |
+| `store/extract.ts` | 改动：`SUPPORT` 扩充 + `preflight` |
+| `store/build.ts` | 改动：`parse` 阶段逐文档解析 + 每篇 try/catch |
+| `store/documents.ts` | 改动：`DocumentRecord` 字段 + 三处清单同源 |
+
+**DOCX 的实测结论已把风险下调**（调研 §10）：风险的真正触发条件是 **styleId 而非显示语言**——
+中文 Word 的内置样式 ID 仍是 `Heading1`，默认映射已覆盖"英文 styleId + 任意语言名字"。
+会漏的是非 Word 生成器把 styleId 写成 `1`/`a1` 之类。因此采用**推导式映射**
+（读 `word/styles.xml` 的 `w:outlineLvl`，名字模式兜底），并**关掉默认映射自带全量**
+（`includeDefaultStyleMap: false`——注意不是 `useDefaultStyleMap`，后者被静默忽略）。
+两类告警（`Did not understand this style mapping` / `Unrecognised paragraph style`）
+**必须当失败断言**——那是这类文档唯一的可见信号。
+
+### 8.8 落地顺序与门禁
+
+顺序 `阶段 0 → 1 → 2 → 3 → 4`，**每阶段独立可验收**：
+
+| 阶段 | 内容 | 新增门禁 |
+|---|---|---|
+| 0 | 判据 + fixtures（不改产品行为） | `verify:parse-grade`（判据自身，含负向自证） |
+| 1 | CSV / JSON / HTML（零许可风险、零原生、零下载） | `verify:parse-tabular`、`verify:parse-markdown`、`verify:parse-json` |
+| 2 | DOCX | `verify:parse-docx`（含中文名+英文 styleId、数字 styleId、仅 `outlineLvl`、zip-bomb、无 base64） |
+| 3 | PDF（**唯一引入新体量依赖，33 MiB 解压，需单独评审**） | `verify:parse-pdf`（行序、双栏、中文 CMap 本地路径、tagged→`structured`、无标签**永不**为 `structured`、独占时长、不联网） |
+| 4 | 可选外部适配器 + **全库重算** | `verify:parse-adapter`（argv 不经 shell、超时回收）、重算入口 |
+
+**与生成链路的关系**：阶段 1–2 完成即可支撑"真实领域文档进得来"这一生成前提。
+**阶段 3（PDF）是价值最高也最重的一步**——若真实语料以 PDF 为主，它决定整个产品是否成立。
+
+**fixtures 必须先定**（否则后面每步都在补证据）：DOCX/XLSX 用一次性脚本手写最小
+OOXML + zip 并**提交产物**；PDF 用 `pdf-lib` 写出；任何第三方 fixture 须在
+`fixtures/SOURCES.md` 记录来源与许可证。调研已指出：**未发现**许可证明确且适合当中文
+tagged-PDF 样例的公开语料，这是阶段 0 的未决项。
+
+### 8.9 本节明确不做
+
+| 不做 | 理由 |
+|---|---|
+| 扫描件 OCR | 无可用纯 JS 路线；`tesseract.js` 违反 P6 + P7。诚实拒绝（§8.4） |
+| 内置 pandoc / markitdown / docling | 需外部运行时或模型下载，违反 P8。只作 opt-in 适配器（阶段 4） |
+| `.doc`（二进制）/ `epub` / `rtf` / `pptx` | 无结构保证；留给阶段 4 的适配器 |
+| 版面级还原（多栏精排、公式、图表语义） | 超出检索所需；PDF 只保证行序与标题可用 |
+
+## 9 已识别但本次不动的过度设计
 
 记录以供后续裁决，**本设计不改**：
 
@@ -313,7 +483,7 @@ operations 只接真正属于"用例集合"的模板 CRUD。这是刻意抑制�
 **裁决方式**：生成链路跑通、有真实成稿之后，用"哪些管理面在生成流程里从未被打开过"
 作为证据来裁决，而不是靠品味。
 
-## 9 风险与未决
+## 10 风险与未决
 
 | # | 风险 | 处置 |
 |---|---|---|
@@ -324,8 +494,13 @@ operations 只接真正属于"用例集合"的模板 CRUD。这是刻意抑制�
 | 5 | DAG 并行写作导致文风割裂、章节间重复 | 由 Skill 指引（先汇总事实、再分章节、末端合稿），**插件不介入**——这是编排层的质量问题 |
 | 6 | 模板页与集合无关，用户可能困惑 | UI 明确标注"工作区级"（§5） |
 | 7 | 大模板（章节多）× 大 topk 导致上下文过长 | `sections` 数量与 `topk` 各设上限并在校验期拒绝；具体数值待实测后定 |
+| 8 | **解析产物不稳定导致引用漂移** | converter 版本 / `structure` 变化并入强制全量重建（§8.3 第 2 条）；这是保护校验二的前提 |
+| 9 | **PDF 解析在宿主循环上长时独占** | 先按 §8.6 用协作让位；由"事件循环最大间隔"门禁决定是否升级 `worker_threads`，不预先付复杂度 |
+| 10 | **PDF 体量（解压 33 MiB）拖累安装** | 阶段 3 单独评审；这是唯一引入新体量依赖的一步 |
+| 11 | 解析引入新依赖后 allowlist 说明过期 | 阶段门禁断言 README 安装节**仍只列 `@zvec/zvec`**；若真新增则必须同步 |
+| 12 | 中文 tagged-PDF fixture 无合适公开语料 | 阶段 0 未决项（§8.8）；未取得时 tagged 路径只测"不误判为 `structured`"这一半 |
 
-## 10 验收标准
+## 11 验收标准
 
 1. 用户能在面板上传一份模板 `.md`，非法模板被拒绝且原因具名。
 2. 面板显示模板的工作区级归属与绝对路径。
@@ -335,4 +510,9 @@ operations 只接真正属于"用例集合"的模板 CRUD。这是刻意抑制�
 6. 同一模板用于两个不同集合，输出文件不互相覆盖。
 7. 无 `webServer` / 无 `skills` 的 profile 仍保留 `dsh_kb_search` 与 `dsh_kb_commit`。
 8. 入口①的 rag 问答行为与既有断言不变。
-9. `npm run verify` 全链 exit 0，含新增门禁。
+9. **CSV / JSON / HTML / DOCX / XLSX 上传后可索引**，产物过 §8.4 五条判据；
+   扫描件 PDF 与加密 PDF 在上传期被拒且 remedy 可执行。
+10. **PDF 可索引**（阶段 3），中文不乱码，且无标签文档**永不**被判为 `structured`。
+11. 单篇解析失败不使整场构建失败，其余文档照常产出。
+12. 「重新解析全部文档」只依赖 `sources/` 原件即可跑通，行序与 `id` 不变。
+13. `npm run verify` 全链 exit 0，含新增门禁。
