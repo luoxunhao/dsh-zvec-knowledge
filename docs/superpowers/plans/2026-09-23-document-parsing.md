@@ -244,7 +244,7 @@ PDF 是本设计里唯一需要自研结构推断的格式：`getTextContent()` 
 **Interfaces:**
 - Consumes: `gradeMarkdown`, `StructureLevel`（Task 0）
 - Produces: `convertPdf(file: string, opts: ParseOptions): Promise<ParseResult>`；
-  `interface ParseResult { text: string, structure: StructureLevel, truncated: boolean }`；
+  `interface ParseResult { text: string, structure: StructureLevel, truncated: boolean, failed?: boolean, error?: string, tagged?: boolean }`；
   `interface ParseOptions { timeoutMs: number, maxPages: number, maxTextBytes: number, signal?: AbortSignal }`
 
 - [ ] **Step 1: 决定引擎（二选一，先做对照实验）**
@@ -284,10 +284,17 @@ mkdirSync('src/store/parse/fixtures', { recursive: true })
 ```
 
 **中文 fixture 的现实约束**：`pdf-lib` 的 `StandardFonts` 不含 CJK 字形。
-因此中文 fixture 有两条路，**任选其一并在 `fixtures/SOURCES.md` 记录**：
+**已裁决的路线（用户决定）**：用 `fontkit` + **Noto Sans SC（OFL-1.1）子集嵌入**。
 
-- (a) 用 `fontkit` + 一份许可允许再分发的中文字体（如 Noto Sans SC，OFL-1.1）子集嵌入
-- (b) 从机器上现成的中文 PDF 取一份（调研 §11.1 用的是这种），记录来源与许可
+- 字体文件放 `plugin/src/store/parse/fixtures/fonts/`，**必须**同时提交
+  `OFL.txt`（OFL-1.1 要求随字体分发许可全文）。
+- 在 `fixtures/SOURCES.md` 记录：字体名、版本、下载 URL、许可（OFL-1.1）、
+  以及它是**子集**（只嵌 fixture 用到的字形，不是整份字体）。
+- `fontkit` 与 `pdf-lib` 均为 **devDependency**（只用于造 fixture，不进运行时依赖，
+  因此不影响安装摩擦约束）。
+
+**另一条路（记录备查，不采用）**：从机器上现成的中文 PDF 取一份。
+不采用的理由是它无法保证「许可允许再分发」，而 fixture 要提交进仓库。
 
 **必须同时提交一份拉丁对照 fixture**，因为「引擎返回空文本」时无法区分是解析器坏了
 还是 fixture 不合法——调研 §11.4 正是踩了这个坑（手写 Type0 fixture 连拉丁对照组都取不到文本）。
