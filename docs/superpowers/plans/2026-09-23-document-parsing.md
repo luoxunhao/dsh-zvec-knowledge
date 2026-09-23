@@ -461,11 +461,37 @@ Expected: `8 passed, 0 failed`，exit 0
 Expected: **「拉丁对照非空」必须变红**。若它是绿的，说明门禁只断言了"不抛错"——
 那正是调研 §11.4 记录的最阴险假绿。**改回。**
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 8: bake-off —— 真机 PDF 恢复率对标（验收门槛，不只是测量）**
+
+fixture 过只能证明"已知输入产出已知输出"。这一步用**机器上现成的真机中文 PDF**
+（调研 §11.1 用过的四份：`AI-Agents-in-Depth-zh-CN.pdf`、`bits_cn.pdf`、`bpftrace_cn.pdf`、
+`hermes_cli_cheat_sheet_cn.pdf`）做两条路线的对照，**达标才算本任务完成**：
+
+1. **基线**：临时 venv（`uv venv`，装 `pymupdf4llm`，**不进插件依赖**）跑同样四份，
+   记录每份的 ATX 标题数与正文行数，作为参照基线。跑完即删 venv。
+2. **我方**：`convertPdf` 跑同样四份，同样记录。
+3. **达标判据（三条同时满足）**：
+   - 每份的**汉字抽取覆盖率** ≥ 基线的 95%（正文别丢）
+   - 无标签文档的**标题恢复数 ≥ 基线的 80%**（推断别太聋）
+   - **零误判**：所有无标签文档的 `structure` 必须是 `inferred`，不得 `structured`（诚实性）
+4. **裁决**：
+   - 达标 → 纯 JS 站得住，适配器留给长尾；数字写进 commit message。
+   - 不达标 → **适配器任务提前**：PDF 的正规通道改为外部命令（默认配 `pymupdf4llm`），
+     自研推断降级为无适配器时的兜底。这是计划级变更，回报控制器。
+
+**为什么基线是 pymupdf4llm 而不是 markitdown**：markitdown 的 PDF 通道实测（读其 0.1.8
+源码）对非表单页只输出 pdfminer 平面文本，无标题——拿它当基线等于拿"无结构"当参照。
+`pymupdf4llm.to_markdown()` 带标题层级，是 Python 生态里可离线、纯 CPU 的最强纯文本基线。
+
+**诚实性要求**：venv 只在临时目录建，跑完删除；四份 PDF **不提交**进仓库
+（来源许可未核），路径从 `.workbuddy/tmp/bakeoff-inputs.txt` 读；
+基线输出与我方输出都写进 `.workbuddy/tmp/`（gitignore 内）供复核。
+
+- [ ] **Step 9: Commit**
 
 ```bash
 cd plugin && git add src/store/parse/pdf.ts scripts/gen-parse-fixtures.mjs scripts/verify-parse-pdf.mjs package.json src/store/parse/fixtures
-git commit -m "feat(parse): PDF 行重建与结构推断，含 workerSrc 路径陷阱门禁"
+git commit -m "feat(parse): PDF 行重建与结构推断，含 workerSrc 路径陷阱门禁与真机 bake-off"
 ```
 
 ---
@@ -1135,4 +1161,19 @@ XLSX 的 fixture 生成细节（Task 6 内联，未单列任务）。
 2. **HTML 主干放在 DOCX 之前**（Task 4 与 Task 5）。DOCX 经 mammoth 产出 HTML 再走这条主干，
    所以主干是 DOCX 的前置依赖。调研按格式难度排序（HTML 在阶段 1、DOCX 在阶段 2），
    本计划按**依赖**排序。
+
+**Python 路线的裁决（2026-09-23，用户问"解析交给 Python 是否可行"之后）**：
+
+- 结论：**默认通道保持纯 JS**，Python 经外部适配器按需取（调研 §4.7 的形状）。
+- 证据（读 markitdown 0.1.8 源码 + 本机实测，非文档转述）：
+  - markitdown 的 PDF 通道对非表单页只输出 pdfminer 平面文本，**无任何一行代码产出 `#` 标题**
+    —— 拿它做默认 PDF 通道等于把无结构输出换个安装面（181.7 MB + Python 3.10+ 前提）。
+  - markitdown 的 DOCX 通道内部就是 mammoth —— 与纯 JS 计划同一个库，转向零收益。
+  - docling / MinerU 质量最高但要 0.8–2 GB 模型下载、16 GB 内存、20 GB 磁盘，破坏离线门禁。
+  - `pymupdf4llm` 是 Python 侧真正值得要的：`to_markdown()` 带标题层级、纯 CPU、可离线。
+- 落法：Task 1 新增 Step 8 bake-off（真机中文 PDF 对照 `pymupdf4llm` 基线），
+  **用实测恢复率裁决**纯 JS 推断是否站得住；不达标则 PDF 通道改为外部命令优先、
+  自研推断降级为兜底。适配器本体（argv 模板、默认关、产物过五条判据）仍排在 Task 8 之后，
+  两边共用同一道判据，质量底线不因通道而异。
+
 
