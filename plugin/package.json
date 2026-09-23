@@ -76,6 +76,7 @@
     "verify:wiring": "node scripts/verify-client-wiring.mjs",
     "verify:layout": "node scripts/render-layout-check.mjs && node scripts/measure-layout.mjs && node scripts/measure-overflow.mjs",
     "verify:upload": "node scripts/verify-upload.mjs",
+    "verify:parse-grade": "node scripts/verify-parse-grade.mjs",
     "smoke:zvec": "node scripts/zvec-smoke.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json --noEmit",
     "build": "node scripts/clean-build.mjs && node scripts/gen-tokens.mjs && tsc -p tsconfig.json && tsc -p tsconfig.client.json && tsdown",
