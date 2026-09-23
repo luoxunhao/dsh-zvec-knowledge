@@ -233,12 +233,45 @@ check(
 // ===========================================================================
 // 4. Line endings — a `\r` defeats the chunker's heading regex
 // ===========================================================================
-// The input is deliberately hostile: real CRLF inside the HTML, which is what a
-// file saved on Windows contains. The HTML parser normalises some of this on its
-// own, so the conversion is asserted to be `\r`-free *and* the check is written
-// so it would still fail if the parser stopped normalising.
+// **What these two checks do and do NOT prove, stated honestly after mutation
+// testing.** Deleting the `.replace(/\r\n?/g, '\n')` from `htmlToMarkdown` leaves
+// this gate at 36 passed / 0 failed — measured. The reason is that the HTML
+// parser folds CR and CRLF before this module ever sees the text, so the checks
+// below are measuring *the parser's* contract, not this module's code.
+//
+// An earlier version of this comment claimed the check "is written so it would
+// still fail if the parser stopped normalising". That was false, and a comment
+// asserting a guard that does not exist is worse than no comment, because the
+// next reader trusts it. The honest statement: these assertions pin the
+// *observable product contract* (a converted document carries no `\r`, which is
+// what the chunker and `gradeMarkdown` require) and they are satisfied by the
+// parser. The `.replace` is kept as defence in depth and is deliberately NOT
+// claimed as covered here.
+//
+// Kept anyway, because the contract is worth asserting at our own boundary:
+// `gradeMarkdown` returns `flat-text` for any `\r` before it looks at structure,
+// so if a future parser release stopped folding, every document's structure
+// verdict would silently flatten — and this pair of checks is what would notice.
 const crlf = convert('<h1>章节</h1>\r\n<p>正文</p>\r\n<pre><code>a\r\nb</code></pre>\r\n')
 check('CRLF input produces no CR in the product', !crlf.includes('\r'), JSON.stringify(crlf))
+// The CR paths a converter could plausibly leak are asserted individually rather
+// than trusted to the one sample above: `<pre>` is where a producer most often
+// preserves a literal CR, and a table cell goes through the gfm-table serializer.
+// Measured, all three are already clean before any normalisation of ours.
+for (const [name, sample] of [
+  ['a paragraph', '<p>a\r\nb</p>'],
+  ['a <pre> block', '<pre><code>a\r\nb</code></pre>'],
+  ['a table cell', '<table><tr><th>h</th></tr><tr><td>a\r\nb</td></tr></table>'],
+  ['an attribute value', '<img alt="a\r\nb" src="x.png">'],
+  ['a numeric CR entity', '<p>a&#13;b</p>'],
+]) {
+  const produced = convert(sample)
+  check(
+    `CR: ${name} yields no CR in the product`,
+    !produced.includes('\r'),
+    JSON.stringify(produced),
+  )
+}
 // And the grader agrees: `gradeMarkdown` reports any `\r` as `flat-text` before
 // looking at structure, so a `\r` in the product is a structure loss even when
 // the headings are all present.
@@ -388,8 +421,149 @@ try {
     capped.truncated === true && Buffer.byteLength(capped.text, 'utf8') <= 8,
     `truncated=${capped.truncated} bytes=${Buffer.byteLength(capped.text, 'utf8')}`,
   )
+  // The ceiling has to be honoured on a character boundary, so a multi-byte cut
+  // does not leave a replacement character to be indexed as content. Asserted on
+  // a Chinese document, where every character is 3 bytes — the case a byte-count
+  // estimate gets wrong.
+  const cjk = join(scratch, 'cjk.html')
+  writeFileSync(cjk, `<h1>章节</h1><p>${'中文正文内容。'.repeat(200)}</p>`)
+  const cjkCut = await convertHtml(cjk, { ...opts, maxTextBytes: 100 })
+  check(
+    'envelope: a multi-byte cut lands on a character boundary, leaving no U+FFFD',
+    cjkCut.truncated === true
+      && Buffer.byteLength(cjkCut.text, 'utf8') <= 100
+      && !cjkCut.text.includes('\uFFFD'),
+    `bytes=${Buffer.byteLength(cjkCut.text, 'utf8')} replacement=${cjkCut.text.includes('\uFFFD')}`,
+  )
+
+  // **The timeout arm.** Every other check in this section passes a comfortable
+  // `timeoutMs`, so the `failed` branch for an overrun was asserted by nothing —
+  // mutation testing on the sibling defects in this round made the same gap
+  // visible here. A zero ceiling makes the overrun deterministic rather than
+  // timing-dependent: the conversion cannot finish within 0 ms, so the branch has
+  // to be reached. This is the same shape as the PDF gate's timeout assertion.
+  //
+  // It must be `failed` with a reason and must NOT be a silent empty success: the
+  // build would otherwise record the document as parsed while indexing nothing.
+  const timedOut = await convertHtml(file, { ...opts, timeoutMs: 0 })
+  check(
+    'envelope: an overrun is failed with a reason, not a silent empty success',
+    timedOut.failed === true && typeof timedOut.error === 'string' && timedOut.error.length > 0,
+    `failed=${timedOut.failed} error=${timedOut.error ?? '(none)'}`,
+  )
+  check(
+    'envelope: the timeout reason names the ceiling in the user’s language',
+    /超时/.test(timedOut.error ?? ''),
+    timedOut.error ?? '(none)',
+  )
+  // The arm must report what it produced rather than discarding it silently, and
+  // a truncated-or-overrun product is never claimed as `structured`.
+  check(
+    'envelope: an overrun is marked truncated and not graded as surviving structure',
+    timedOut.truncated === true && timedOut.structure === 'flat-text',
+    `truncated=${timedOut.truncated} structure=${timedOut.structure}`,
+  )
 } finally {
   rmSync(scratch, { recursive: true, force: true })
+}
+
+// ===========================================================================
+// 8. The shared byte ceiling, pinned where both converters depend on it
+// ===========================================================================
+// `capBytes` was moved out of `pdf.ts` into `parse/cap.ts` in fix round 1: the
+// HTML converter had copied it character-for-character, binary search included.
+// One implementation now serves both, and its contract is asserted here directly
+// rather than only through whichever converter happens to call it — because a
+// shared helper whose only coverage is indirect is one refactor away from being
+// changed for one caller and silently not the other.
+const { capBytes } = await import(new URL('../lib/store/parse/cap.js', import.meta.url).href)
+
+check(
+  'capBytes: a text under the ceiling is returned untouched and not marked truncated',
+  (() => {
+    const r = capBytes('abc', 100)
+    return r.text === 'abc' && r.truncated === false
+  })(),
+  JSON.stringify(capBytes('abc', 100)),
+)
+check(
+  'capBytes: a zero ceiling yields empty and reports the loss, rather than meaning unlimited',
+  (() => {
+    const r = capBytes('abc', 0)
+    return r.text === '' && r.truncated === true
+  })(),
+  JSON.stringify(capBytes('abc', 0)),
+)
+check(
+  'capBytes: an empty text under a zero ceiling is not falsely reported as truncated',
+  (() => {
+    const r = capBytes('', 0)
+    return r.text === '' && r.truncated === false
+  })(),
+  JSON.stringify(capBytes('', 0)),
+)
+// The reason the binary search exists: cutting a multi-byte character in half
+// leaves a replacement character that would be indexed as content. Three-byte
+// characters make every byte boundary a wrong one except every third.
+check(
+  'capBytes: a cut through multi-byte text never leaves a U+FFFD replacement',
+  (() => {
+    const cjk = '中文正文内容。'.repeat(50)
+    for (let ceiling = 1; ceiling <= 40; ceiling++) {
+      const r = capBytes(cjk, ceiling)
+      if (r.truncated !== true || Buffer.byteLength(r.text, 'utf8') > ceiling || r.text.includes('\uFFFD')) {
+        return false
+      }
+    }
+    return true
+  })(),
+  'every ceiling from 1 to 40 bytes lands on a character boundary',
+)
+check(
+  'capBytes: an emoji (a surrogate pair) is not split either',
+  (() => {
+    const emoji = '😀'.repeat(20)
+    for (let ceiling = 1; ceiling <= 20; ceiling++) {
+      const r = capBytes(emoji, ceiling)
+      if (r.truncated !== true || Buffer.byteLength(r.text, 'utf8') > ceiling || r.text.includes('\uFFFD')) {
+        return false
+      }
+    }
+    return true
+  })(),
+  'every ceiling from 1 to 20 bytes lands on a code-point boundary',
+)
+
+// ===========================================================================
+// 9. The PDF converter still works after the shared-helper extraction
+// ===========================================================================
+// `pdf.ts` is reviewed and frozen except for sanctioned changes, and this round
+// made one: `cap` became an import of `capBytes`. `verify-parse-pdf.mjs` covers
+// the converter's own behaviour, but this gate asserts the specific thing the
+// refactor could have broken — that the PDF path still truncates at the ceiling
+// it is given, through the same helper. A frozen file that was edited needs its
+// edit verified from outside, not assumed.
+{
+  const { convertPdf } = await import(new URL('../lib/store/parse/pdf.js', import.meta.url).href)
+  const latin = 'src/store/parse/fixtures/latin.pdf'
+  const full = await convertPdf(latin, { timeoutMs: 30_000, maxPages: 10, maxTextBytes: 8 * 1024 * 1024 })
+  check(
+    'shared ceiling: the PDF converter still produces text after the extraction',
+    full.failed !== true && full.text.trim().length > 0 && full.truncated === false,
+    `failed=${full.failed} len=${full.text.length} truncated=${full.truncated}`,
+  )
+  const cut = await convertPdf(latin, { timeoutMs: 30_000, maxPages: 10, maxTextBytes: 16 })
+  check(
+    'shared ceiling: the PDF converter truncates through the shared helper',
+    cut.truncated === true && Buffer.byteLength(cut.text, 'utf8') <= 16 && !cut.text.includes('\uFFFD'),
+    `truncated=${cut.truncated} bytes=${Buffer.byteLength(cut.text, 'utf8')}`,
+  )
+  const none = await convertPdf(latin, { timeoutMs: 30_000, maxPages: 10, maxTextBytes: 0 })
+  check(
+    'shared ceiling: a zero ceiling makes the PDF converter produce empty, as it did before',
+    none.text === '' && none.truncated === true,
+    `text=${JSON.stringify(none.text)} truncated=${none.truncated}`,
+  )
 }
 
 console.log(`\n${pass} passed, ${fail} failed`)

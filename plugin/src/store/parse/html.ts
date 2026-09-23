@@ -61,6 +61,7 @@ import { toMdast } from 'hast-util-to-mdast'
 import { toMarkdown } from 'mdast-util-to-markdown'
 import { gfmTableToMarkdown } from 'mdast-util-gfm-table'
 import type { Nodes } from 'hast'
+import { capBytes } from './cap.ts'
 import { gradeMarkdown } from './grade.ts'
 import type { ParseOptions, ParseResult } from './pdf.ts'
 
@@ -150,19 +151,28 @@ function stripUnsafeHrefs(tree: Nodes): boolean {
  * template's conditional comment becomes indexable, citable content that is not
  * part of the document. Comments are removed here.
  *
- * `script` and `style` are handled by the parser rather than here — they land in
- * the tree as elements whose text is *not* a child text node, so they already
- * produce nothing — but they are dropped explicitly anyway. That is the
- * assertion's own subject and it should not depend on a parser's element
- * semantics that a future release could change.
+ * **`script` and `style`: kept, but currently unreachable, and the reason is not
+ * the tree shape.** An earlier version of this comment claimed their text "is
+ * *not* a child text node". Measured, that is false: `fromHtml` gives a
+ * `<script>` element an ordinary `text` child (`{type: 'text', value: 'var s=1'}`),
+ * exactly like a `<p>`. What actually keeps script bodies out of the product is
+ * that `hast-util-to-mdast` has no `script`/`style` handler, so the element
+ * contributes nothing. Removing this rule leaves the gate green — verified — so
+ * the branch is dead code today.
  *
- * **What is *not* removed, and why.** A `<!doctype>` and a stray processing
- * construct are parsed into `doctype` nodes that `hast-util-to-mdast` already
- * drops, so no rule is needed and adding one would be dead code — measured, and
- * the gate asserts the outcome rather than the mechanism. `raw` was written here
- * at first and removed: hast has no `raw` node type, so the comparison could
- * never be true and TypeScript rejected it as an impossible test. A rule that
- * cannot fire is worse than no rule, because it reads as coverage.
+ * It is kept deliberately, and the honest justification is the forward-looking
+ * one: `toMdast` gains handlers over time, and a handler for these two elements
+ * would turn every inline `<script>` into indexed text with no gate noticing.
+ * The rule costs one comparison per element and states the intent explicitly
+ * instead of relying on a dependency's handler table staying empty.
+ *
+ * **What is *not* removed, and why.** A `<!doctype>` is parsed into a `doctype`
+ * node that `hast-util-to-mdast` already drops, so no rule is needed and adding
+ * one would be dead code — measured, and the gate asserts the outcome rather than
+ * the mechanism. `raw` was written here at first and removed: hast has no `raw`
+ * node type, so the comparison could never be true and TypeScript rejected it as
+ * an impossible test. A rule that cannot fire must either go or say why it stays;
+ * this one goes.
  * @param tree - the tree to prune, mutated in place.
  * @returns how many nodes were removed, for the caller's record.
  */
@@ -217,10 +227,19 @@ export function htmlToMarkdown(html: string): string {
     // cap is stated rather than left to the serializer's own truncation.
     bullet: '-',
     extensions: extensions(),
-    // Normalised at the boundary. The HTML parser already folds CRLF on its own —
-    // measured — but the contract belongs to this module rather than to a
-    // dependency's current behaviour, and `gradeMarkdown` reports any `\r` as
-    // `flat-text` before it looks at structure at all.
+    // **Belt against a parser-contract change; not currently reachable, so not
+    // pinned by an assertion.** The HTML parser folds CR and CRLF itself, and
+    // measured, no input reaches this point carrying a `\r` — not in text, a
+    // heading, a table cell, `<pre>`, a `<textarea>`, an attribute, a comment, an
+    // image `alt`, nor via the `&#13;` entity. So the `.replace` below cannot
+    // fire on any input, and a gate that deletes it stays green; asserting "the
+    // product has no CR" would be measuring the parser, not this module.
+    //
+    // It is kept as defence in depth because the contract is worth enforcing at
+    // our own boundary rather than inheriting: `gradeMarkdown` reports any `\r`
+    // as `flat-text` before it looks at structure, so a parser that stopped
+    // folding would silently flatten every document's structure verdict. The
+    // cost is one regex pass over text we already hold.
   }).replace(/\r\n?/g, '\n')
 }
 
@@ -252,6 +271,20 @@ export function htmlToMarkdown(html: string): string {
  */
 export async function convertHtml(file: string, opts: ParseOptions): Promise<ParseResult> {
   const started = Date.now()
+  // The deadline is an *instant*, computed once, matching `convertPdf` — not
+  // `Date.now() - started > opts.timeoutMs`. The two differ when the ceiling is
+  // zero: the elapsed-time form compares `0 > 0` and reports a successful
+  // conversion of a document that was never allowed any time at all. A zero
+  // ceiling here means zero, which is the same reading `capBytes` takes of a zero
+  // byte ceiling. Found by the gate's own timeout assertion, which was added
+  // because mutation testing showed this arm was covered by nothing.
+  //
+  // Checked once, after the work, rather than also before the read: a guard
+  // before the read was written and then deleted, because mutation testing showed
+  // deleting it changed no gate result — the post-work check already covers the
+  // zero-ceiling case, so the early return was unreachable. A rule that cannot
+  // fire is worse than no rule, because it reads as coverage.
+  const deadline = started + opts.timeoutMs
   try {
     if (opts.signal?.aborted) return empty('已取消')
 
@@ -278,21 +311,13 @@ export async function convertHtml(file: string, opts: ParseOptions): Promise<Par
       }
     }
 
-    const { text, truncated } = cap(raw, opts.maxTextBytes)
+    const { text, truncated } = capBytes(raw, opts.maxTextBytes)
 
-    // The deadline is tested after the work, not before it: a conversion that
-    // ran long produced a text whose completeness cannot be claimed, and
-    // reporting it as a clean success is how a truncated document is indexed
-    // with nothing to point at why.
-    if (Date.now() - started > opts.timeoutMs) {
-      return {
-        text,
-        structure: truncated || text === '' ? 'flat-text' : gradeMarkdown(text),
-        truncated: true,
-        failed: true,
-        error: `HTML 解析超时（上限 ${Math.round(opts.timeoutMs / 1000)} 秒）`,
-      }
-    }
+    // The deadline is tested after the work as well, not only before it: a
+    // conversion that ran long produced a text whose completeness cannot be
+    // claimed, and reporting it as a clean success is how a truncated document is
+    // indexed with nothing to point at why.
+    if (Date.now() > deadline) return timeoutResult(opts, started, text)
 
     return { text, structure: gradeMarkdown(text), truncated }
   } catch (error) {
@@ -320,34 +345,31 @@ function empty(error: string): ParseResult {
 }
 
 /**
- * Apply the byte ceiling.
+ * The result for a document that exceeded its wall-clock ceiling.
  *
- * Truncation happens on a character boundary, because slicing a multi-byte
- * character in half produces a replacement character that would then be indexed
- * as content. The binary search is over *code units* rather than code points for
- * the same reason `convertPdf`'s is: `Buffer.byteLength` is the measure the
- * quota is charged in, and a surrogate pair is three or four bytes, so the
- * boundary has to be found against the real byte count rather than estimated.
+ * Reported as a failure with whatever text was produced, rather than as a
+ * success: a document indexed from a conversion that was cut short has content
+ * missing with nothing to point at why.
  *
- * A truncated document is **not** marked `failed` by the caller: the text is
- * real and the ceiling is the caller's own instruction, so `truncated: true` is
- * the honest report. It is graded `flat-text` regardless, because the section a
- * cut landed inside may have lost its heading — a structure verdict computed on
- * half a document would be a claim this module cannot support.
- * @param text - the produced text.
- * @param maxTextBytes - the ceiling from config.
- * @returns the possibly-truncated text and whether it was cut.
+ * **Never graded above `flat-text`.** The text may well contain ATX headings and
+ * a pipe table, so `gradeMarkdown` would happily answer `structured` — but that
+ * answer is about a document that was only partly converted, and the section a
+ * cut landed inside may have lost the heading that made it a section. Claiming a
+ * structure level from half a document is a claim this module cannot support, so
+ * the verdict is pinned to the honest floor here. This mirrors `pdf.ts`'s
+ * `timeoutResult`, which reaches the same conclusion about a timed-out PDF.
+ * @param opts - the envelope, for the ceiling in the message.
+ * @param started - when conversion began.
+ * @param partial - text produced before the deadline, when there is any.
+ * @returns the failed result.
  */
-function cap(text: string, maxTextBytes: number): { text: string, truncated: boolean } {
-  if (maxTextBytes <= 0) return { text: '', truncated: text !== '' }
-  const bytes = Buffer.byteLength(text, 'utf8')
-  if (bytes <= maxTextBytes) return { text, truncated: false }
-  let lo = 0
-  let hi = text.length
-  while (lo < hi) {
-    const mid = Math.ceil((lo + hi) / 2)
-    if (Buffer.byteLength(text.slice(0, mid), 'utf8') <= maxTextBytes) lo = mid
-    else hi = mid - 1
+function timeoutResult(opts: ParseOptions, started: number, partial = ''): ParseResult {
+  const elapsed = Math.round((Date.now() - started) / 1000)
+  return {
+    text: partial,
+    structure: 'flat-text',
+    truncated: true,
+    failed: true,
+    error: `HTML 解析超时（上限 ${Math.round(opts.timeoutMs / 1000)} 秒，已用 ${elapsed} 秒）`,
   }
-  return { text: text.slice(0, lo), truncated: true }
 }

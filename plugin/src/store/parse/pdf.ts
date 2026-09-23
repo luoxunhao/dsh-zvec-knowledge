@@ -38,6 +38,7 @@
  */
 
 import { readFileSync } from 'node:fs'
+import { capBytes } from './cap.ts'
 import { gradeMarkdown, type StructureLevel } from './grade.ts'
 
 /** Bounded resource envelope; values arrive from config, never hardcoded here. */
@@ -357,7 +358,7 @@ export async function convertPdf(file: string, opts: ParseOptions): Promise<Pars
  * @returns the failed result.
  */
 function timeoutResult(opts: ParseOptions, started: number, partial = ''): ParseResult {
-  const { text, truncated } = cap(partial, opts.maxTextBytes)
+  const { text, truncated } = capBytes(partial, opts.maxTextBytes)
   return {
     text,
     structure: truncated || text === '' ? 'flat-text' : gradeMarkdown(text),
@@ -389,7 +390,7 @@ function timeoutResult(opts: ParseOptions, started: number, partial = ''): Parse
  * @returns the finished result.
  */
 function finish(raw: string, opts: ParseOptions, tagged: boolean, started: number): ParseResult {
-  const { text, truncated } = cap(raw, opts.maxTextBytes)
+  const { text, truncated } = capBytes(raw, opts.maxTextBytes)
   const graded = gradeMarkdown(text)
   // A guess is never the document's own claim: cap an inference at `inferred`.
   const structure: StructureLevel = !tagged && graded === 'structured' ? 'inferred' : graded
@@ -1249,30 +1250,6 @@ function escapeCell(cell: string): string {
 function formatTableRow(line: Line): string {
   const cells = cellsOf(line) ?? [lineText(line)]
   return `| ${cells.map(escapeCell).join(' | ')} |`
-}
-
-/**
- * Apply the byte ceiling.
- *
- * Truncation happens on a character boundary, because slicing a multi-byte
- * character in half produces a replacement character that would then be indexed
- * as content.
- * @param text - the produced text.
- * @param maxTextBytes - the ceiling from config.
- * @returns the possibly-truncated text and whether it was cut.
- */
-function cap(text: string, maxTextBytes: number): { text: string, truncated: boolean } {
-  if (maxTextBytes <= 0) return { text: '', truncated: text !== '' }
-  const bytes = Buffer.byteLength(text, 'utf8')
-  if (bytes <= maxTextBytes) return { text, truncated: false }
-  let lo = 0
-  let hi = text.length
-  while (lo < hi) {
-    const mid = Math.ceil((lo + hi) / 2)
-    if (Buffer.byteLength(text.slice(0, mid), 'utf8') <= maxTextBytes) lo = mid
-    else hi = mid - 1
-  }
-  return { text: text.slice(0, lo), truncated: true }
 }
 
 /**
