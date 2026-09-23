@@ -79,6 +79,7 @@
     "verify:parse-grade": "node scripts/verify-parse-grade.mjs",
     "verify:parse-pdf": "node scripts/verify-parse-pdf.mjs",
     "verify:parse-preflight": "node scripts/verify-parse-preflight.mjs",
+    "verify:parse-build": "node scripts/verify-parse-build.mjs",
     "smoke:zvec": "node scripts/zvec-smoke.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json --noEmit",
     "build": "node scripts/clean-build.mjs && node scripts/gen-tokens.mjs && tsc -p tsconfig.json && tsc -p tsconfig.client.json && tsdown",

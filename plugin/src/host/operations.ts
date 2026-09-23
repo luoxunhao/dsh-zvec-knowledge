@@ -44,7 +44,7 @@ import {
   replaceDocuments, sourcePath, summarizeDocuments, validateUpload,
   MAX_UPLOAD_BYTES, MAX_UPLOAD_LABEL, type DocumentRecord,
 } from '../store/documents.ts'
-import { extractVerbatim, extractionSupport } from '../store/extract.ts'
+import { extractVerbatim, extractionSupport, type ConverterId } from '../store/extract.ts'
 import { writeFileStreamed } from '../store/atomic.ts'
 import {
   CHUNKING_DEFAULTS, INDEX_DEFAULTS, QUANTIZER_OPTIONS, estimateCost, planBuild, storedIndex,
@@ -246,6 +246,37 @@ export interface OperationsOptions {
    */
   retrievalDefaults?: Partial<RetrievalStrategy>
 }
+
+/**
+ * In-process document-parsing envelope.
+ *
+ * These are deliberately private constants rather than `Config` fields, and the
+ * exception to the module's own rule — every other tunable here arrives from
+ * `cordis.patch.yml` — is a considered one with two reasons:
+ *
+ * 1. **They are hard bounds, not preferences.** `timeoutMs` exists so one
+ *    pathological document cannot pin the host loop; `maxTextBytes` exists so a
+ *    400-page text layer cannot be pulled into memory in one string. A deployment
+ *    that could set them to zero could disable the only two ceilings that stand
+ *    between an uploaded file and an unbounded process.
+ * 2. **Every other ceiling of this shape is already a constant here.** Chunk
+ *    size 512 and 64-token overlap are literals in `chunkDocument`, and the 16-vector
+ *    embedding batch is a literal in `build.ts`. Making the parse envelope
+ *    configurable while those are not would be one rule for one stage.
+ *
+ * The values are the ones Task 1's bake-off measured against: the 316-page book
+ * converted in full inside the timeout, so the ceiling is loose enough for a real
+ * corpus and tight enough that a hang is bounded. `maxPages` is deliberately far
+ * above any book (a 316-page one uses a third of it) because the page ceiling is
+ * the *cost* bound for the pathological case, and only the timeout is meant to
+ * bite in normal use.
+ */
+/** Wall-clock ceiling for one document's conversion. */
+const PARSE_TIMEOUT_MS = 120_000
+/** Page ceiling, so a huge scan cannot monopolise the loop. */
+const PARSE_MAX_PAGES = 1_000
+/** Ceiling on one document's produced text. */
+const PARSE_MAX_TEXT_BYTES = 16 * 1024 * 1024
 
 /** Tracks retrieval hits so the overview's seven-day figure is real, not a placeholder. */
 export interface HitCounter {
@@ -880,6 +911,12 @@ export class KnowledgeOperations {
       return { possible: false, reason: '索引参数已变更，需要全量重建' }
     }
 
+    // The document log is read here rather than passed in because the parser
+    // comparison below is a property of the *documents*, and the caller's own
+    // document list is not what the served snapshot was built from — it is the
+    // current set, which may already hold an upload this build has not indexed.
+    const records = listDocuments(this.storeRoot, collectionId)
+
     // `== null` rather than `=== null`: a collection written before the field
     // existed has **no** `chunking` key at all, so `readMeta` yields `undefined`
     // and a `=== null` guard does not fire. Execution then reached `sameChunking`,
@@ -902,6 +939,38 @@ export class KnowledgeOperations {
     // be proven equal and is therefore treated as changed.
     if (meta.tokenizer !== TOKENIZER_NAME) {
       return { possible: false, reason: `全文分词器已变更（${meta.tokenizer ?? '未记录'} → ${TOKENIZER_NAME}），需要全量重建` }
+    }
+
+    // The parse stage's two outputs are a document property, not a collection
+    // one, and both are written per document: `converter` says which converter
+    // produced the text, `structure` says how much of the document's structure
+    // survived it. An incremental build embeds only the documents that are not
+    // built yet and inherits every other document's chunks from the cloned
+    // snapshot — so after a converter change the index would hold old-parser text
+    // for the documents it reused and new-parser text for the ones it embedded.
+    //
+    // That mixture is not visibly broken, which is what makes it dangerous. KB-13
+    // addresses a citation by the *line number* of the stored text, so a document
+    // whose text was re-derived at different line breaks has every stored
+    // citation pointing at the wrong line — and nothing would say so. A docstring
+    // count is likewise a property of the split, so `structure` changing means the
+    // chunk shapes changed too.
+    //
+    // Either field moving is therefore a full rebuild, and the trigger is placed
+    // after the cheap config comparisons so the common case — nothing changed —
+    // pays one extra pass over the document log.
+    if (meta.parser !== null && meta.parser !== undefined) {
+      const current = recordParser(records)
+      if (current.converter !== meta.parser.converter || current.structure !== meta.parser.structure) {
+        return { possible: false, reason: '解析器或结构判定已变更，为避免新旧解析产物混排导致引用行号漂移，需要全量重建' }
+      }
+    } else {
+      // A collection built before the field existed has no recorded parser, so
+      // the current one cannot be proven equal to whatever produced the chunks
+      // already in the snapshot. That is the same rule the chunking and tokenizer
+      // checks above follow, and the safe direction: one full rebuild against a
+      // silently mixed snapshot.
+      return { possible: false, reason: '上次构建未记录解析器信息，为安全起见全量重建' }
     }
 
     return { possible: true, reason: '' }
@@ -969,7 +1038,13 @@ export class KnowledgeOperations {
     const viability = self.incrementalViability(collectionId, strategy.chunking, strategy.index)
     const useIncremental = mode === 'incremental' && viability.possible
     const pending = records.filter(record => record.status !== 'ready')
-    const toEmbed = useIncremental ? pending : records
+    // A document whose parse failed has already been judged by the build that ran
+    // it and is excluded here rather than retried on every submission: the
+    // verdict is sticky (see `markPublished`), and re-converting it would spend a
+    // whole corpus's parse budget to reach the same answer. Re-uploading the file
+    // gives it a new id and therefore a clean slate, which is the user's remedy.
+    const toEmbed = (useIncremental ? pending : records)
+      .filter(record => !(record.status === 'failed' && record.converter !== undefined))
 
     // A full build is required, but the caller asked for incremental. Saying so is
     // the difference between "your upload was cheap" and "this silently re-cut
@@ -1020,7 +1095,39 @@ export class KnowledgeOperations {
         collectionId,
         slot,
         index: strategy.index,
-        documents: toEmbed.map(record => ({ docId: record.id, text: record.text })),
+        documents: toEmbed.map(record => ({
+          docId: record.id,
+          text: record.text,
+          // Where the derived text comes from, for a converted format. A
+          // `verbatim` document records no converter, so it arrives with its text
+          // already present and the parse stage converts nothing.
+          //
+          // `reparse: false` because a rebuild is not the place to re-derive text
+          // that already exists: a converter change is what makes reparsing
+          // meaningful, and that is a full rebuild triggered by
+          // `incrementalViability` — not something a per-document flag should
+          // silently force on every build, which would re-parse an entire PDF
+          // corpus each time one document was added.
+          ...(record.converter === undefined
+            ? {}
+            : {
+                source: {
+                  file: sourcePath(root, collectionId, record.id, record.ext),
+                  converter: record.converter as ConverterId,
+                  reparse: false,
+                },
+              }),
+        })),
+        // Where the parse stage writes the derived text back and records a
+        // per-document failure. Without it the parse stage still converts — it
+        // simply has no log to write to.
+        documentsFile: { storeRoot: root, collectionId },
+        // The envelope each conversion runs inside, and the quota re-checked once
+        // the text exists. Upload admitted the *original* bytes; a PDF can produce
+        // far more text than it weighs, so the real footprint is only knowable
+        // here.
+        parse: { timeoutMs: PARSE_TIMEOUT_MS, maxPages: PARSE_MAX_PAGES, maxTextBytes: PARSE_MAX_TEXT_BYTES },
+        quota: self.quota,
         // The collection's own total, which incremental builds would otherwise
         // under-report as just the documents they embedded.
         allDocCount: records.length,
@@ -1038,6 +1145,14 @@ export class KnowledgeOperations {
         // schema and takes the default. Passing it explicitly keeps the recorded
         // value truthful either way.
         ...(useIncremental ? { tokenizer: meta.tokenizer ?? TOKENIZER_NAME } : {}),
+        // Which parser this snapshot's text came from. Handed to the *build*
+        // rather than computed here, because the summary has to describe what the
+        // documents were parsed by, and at this moment the parse stage has not run
+        // yet: a document uploaded by a `converted` format still holds no text and
+        // therefore no `structure` verdict. Reading the log here would record
+        // `unparsed` for every freshly converted document and force a spurious
+        // full rebuild on the very next submission.
+        parserFrom: { storeRoot: root, collectionId },
         embed,
         dimension: self.dimension,
         onProgress: hooks.onProgress,
@@ -1511,6 +1626,33 @@ export class KnowledgeOperations {
 }
 
 /**
+ * Summarize the parser a document set was produced by.
+ *
+ * The set of converter ids plus the set of structure verdicts, sorted and joined
+ * — a *summary*, not a digest of every document, because those two sets are
+ * exactly what an incremental build could silently mix. Two documents converted
+ * by the same converter with the same verdict are interchangeable as far as the
+ * index is concerned; the moment either set differs from what the served
+ * snapshot recorded, the snapshot holds text from more than one parser and a
+ * full rebuild is the only honest answer.
+ * @param records - the documents as they stand.
+ * @returns the summary string recorded in the snapshot's metadata.
+ */
+function recordParser(records: DocumentRecord[]): { converter: string, structure: string } {
+  const converters = [...new Set(records.map(record => record.converter ?? 'verbatim'))].sort()
+  const structures = [...new Set(records.map(record => record.structure ?? 'unparsed'))].sort()
+  return { converter: converters.join(','), structure: structures.join(',') }
+}
+
+/** Where the build reads the parser summary it must record, and when. */
+export interface ParserSummarySource {
+  /** Absolute store root, as the documents module resolves paths against. */
+  storeRoot: string
+  /** Collection whose document log is read. */
+  collectionId: string
+}
+
+/**
  * Project stored metadata into the interface's view.
  * @param meta - snapshot metadata.
  * @param summary - document summary.
@@ -1569,6 +1711,21 @@ function markPublished(
   const updated = current.map(record => {
     const rebuilt = builtById.get(record.id)
     if (rebuilt === undefined) return record
+    // A failure the *build* recorded is not overwritten by the publish that follows
+    // it. The parse stage marks a document `failed` with its reason before the
+    // publish stage runs, and the publish sweeps every embedded document to `ready`
+    // — which erases exactly the verdict the user needs to see, and leaves the
+    // document looking built while holding no text and no chunks.
+    //
+    // Read from `record` — the log as it stands *now*, after the build wrote its
+    // verdict — and **not** from `rebuilt`, which is the pre-build snapshot the
+    // caller handed in. Reading the stale copy is what made this guard look correct
+    // and do nothing: at launch time the document was `pending`, so the check never
+    // fired and the publish overwrote the failure anyway. The caller's list is a
+    // record of what was *submitted*; only the log knows what the build decided.
+    if (record.status === 'failed') {
+      return { ...record, chunks: null, error: record.error ?? rebuilt.error }
+    }
     return {
       ...record,
       status: 'ready' as const,

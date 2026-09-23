@@ -28,6 +28,11 @@ import { chunkDocument, type Chunk, type ChunkingConfig } from './chunk.ts'
 import { chunkDocInput, chunkRowFromDoc, EMBEDDING_DIMENSION, FIELD_DOC_ID, FIELD_TEXT, TOKENIZER_NAME, VECTOR_FIELD, documentFilter, type ChunkRow, type IndexConfig } from './collection.ts'
 import { cloneSlot, publishSlot, resetSlot, slotDir, type Slot } from './snapshot.ts'
 import { adopt, releaseSlot } from './registry.ts'
+import { listDocuments, patchDocument, type DocumentRecord } from './documents.ts'
+import { gradeMarkdown, type StructureLevel } from './parse/grade.ts'
+import { convertPdf, type ParseOptions, type ParseResult } from './parse/pdf.ts'
+import { admit, type Quota } from './quota.ts'
+import type { ConverterId } from './extract.ts'
 
 /** The four pipeline stages, in spec order. */
 export const STAGES = ['parse', 'chunk', 'index', 'publish'] as const
@@ -99,8 +104,29 @@ export type EmbedFn = (texts: string[], signal?: AbortSignal) => Promise<Float32
 export interface DocumentBuildRequest {
   /** Source document id. */
   docId: string
-  /** Full document text. */
+  /**
+   * Full document text, when it is already materialised.
+   *
+   * For a `verbatim` format the upload path decoded it, so the parse stage finds
+   * the text here and converts nothing. For a `converted` format it is empty at
+   * upload time — the derived text does not exist yet — and the parse stage
+   * produces it from {@link source}.
+   */
   text: string
+  /**
+   * Where to re-read the text from, when the text is not already materialised.
+   *
+   * Optional so callers that already hold text — including the existing
+   * build-job gates — keep working unchanged.
+   */
+  source?: {
+    /** Absolute path of the stored original. */
+    file: string
+    /** Which converter to run. */
+    converter: ConverterId
+    /** Force re-conversion even when `text` is already present. */
+    reparse: boolean
+  }
 }
 
 /** Build request for a whole collection. */
@@ -123,6 +149,44 @@ export interface BuildRequest {
   dimension?: number
   /** Documents to index. */
   documents: DocumentBuildRequest[]
+  /**
+   * Where the parsed text is written back and a per-document failure is recorded.
+   *
+   * Optional because a caller that holds no document records — the pre-existing
+   * build-job gates, an in-process `startBuild` — has nowhere to write and nothing
+   * to fail. Omitted, the parse stage still converts and still keeps one bad
+   * document from failing the build; it simply has no log to write the outcome to.
+   */
+  documentsFile?: {
+    /** Absolute store root, as the documents module resolves paths against. */
+    storeRoot: string
+    /** Collection whose document log is written. */
+    collectionId: string
+  }
+  /**
+   * The resource envelope each conversion runs inside.
+   *
+   * Supplied by the caller rather than defaulted here, because these are
+   * deployment tunables and the harness treats a `DEFAULT_*` constant in plugin
+   * source as a missing configuration field. Required only in the sense that a
+   * conversion cannot run without one: a request carrying no `source` never
+   * converts, so it needs none.
+   */
+  parse?: ParseOptions
+  /**
+   * Storage quota, re-checked when parsing produces real text.
+   *
+   * **Why the parse stage checks it at all.** Admission at upload charges the
+   * *original* bytes, because the derived text does not exist yet. A PDF is the
+   * extreme case: admitted for 900 KB of bytes, it can produce megabytes of text
+   * that then join the published snapshot. Without this second check the quota
+   * would be enforced against a document that had not yet declared its real size,
+   * which is exactly the state it exists to refuse.
+   *
+   * Omitted means unlimited, the same statement as `{bytes: null}` — so a caller
+   * that says nothing is never refused.
+   */
+  quota?: Quota
   /**
    * Slot to inherit existing chunks from, for an incremental build.
    *
@@ -161,6 +225,26 @@ export interface BuildRequest {
    * differ. Omit to record the current default (a fresh full build).
    */
   tokenizer?: string
+  /**
+   * Which parser produced the text this snapshot indexes.
+   *
+   * Recorded on the published snapshot so the next viability check can compare it
+   * against the documents as they now stand and force a full rebuild when they
+   * differ. The mixture is invisible otherwise, and it would silently invalidate
+   * every stored citation line number — see the field's note in `snapshot.ts`.
+   *
+   * Derived here at publish time, from {@link parserFrom}, rather than passed in
+   * ready-made: the summary describes what the documents were parsed *by*, and
+   * the verdicts it summarizes are written by this build's own parse stage. A
+   * caller reading the log before launching the build would record `unparsed` for
+   * every document whose text the build has not produced yet.
+   */
+  parserFrom?: {
+    /** Absolute store root, as the documents module resolves paths against. */
+    storeRoot: string
+    /** Collection whose document log is read. */
+    collectionId: string
+  }
   /** Embedding provider. */
   embed: EmbedFn
   /** Progress callback, invoked as stages and counts change. */
@@ -223,14 +307,28 @@ export function startBuild(request: BuildRequest): RunningBuild {
   const stages: StageProgress[] = STAGES.map(id => ({ id, label: STAGE_LABELS[id], state: 'pending' }))
   let processed = 0
   let total = 0
+  /**
+   * Highest fraction published so far.
+   *
+   * `total` means two different things over a build's life — documents while the
+   * parse stage runs, chunks afterwards — so the ratio `processed / total` is not
+   * monotonic across the switch. A progress bar that goes backwards reads as a
+   * glitch, and it is entirely avoidable: what a fraction is *for* is to say how
+   * far along the build is, so it is only ever allowed to grow.
+   */
+  let fractionFloor = 0
+
+  /** The fraction a pair of counts implies, bounded like the published one. */
+  const fractionOf = (done: number, all: number): number => (all === 0 ? 0 : Math.min(1, done / all))
 
   /** Publish a progress snapshot. */
   const emit = (): void => {
+    fractionFloor = Math.max(fractionFloor, fractionOf(processed, total))
     request.onProgress?.({
       stages: stages.map(stage => ({ ...stage })),
       processed,
       total,
-      fraction: total === 0 ? 0 : Math.min(1, processed / total),
+      fraction: fractionFloor,
     })
   }
 
@@ -255,8 +353,29 @@ export function startBuild(request: BuildRequest): RunningBuild {
     // reached before stopping, rather than losing it at the catch boundary.
     let discarded = 0
     try {
+      total = request.documents.length
+      // Reported by *document* first, because the chunk count is not known until
+      // the chunking stage runs and a bar that only moves after chunking looks
+      // stalled when chunking is the slow half. The chunking stage then re-bases
+      // `total` to the chunk count; `fraction` is held monotonic across that
+      // switch so the bar never runs backwards.
+      //
+      // Written straight into the function-scoped `total` rather than into a
+      // shadowing local, and **before** `enter('parse')` emits. `emit` closes over
+      // the outer `total`, so a shadowing local here is written and then never
+      // read — the bar sits at 0/0 for the whole parse stage while everything
+      // else looks correct. And `enter` emits on its own, so setting the total
+      // afterwards means the stage's first published snapshot is `0 / 0`: the
+      // count is already known at this point (the documents arrived with the
+      // request), so publishing zero first is simply wrong.
       enter('parse')
-      const documents = request.documents.filter(document => document.text.trim() !== '')
+      // `let`, not `const`: the parse stage rebuilds the list from what it was
+      // able to convert, and everything downstream reads the rebuilt list.
+      let requests = await parseDocuments(request, controller.signal, () => {
+        processed += 1
+        emit()
+      })
+      const documents = requests.filter(document => document.text.trim() !== '')
       if (documents.length === 0) throw new Error('no readable content: every document is empty')
       if (controller.signal.aborted) return cancelled(0, 0, 0)
 
@@ -267,7 +386,14 @@ export function startBuild(request: BuildRequest): RunningBuild {
         discarded += result.discarded
         planned.push({ docId: document.docId, chunks: result.chunks })
       }
+      // Re-based from documents to chunks, with `processed` moved to the whole
+      // document count first so the derived fraction is unchanged at the boundary
+      // even when a document produced no chunks. The floor below then absorbs the
+      // remaining case — chunk count smaller than document count — where the bare
+      // ratio would dip.
+      processed = Math.max(processed, documents.length)
       total = planned.reduce((sum, item) => sum + item.chunks.length, 0)
+      fractionFloor = Math.max(fractionFloor, fractionOf(processed, total))
       log('info', `切分得到 ${total} 片，丢弃 ${discarded} 片碎片`)
       emit()
       if (controller.signal.aborted) return cancelled(0, 0, discarded)
@@ -361,6 +487,13 @@ export function startBuild(request: BuildRequest): RunningBuild {
         throw new Error(`快照中的分片数（${indexed}）少于本次写入（${total}），增量构建的基准快照不完整`)
       }
       const publishedChunks = indexed
+      // Read from the log *here*, after the parse stage has written every verdict:
+      // the summary has to describe the whole document set — including the
+      // documents an incremental build inherited and never embedded — and the
+      // parse stage's own verdicts only exist from this point on.
+      const parserSummary = request.parserFrom === undefined
+        ? null
+        : recordParser(listDocuments(request.parserFrom.storeRoot, request.parserFrom.collectionId))
       // The collection's document total, which for an incremental build is larger
       // than the number embedded here.
       const allDocCount = request.allDocCount ?? documents.length
@@ -374,6 +507,7 @@ export function startBuild(request: BuildRequest): RunningBuild {
         // caller passes that value through. Recording the truth rather than the
         // preference is what lets the next viability check notice a mismatch.
         tokenizer: request.tokenizer ?? TOKENIZER_NAME,
+        ...(parserSummary === null ? {} : { parser: parserSummary }),
       })
       processed = total
       stages[STAGES.indexOf('publish')]!.state = 'done'
@@ -425,6 +559,323 @@ export function startBuild(request: BuildRequest): RunningBuild {
   })()
 
   return { done, cancel: () => controller.abort() }
+}
+
+/**
+ * Summarize the parser a document set was produced by.
+ *
+ * The set of converter ids plus the set of structure verdicts, sorted and joined
+ * — a *summary* rather than a digest of every document, because those two sets
+ * are exactly what an incremental build could silently mix. Two documents
+ * converted by the same converter with the same verdict are interchangeable as
+ * far as the index is concerned; the moment either set differs from what the
+ * served snapshot recorded, the snapshot holds text from more than one parser and
+ * a full rebuild is the only honest answer.
+ *
+ * A document with no `converter` was decoded verbatim from text, which is a
+ * parser too — and one that can equally be swapped for a real converter later.
+ * @param records - the documents as they stand.
+ * @returns the summary recorded in the snapshot's metadata.
+ */
+function recordParser(records: DocumentRecord[]): { converter: string, structure: string } {
+  const converters = [...new Set(records.map(record => record.converter ?? 'verbatim'))].sort()
+  const structures = [...new Set(records.map(record => record.structure ?? 'unparsed'))].sort()
+  return { converter: converters.join(','), structure: structures.join(',') }
+}
+
+/**
+ * Convert every document that is not already text, one guarded conversion each.
+ *
+ * **The single most important property of this function is that it does not
+ * throw for a document-level problem.** `startBuild`'s outer `try/catch` discards
+ * the staging slot and fails the entire build, so a conversion failure that
+ * escaped from here would make one unreadable PDF destroy a collection's whole
+ * index — the upload that started it is not even the one that would suffer. So
+ * each document is converted inside its own guard and a failure is recorded *on
+ * that document*: its status becomes `failed` with the converter's own reason,
+ * and the build continues with the rest.
+ *
+ * What still fails the build is a *systemic* fault: the document log cannot be
+ * written, the process is out of memory. Those are not properties of one file,
+ * and retrying the build would not fix them.
+ *
+ * Documents that carry no {@link DocumentBuildRequest.source} are taken as they
+ * are — that is the pre-existing caller, which already holds its text.
+ * @param request - the build request, for the source files, envelope and log.
+ * @param signal - the build's cancellation signal.
+ * @param onDocument - invoked once per document, for progress.
+ * @returns the documents that survived, with their text materialised.
+ */
+async function parseDocuments(
+  request: BuildRequest,
+  signal: AbortSignal,
+  onDocument: () => void,
+): Promise<DocumentBuildRequest[]> {
+  const kept: DocumentBuildRequest[] = []
+  for (const document of request.documents) {
+    if (signal.aborted) return kept
+    // Checked *before* the guards below, because a conversion already recorded
+    // `failed` must not be reprocessed: re-keeping it would silently turn the
+    // failure into a success on the next build.
+    if (isAlreadyFailed(request, document.docId)) {
+      onDocument()
+      continue
+    }
+    // A document whose text is already present and which is not being reparsed
+    // needs no conversion at all, and must not be charged for one.
+    if (document.source === undefined || (!document.source.reparse && document.text.trim() !== '')) {
+      kept.push(document)
+      onDocument()
+      continue
+    }
+    try {
+      const outcome = await convertOne(document, request)
+      if (outcome.failed === true) {
+        failOne(request, document, outcome.error ?? '解析未产出文本')
+      } else {
+        const reason = admitParsedText(request, document, outcome.text)
+        if (reason !== null) {
+          failOne(request, document, reason)
+        } else {
+          keep(request, document, outcome.text, outcome.structure)
+          kept.push({ ...document, text: outcome.text })
+        }
+      }
+    } catch (error) {
+      // A systemic fault — an unwritable document log, a broken engine import —
+      // is reported to the caller rather than swallowed into a per-document
+      // failure, because "this document is bad" would be a false statement about
+      // a file that is fine.
+      if (isSystemic(error)) throw error
+      failOne(request, document, describeFailure(error, document.source.converter))
+    }
+    onDocument()
+    // One document at a time is not enough on its own: a conversion is
+    // synchronous for most of its cost, so without this an empty await queue
+    // would still hold the host's loop for the length of a whole corpus.
+    await yieldToEventLoop()
+  }
+  return kept
+}
+
+/**
+ * Run one document's converter.
+ *
+ * The dispatch table is exhaustive over {@link ConverterId}, which is the whole
+ * reason it exists as a type: a format the upload path advertises but whose
+ * converter is not implemented yet must fail here, loudly and by name, rather
+ * than produce an empty text that would be indexed as a document with no
+ * content. That is the failure mode this table is shaped to prevent — a
+ * successful-looking build of nothing.
+ * @param document - the document, with its source.
+ * @param request - the build request, for the envelope.
+ * @returns the converter's result.
+ */
+async function convertOne(
+  document: DocumentBuildRequest,
+  request: BuildRequest,
+): Promise<ParseResult> {
+  const source = document.source as NonNullable<DocumentBuildRequest['source']>
+  const options: ParseOptions = { ...envelope(request) }
+  // The signal is attached only when the caller supplied one, so an aborted
+  // conversion is reported by the converter as a failure rather than looked for
+  // here — the converter knows where in its own work the cancellation landed.
+  if (request.parse?.signal !== undefined) options.signal = request.parse.signal
+  switch (source.converter) {
+    case 'pdf':
+      return convertPdf(source.file, options)
+    default:
+      // docx / html / xlsx / csv / json are declared by `extract.ts` and have no
+      // implementation yet. Returning an empty success here would be the worst
+      // available outcome: the build reports the document as parsed, indexes no
+      // text for it, and nothing says why.
+      return {
+        text: '',
+        structure: 'flat-text',
+        truncated: false,
+        failed: true,
+        error: `${source.converter} 转换器尚未实现，该文档无法解析（已声明但无实现的格式编号）`,
+      }
+  }
+}
+
+/** The conversion envelope, with the tiers always present. */
+function envelope(request: BuildRequest): ParseOptions {
+  const parse = request.parse
+  return {
+    timeoutMs: parse?.timeoutMs ?? 0,
+    maxPages: parse?.maxPages ?? 0,
+    maxTextBytes: parse?.maxTextBytes ?? 0,
+  }
+}
+
+/**
+ * Whether this document is already marked as a parse failure.
+ *
+ * Read from the document log rather than carried in the request, because that is
+ * where the previous build's verdict lives and the whole point of the verdict is
+ * that it *persists*: a document whose scan was refused, whose PDF is encrypted
+ * or whose converter is not implemented yet must not be silently upgraded to a
+ * success on the next build by a record that still holds no text. It stays
+ * failed, with its reason, until it is parsed successfully — which means the user
+ * re-uploads it, or a later task implements its converter and the collection is
+ * reparsed from the stored original.
+ * @param request - the build request, for the log target.
+ * @param docId - the document to look up.
+ * @returns true when the recorded status is `failed`.
+ */
+function isAlreadyFailed(request: BuildRequest, docId: string): boolean {
+  const where = request.documentsFile
+  if (where === undefined) return false
+  try {
+    return listDocuments(where.storeRoot, where.collectionId)
+      .some(record => record.id === docId && record.status === 'failed')
+  } catch {
+    // An unreadable log means no verdict can be recovered; converting the
+    // document again is the safe direction, and the parse stage's own guard is
+    // what keeps a failure contained either way.
+    return false
+  }
+}
+
+/**
+ * Decide whether a document's freshly produced text still fits the quota.
+ *
+ * The second half of a two-phase check. Upload admitted the *original* bytes,
+ * because at that moment the derived text did not exist; parsing is where it
+ * starts to exist, so this is the only place the real footprint can be measured.
+ * A document that no longer fits fails *itself* — the rest of the collection is
+ * unaffected, which is the same containment rule the conversion guard follows.
+ * @param request - the build request, for the quota.
+ * @param document - the document whose text was just produced.
+ * @param text - that text.
+ * @returns the refusal reason, or `null` when the document may be kept.
+ */
+function admitParsedText(
+  request: BuildRequest,
+  document: DocumentBuildRequest,
+  text: string,
+): string | null {
+  const where = request.documentsFile
+  if (request.quota === undefined || where === undefined) return null
+  const admission = admit(
+    where.storeRoot,
+    request.quota,
+    Buffer.byteLength(text, 'utf8'),
+    `解析文档 ${document.docId} 的正文`,
+  )
+  return admission.allowed ? null : admission.reason ?? '存储配额不足'
+}
+
+/**
+ * Record a successful parse on the document and in the build log.
+ * @param request - the build request, for the log target.
+ * @param document - the parsed document.
+ * @param text - the produced Markdown.
+ * @param structure - how much structure survived.
+ */
+function keep(
+  request: BuildRequest,
+  document: DocumentBuildRequest,
+  text: string,
+  structure: StructureLevel,
+): void {
+  patch(request, document.docId, {
+    text,
+    structure,
+    parsedAt: new Date().toISOString(),
+    ...(document.source === undefined ? {} : { converter: document.source.converter }),
+  })
+}
+
+/**
+ * Mark one document as failed, leaving every other document alone.
+ *
+ * Both halves matter and they are written together: the log is what the panel
+ * shows, and the log line is what makes the failure visible in the build's own
+ * output. A build that quietly indexed fourteen of fifteen documents and said
+ * nothing would be indistinguishable from a complete one.
+ * @param request - the build request, for the log target.
+ * @param document - the document that failed.
+ * @param reason - why, in the user's language.
+ */
+function failOne(request: BuildRequest, document: DocumentBuildRequest, reason: string): void {
+  patch(request, document.docId, { status: 'failed', error: reason, chunks: null })
+}
+
+/**
+ * Apply a read-modify-write to one document record.
+ *
+ * Best effort, and logged when it fails: the document log is diagnostics for the
+ * *next* build and for the panel, while the index in flight is the artifact this
+ * build exists to produce. Throwing here would convert an unwritable log into a
+ * failed build, which is the systemic failure this stage is careful not to
+ * manufacture.
+ * @param request - the build request, for the log target.
+ * @param docId - the document to patch.
+ * @param fields - the fields to change.
+ */
+function patch(
+  request: BuildRequest,
+  docId: string,
+  fields: Parameters<typeof patchDocument>[3],
+): void {
+  const where = request.documentsFile
+  if (where === undefined) return
+  try {
+    patchDocument(where.storeRoot, where.collectionId, docId, fields)
+  } catch (error) {
+    request.onLog?.({
+      at: new Date().toISOString(),
+      level: 'error',
+      message: `文档状态写入失败（${docId}）：${error instanceof Error ? error.message : String(error)}`,
+    })
+  }
+}
+
+/**
+ * Whether a failure is the store's rather than the document's.
+ *
+ * The distinction decides who pays for it. A missing file, a broken PDF and an
+ * unsupported converter are all properties of one document, so the document
+ * fails. An out-of-memory, a closed engine handle or anything else that is not
+ * about the file at hand is systemic, and reporting it as "this document is bad"
+ * would be a false statement that also hides a real fault.
+ * @param error - the thrown value.
+ * @returns true when the build as a whole should fail.
+ */
+function isSystemic(error: unknown): boolean {
+  if (!(error instanceof Error)) return false
+  return error.name === 'RangeError'
+    || /out of memory|heap|ENOSPC|EBUSY/i.test(error.message)
+}
+
+/**
+ * Turn a thrown conversion failure into something a user can act on.
+ *
+ * The converter id is named because it is the actionable part: "the pdf
+ * converter failed" tells the reader which format to work around, while a bare
+ * stack trace names nothing they can change.
+ * @param error - the thrown value.
+ * @param converter - which converter was running.
+ * @returns the reason, in the user's language.
+ */
+function describeFailure(error: unknown, converter: ConverterId): string {
+  const message = error instanceof Error ? error.message : String(error)
+  return `${converter} 转换失败：${message}`
+}
+
+/**
+ * Yield the event loop between two documents.
+ *
+ * The host runs one fiber per plugin, and a corpus-wide parse is minutes of
+ * nearly-synchronous work. `setImmediate` gives the loop a turn between
+ * documents, so the progress the parse stage emits can actually be delivered
+ * rather than queued behind the whole build.
+ * @returns a promise resolved on the loop's next turn.
+ */
+function yieldToEventLoop(): Promise<void> {
+  return new Promise(resolve => { setImmediate(resolve) })
 }
 
 /**

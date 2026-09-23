@@ -79,6 +79,27 @@ export interface SnapshotMeta {
    * rebuild.
    */
   tokenizer: string | null
+  /**
+   * Which parser produced the text the active snapshot indexes.
+   *
+   * A summary of two per-document properties, recorded at publish time: the set
+   * of converter ids the documents were converted by, and the set of `structure`
+   * verdicts their text was graded at. Both are decided by a per-document stage
+   * rather than by the build's configuration, which is what makes them able to
+   * differ *within* one snapshot after an incremental build — the documents it
+   * embedded would carry the new parser's text while the ones it inherited from
+   * the cloned slot carry the old one's.
+   *
+   * That mixture is invisible and it matters, because a citation addresses a
+   * document by the line number of its stored text (KB-13). Two parsers break
+   * lines differently, so mixing them makes stored citations point at the wrong
+   * lines with nothing to say so. `incrementalViability` compares this value
+   * against the current documents and forces a full rebuild when it differs.
+   *
+   * `null` for a collection built before this field existed; an unknown value is
+   * treated as a mismatch and rebuilds in full, which is the safe direction.
+   */
+  parser: { converter: string, structure: string } | null
   /** Slot currently being served. `null` before the first successful build. */
   active: Slot | null
   /** Chunks in the active snapshot, for the overview card. */
@@ -226,7 +247,7 @@ export interface ServedCollection {
  * @param meta - collection metadata; `active` is forced to `null`.
  * @throws {Error} when the collection already exists.
  */
-export async function createCollection(storeRoot: string, meta: Omit<SnapshotMeta, 'active' | 'builtAt' | 'chunks' | 'docs' | 'chunking' | 'tokenizer' | 'retrieval'>): Promise<SnapshotMeta> {
+export async function createCollection(storeRoot: string, meta: Omit<SnapshotMeta, 'active' | 'builtAt' | 'chunks' | 'docs' | 'chunking' | 'tokenizer' | 'parser' | 'retrieval'>): Promise<SnapshotMeta> {
   const id = assertCollectionId(meta.id)
   const dir = collectionDir(storeRoot, id)
   return withFileLock(dir, () => {
@@ -235,7 +256,7 @@ export async function createCollection(storeRoot: string, meta: Omit<SnapshotMet
     }
     // `chunking` starts null: nothing has been built, so no parameters have been
     // used yet, and the first build always indexes everything regardless.
-    const created: SnapshotMeta = { ...meta, chunking: null, tokenizer: null, retrieval: null, builtAt: null, active: null, chunks: 0, docs: 0 }
+    const created: SnapshotMeta = { ...meta, chunking: null, tokenizer: null, parser: null, retrieval: null, builtAt: null, active: null, chunks: 0, docs: 0 }
     writeMeta(storeRoot, created)
     return created
   })
@@ -400,7 +421,13 @@ export async function publishSlot(
   storeRoot: string,
   id: string,
   slot: Slot,
-  counts: { chunks: number, docs: number, chunking?: ChunkingConfig, tokenizer?: string },
+  counts: {
+    chunks: number
+    docs: number
+    chunking?: ChunkingConfig
+    tokenizer?: string
+    parser?: { converter: string, structure: string }
+  },
 ): Promise<SnapshotMeta> {
   const dir = collectionDir(storeRoot, assertCollectionId(id))
   return withFileLock(dir, () => {
@@ -418,6 +445,11 @@ export async function publishSlot(
       // Same reasoning for the tokenizer: it is a schema property of the snapshot
       // just published, and the next incremental build compares against it.
       ...(counts.tokenizer === undefined ? {} : { tokenizer: counts.tokenizer }),
+      // And the parser, for the same reason at one remove: it is not a
+      // configuration value but a summary of what the *documents* were produced
+      // by, so only the publish stage — which is the moment the snapshot's
+      // contents became final — can state it truthfully.
+      ...(counts.parser === undefined ? {} : { parser: counts.parser }),
     }
     writeMeta(storeRoot, updated)
     markActive(storeRoot, id, slot)

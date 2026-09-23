@@ -295,6 +295,38 @@ export async function convertPdf(file: string, opts: ParseOptions): Promise<Pars
       }
     }
 
+    // **An empty product is a failure, not a clean conversion of nothing.**
+    //
+    // This is the single most dangerous outcome this module can produce: the build
+    // records the document as parsed, indexes no text for it, and nothing anywhere
+    // says why — indistinguishable from a document that legitimately had nothing to
+    // index. Measured on the committed `scanned.pdf`, which is a page whose only
+    // content is a drawn image: `convertPdf` returned `{text: '', failed: undefined}`
+    // and the build marked it 已构建 with zero chunks.
+    //
+    // The upload preflight refuses a text-free PDF *before* a record is written, so
+    // this path is not reachable through the upload UI for the scan case — but the
+    // preflight samples at most two pages, and a document whose text begins later
+    // than that reaches here. The envelope can also produce it directly: `maxPages:
+    // 0`, or a page ceiling below the first page carrying text. Reporting those as
+    // successes is the failure mode all of this exists to avoid.
+    //
+    // The reason is phrased in the user's language and names the likely cause,
+    // because "no text" alone leaves them unable to tell a scan from a broken file.
+    if (text.trim() === '') {
+      return {
+        text: '',
+        structure: 'flat-text',
+        truncated: read.runs.length === 0 && opts.maxPages > 0,
+        failed: true,
+        error: read.runs.length === 0
+          ? `PDF 未提取到任何文字（读到的前 ${Math.min(opts.maxPages, 1)} 页中没有文本层）。`
+            + '若这是扫描件，请先用离线 OCR 工具（例如 OCRmyPDF、ABBYY 或 Adobe Acrobat 的「识别文本」）'
+            + '生成带文本层的 PDF，再上传；也可以先转成 Markdown 后上传。'
+          : 'PDF 提取到了文字对象，但没有任何一行能构成正文。请确认文件未损坏，或改用 Markdown 上传。',
+      }
+    }
+
     if (opts.signal?.aborted) return empty('已取消')
     const overran = Date.now() > deadline
     if (overran) return timeoutResult(opts, started, text)
