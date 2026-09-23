@@ -134,3 +134,38 @@ A heading-shaped TOC entry still becomes a heading rather than a table row
 whenever it clears the size test, which is why the sampled book output keeps
 `# 目录` as a heading and puts only the dot-leader lines into the table.
 
+## Latent risk: the engine's auxiliary data lives in a devDependency
+
+In Node the extraction engine resolves `cMapUrl` and `standardFontDataUrl` from
+the installed `pdfjs-dist` package (`import.meta.resolve("pdfjs-dist/package.json")`,
+then `./cmaps/` and `./standard_fonts/`). `pdfjs-dist` is a **devDependency**
+here — it exists for the engine comparison and the fixture pipeline, not for
+runtime — so a production install that omits devDependencies makes that
+resolution throw, and the engine swallows the error in a bare `catch {}`.
+
+A document that needs either resource (a CID-keyed font whose CMap is not
+embedded, or one of the fourteen standard fonts) then extracts to **empty or
+garbled text with no error at all** — the same silent-empty shape as the
+worker-path trap, and indistinguishable downstream from a genuinely empty
+document.
+
+**Measured:** all four real Chinese PDFs embed their own fonts and need neither
+resource, so this is a latent deployment risk rather than an observed failure.
+The fix is therefore not to promote `pdfjs-dist` to a runtime dependency
+(+33 MB, which would also undercut the entire reason `unpdf` was chosen) but to
+make the failure **loud and attributable**: `checkAssets()` in `pdf.ts` probes the
+resolution once per process, logs an actionable message naming the cause and the
+remedy when it fails, and `convertPdf` reports an empty product with unreachable
+assets as `failed` with a distinct error rather than as a clean conversion of
+nothing.
+
+The gate's Latin control cannot catch this class — no committed fixture needs
+cmaps or standard fonts — so the probe is what stands between it and silence.
+
+## Reproducing the real-corpus measurement
+
+`scripts/parse-bakeoff/` holds the three measurement scripts and a README. They
+are not a gate: they need input documents that cannot be committed and a Python
+interpreter that is not a plugin dependency. See that README for the commands,
+the input-list format, the expected output shape, and the measured result.
+

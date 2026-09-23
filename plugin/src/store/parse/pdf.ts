@@ -92,8 +92,6 @@ interface Run {
   width: number
   /** Font size in points. */
   size: number
-  /** Whether the run ended with an explicit line break. */
-  eol: boolean
   /** Marked-content tag in force for this run, when the document is tagged. */
   tag: string | null
   /**
@@ -140,8 +138,6 @@ type ContentItem = MarkedItem | {
   width: number
   /** Run height in the text space. */
   height: number
-  /** Whether the run ended with a line break. */
-  hasEOL: boolean
 }
 
 /** The engine's per-page content, as much of it as this module reads. */
@@ -189,26 +185,6 @@ interface UnpdfSurface {
   getDocumentProxy: (data: Uint8Array) => Promise<EngineDocument>
   /** The resolved pdf.js module. */
   getResolvedPDFJS: () => Promise<EngineModule>
-  /** Extracted, positioned runs per page. */
-  extractTextItems: (data: Uint8Array) => Promise<{ totalPages: number, items: StructuredItem[][] }>
-}
-
-/** One run as the extraction helper reports it. */
-interface StructuredItem {
-  /** The run's text. */
-  str: string
-  /** Left edge in a bottom-left origin. */
-  x: number
-  /** Baseline in a bottom-left origin. */
-  y: number
-  /** Run width in points. */
-  width: number
-  /** Run height in points. */
-  height: number
-  /** Font size in points. */
-  fontSize: number
-  /** Whether the run ended with a line break. */
-  hasEOL: boolean
 }
 
 /**
@@ -267,42 +243,66 @@ function readBytes(file: string): Uint8Array {
  * document, a timeout or a cancellation all come back as `failed` with an
  * `error` in the user's language, because the build pipeline treats one
  * document's failure as data about that document.
+ *
+ * **One load, one path.** The document is read through the engine's own API
+ * once, which both carries the marked-content tags this module needs and lets
+ * the page loop check the deadline and the abort signal. It is deliberately not
+ * read twice — once through the tagged API and again through the untagged
+ * helper — because that doubled the work on every document and made `maxPages`
+ * mean two different things depending on which path ran.
+ *
+ * **On the page ceiling.** `maxPages` bounds the pages this module *reads*: the
+ * loop stops at the cap, so nothing beyond it is parsed. What it cannot bound is
+ * the engine's own per-page cost for the pages inside the cap, and `timeoutMs`
+ * is the ceiling for that. Both are enforced in the loop, not reported after the
+ * fact.
  * @param file - absolute or relative path of the stored original.
  * @param opts - the resource envelope, supplied by config.
  * @returns the converted Markdown and how much structure survived.
  */
 export async function convertPdf(file: string, opts: ParseOptions): Promise<ParseResult> {
   const started = Date.now()
+  const deadline = started + opts.timeoutMs
   try {
     if (opts.signal?.aborted) return empty('已取消')
 
     const unpdf = await loadEngine()
+    const read = await readRuns(unpdf, readBytes(file), opts, deadline)
 
-    // Tagged structure is read from the engine's own content stream, which the
-    // helper does not expose: `extractTextItems` calls `getTextContent()` with
-    // no arguments, so `includeMarkedContent` is not reachable through it.
-    //
-    // The test is whether the document names any *structure*, not whether it
-    // names anything at all. Measured on the one real tagged PDF available, its
-    // 3,264 markers are `NonStruct`, `Span`, `Code` and `Figure` — no `H1..H6`
-    // and no `P` — so a marker merely being present says nothing. Taking this
-    // path on those markers would discard the size-based inference that had
-    // actually recovered structure, and report the document as flat. So a
-    // document only counts as tagged when a run carries a tag this module can
-    // render.
-    const tagged = await readTaggedRuns(unpdf, readBytes(file), opts)
-    if (tagged.some(run => run.tag !== null && isStructuralTag(run.tag))) {
-      const text = render(tagged, true, opts)
-      return finish(text, opts, true, started)
+    // Checked before rendering *and* after, because both can be the long pole:
+    // extraction on a large document, and rendering on a text-heavy one. A
+    // cancellation that arrives during either must not be reported as a
+    // successful conversion of nothing — that is a silent empty success, the
+    // worst available outcome, since the build would record the document as
+    // parsed and index no text for it.
+    if (opts.signal?.aborted) return empty('已取消')
+    if (read.timedOut) return timeoutResult(opts, started)
+
+    const tagged = read.runs.some(run => run.tag !== null && isStructuralTag(run.tag))
+    const text = render(read.runs, tagged, opts)
+
+    // An empty product with unreachable engine assets is a deployment defect,
+    // not an empty document, and must not be reported as a clean conversion of
+    // nothing: the two are indistinguishable downstream, and only one of them is
+    // something the user can act on.
+    if (text.trim() === '' && !checkAssets().ok) {
+      return {
+        text: '',
+        structure: 'flat-text',
+        truncated: false,
+        failed: true,
+        error: `PDF 未取到任何文本，且解析器的字体资源不可用（${checkAssets().detail}）。请将 pdfjs-dist 一并安装后重试。`,
+      }
     }
 
-    const { items } = await unpdf.extractTextItems(readBytes(file))
-    const runs = flatten(items, opts)
-    const text = render(runs, false, opts)
-    return finish(text, opts, false, started)
+    if (opts.signal?.aborted) return empty('已取消')
+    const overran = Date.now() > deadline
+    if (overran) return timeoutResult(opts, started, text)
+
+    return finish(text, opts, tagged, started)
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
     if (isCancellation(error, opts)) return empty('已取消')
+    const message = error instanceof Error ? error.message : String(error)
     return {
       text: '',
       structure: 'flat-text',
@@ -310,6 +310,28 @@ export async function convertPdf(file: string, opts: ParseOptions): Promise<Pars
       failed: true,
       error: `PDF 解析失败：${message}`,
     }
+  }
+}
+
+/**
+ * The result for a document that exceeded its wall-clock ceiling.
+ *
+ * Reported as a failure with whatever text was produced, rather than as a
+ * success: a truncated document indexed silently is a document whose content is
+ * missing with nothing to point at why.
+ * @param opts - the envelope, for the ceiling in the message.
+ * @param started - when conversion began.
+ * @param partial - text produced before the deadline, when there is any.
+ * @returns the failed result.
+ */
+function timeoutResult(opts: ParseOptions, started: number, partial = ''): ParseResult {
+  const { text, truncated } = cap(partial, opts.maxTextBytes)
+  return {
+    text,
+    structure: truncated || text === '' ? 'flat-text' : gradeMarkdown(text),
+    truncated: true,
+    failed: true,
+    error: `PDF 解析超时（上限 ${Math.round(opts.timeoutMs / 1000)} 秒，已用 ${Math.round((Date.now() - started) / 1000)} 秒）`,
   }
 }
 
@@ -361,6 +383,55 @@ function empty(error: string): ParseResult {
 }
 
 /**
+ * Whether the engine's auxiliary data is reachable, and where it is.
+ *
+ * **Why this probe exists.** In Node the engine resolves `cMapUrl` and
+ * `standardFontDataUrl` from the installed `pdfjs-dist` package
+ * (`import.meta.resolve("pdfjs-dist/package.json")`, then `./cmaps/` and
+ * `./standard_fonts/`). Both are **devDependencies** here, so a production
+ * install that omits them makes that resolution throw — and the engine swallows
+ * it in a bare `catch {}`, then goes on to extract with no cmaps and no standard
+ * fonts. A document needing either (a CID-keyed font whose CMap is not embedded,
+ * or one of the fourteen standard fonts) then yields **empty or garbled text with
+ * no error at all**: the same silent-empty shape as the worker-path trap, and
+ * indistinguishable from a genuinely empty document.
+ *
+ * The gate's Latin control cannot catch it, because no committed fixture needs
+ * either resource. So the failure is made loud here instead: the probe runs once
+ * per process, logs an attributable line when the assets are missing, and the
+ * result is carried on the conversion so a caller can tell the two apart.
+ *
+ * Measured on the four real Chinese PDFs: all four embed their fonts and need
+ * neither resource, so this is a latent risk rather than an observed failure —
+ * which is why it is reported rather than worked around, and why promoting
+ * `pdfjs-dist` to a runtime dependency (33 MB) was not taken as the fix.
+ */
+let assetReport: { ok: boolean, detail: string } | null = null
+
+/**
+ * Resolve the engine's auxiliary data directory, once per process.
+ * @returns whether the assets are reachable, and where they were found.
+ */
+function checkAssets(): { ok: boolean, detail: string } {
+  if (assetReport !== null) return assetReport
+  try {
+    const base = import.meta.resolve('pdfjs-dist/package.json')
+    assetReport = { ok: true, detail: new URL('./cmaps/', base).href }
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error)
+    assetReport = { ok: false, detail: reason }
+    // Loud and attributable, once, rather than silent and per-document: this is
+    // a deployment defect, not a property of any one file.
+    console.error(
+      '[dsh-zvec-knowledge/pdf] 未能解析 pdfjs-dist 的 cmaps/standard_fonts 资源，' +
+        'PDF 中依赖 CMap 或标准字体的文本可能产出空文本或乱码而无任何报错。' +
+        `原因：${reason}。修复：将 pdfjs-dist 作为安装依赖一并安装。`,
+    )
+  }
+  return assetReport
+}
+
+/**
  * Whether an error is a cancellation rather than a failure.
  * @param error - the thrown value.
  * @param opts - the envelope carrying the signal.
@@ -387,27 +458,40 @@ async function loadEngine(): Promise<UnpdfSurface> {
 /**
  * Read runs together with the document's own tag tree.
  *
- * Returns an empty run list when the document is untagged, which is the signal
- * to fall back to inference. A tagged document's own claim is stronger than any
- * guess this module could make, so when it exists it is used as-is.
+ * An untagged document yields runs whose `tag` is null, which is the signal to
+ * infer structure from font sizes; a tagged one yields the document's own claim,
+ * which is stronger than any guess this module could make.
+ *
+ * The deadline and the abort signal are both checked **per page**, so a
+ * cancellation or an overrun stops the work rather than being noticed after it.
+ * `getTextContent` for one page is not interruptible — the engine offers no hook
+ * — so the finest granularity available is between pages, which is also where
+ * the cost accumulates on a long document.
  * @param unpdf - the library surface.
  * @param bytes - the document's bytes; the engine detaches them, so the caller
  *   must not reuse this array afterwards.
  * @param opts - the envelope.
- * @returns the runs, each carrying its active tag.
+ * @param deadline - the wall-clock instant past which the document has failed.
+ * @returns the runs, and whether the deadline stopped the read.
  */
-async function readTaggedRuns(
+async function readRuns(
   unpdf: UnpdfSurface,
   bytes: Uint8Array,
   opts: ParseOptions,
-): Promise<Run[]> {
+  deadline: number,
+): Promise<{ runs: Run[], timedOut: boolean }> {
   const doc = await unpdf.getDocumentProxy(bytes)
   const pdfjs = await unpdf.getResolvedPDFJS()
   const runs: Run[] = []
+  let timedOut = false
   try {
     const limit = Math.min(doc.numPages, Math.max(0, opts.maxPages))
     for (let pageNumber = 1; pageNumber <= limit; pageNumber++) {
       if (opts.signal?.aborted) throw abortError()
+      if (Date.now() > deadline) {
+        timedOut = true
+        break
+      }
       const page = await doc.getPage(pageNumber)
       const content = await page.getTextContent({ includeMarkedContent: true })
       runs.push(...translate(content.items, page, pdfjs, pageNumber - 1))
@@ -416,7 +500,7 @@ async function readTaggedRuns(
   } finally {
     await doc.loadingTask.destroy()
   }
-  return runs
+  return { runs, timedOut }
 }
 
 /**
@@ -457,7 +541,6 @@ function translate(items: ContentItem[], page: EnginePage, pdfjs: EngineModule, 
       y,
       width: item.width,
       size,
-      eol: item.hasEOL === true,
       tag: currentTag(stack),
       page: pageIndex,
     })
@@ -490,49 +573,6 @@ function currentTag(stack: string[]): string | null {
     return tag
   }
   return null
-}
-
-/**
- * Convert the extraction helper's per-page output into flat runs.
- *
- * This is the untagged path. It has no marked-content information — the helper
- * does not request it — so every run's tag is null and the caller infers.
- *
- * The helper reports the raw bottom-left translation, which the tagged path
- * gets flipped by the page's viewport transform. There is no page object here,
- * so the flip is applied directly. The two must agree, or a document would be
- * laid out one way when it happens to be tagged and the other way when it is
- * not; the gate covers both paths for exactly that reason.
- * @param pages - the per-page run lists.
- * @param opts - the envelope.
- * @returns the runs.
- */
-function flatten(pages: StructuredItem[][], opts: ParseOptions): Run[] {
-  const keep = Math.min(pages.length, Math.max(0, opts.maxPages))
-  const runs: Run[] = []
-  for (let p = 0; p < keep; p++) {
-    const page = pages[p] as StructuredItem[]
-    // The page's height is not reported per run, so it is recovered from the
-    // runs themselves: the topmost run's y is the largest, and every run's
-    // distance from the top is that value minus its own. Doing it per page
-    // rather than by a global constant keeps pages of different sizes correct.
-    let top = Number.NEGATIVE_INFINITY
-    for (const item of page) if (item.y > top) top = item.y
-    for (const item of page) {
-      if (item.str === '') continue
-      runs.push({
-        text: item.str,
-        x: item.x,
-        y: top - item.y,
-        width: item.width,
-        size: item.fontSize || item.height,
-        eol: item.hasEOL === true,
-        tag: null,
-        page: p,
-      })
-    }
-  }
-  return runs
 }
 
 /**
@@ -799,13 +839,10 @@ function splitColumns(lines: Line[]): Line[][] | null {
     if (runs.length === 0) continue
     const leftRuns = runs.filter(r => r.x + r.width / 2 < gutter)
     const rightRuns = runs.filter(r => r.x + r.width / 2 >= gutter)
-    if (process.env.KB_TRACE) console.error(`[trace]  line gutter=${gutter} runs=${JSON.stringify(runs.map(r => [r.text, r.x + r.width / 2]))} L=${leftRuns.length} R=${rightRuns.length}`)
     if (leftRuns.length > 0) left.push(withRuns(line, leftRuns))
     if (rightRuns.length > 0) right.push(withRuns(line, rightRuns))
   }
-  if (process.env.KB_TRACE) console.error(`[trace] built left=${left.length} right=${right.length} gutter=${gutter}`)
   if (left.length === 0 || right.length === 0) return null
-  if (process.env.KB_TRACE) console.error('[trace] SPLIT left=' + left.length + ' right=' + right.length)
   return [left, right]
 }
 
@@ -817,6 +854,23 @@ function splitColumns(lines: Line[]): Line[][] | null {
  */
 function withRuns(line: Line, runs: Run[]): Line {
   return { ...line, runs }
+}
+
+/**
+ * How wide a gap has to be before it separates two columns rather than two
+ * words.
+ *
+ * The rule appears in four places — deriving cell anchors, splitting cells,
+ * splitting columns and joining a line's text — and it has to be the *same* rule
+ * in all of them, or the anchors a row is tested against are not the boundaries
+ * it was split on. A word space is a fraction of the text size; the gutter that
+ * positions a column is a large multiple of it, so the threshold scales with the
+ * font rather than being a fixed number of points that would fail on small text.
+ * @param size - the font size in points.
+ * @returns the minimum separating width in points.
+ */
+function boundaryWidth(size: number): number {
+  return Math.max(6, size)
 }
 
 /**
@@ -835,11 +889,11 @@ function stripBoundaries(line: Line): number[] {
   let previousEnd: number | null = null
   for (const run of line.runs) {
     if (run.text.trim() === '') {
-      if (run.width > Math.max(6, run.size)) out.push(run.x + run.width)
+      if (run.width > boundaryWidth(run.size)) out.push(run.x + run.width)
       previousEnd = run.x + run.width
       continue
     }
-    if (previousEnd !== null && run.x - previousEnd > Math.max(6, run.size)) out.push(run.x)
+    if (previousEnd !== null && run.x - previousEnd > boundaryWidth(run.size)) out.push(run.x)
     previousEnd = run.x + run.width
   }
   return out
@@ -940,7 +994,7 @@ function lineText(line: Line): string {
     if (previousEnd !== null) {
       const gap = run.x - previousEnd
       const nextChar = piece[0] as string
-      if (gap > Math.max(6, run.size)) text += '\t'
+      if (gap > boundaryWidth(run.size)) text += '\t'
       else if (needsSpace(previousChar, nextChar)) text += ' '
     }
     text += piece
@@ -1073,7 +1127,7 @@ function cellsOf(line: Line): string[] | null {
     if (piece === '') {
       // Whitespace positions the next cell. Whether it is *wide* is the whole
       // question, so it is measured rather than ignored.
-      if (current !== '' && run.width > Math.max(6, run.size)) {
+      if (current !== '' && run.width > boundaryWidth(run.size)) {
         cells.push(current.trim())
         current = ''
         boundaries++
@@ -1081,7 +1135,7 @@ function cellsOf(line: Line): string[] | null {
       previousEnd = run.x + run.width
       continue
     }
-    if (previousEnd !== null && run.x - previousEnd > Math.max(6, run.size) && current !== '') {
+    if (previousEnd !== null && run.x - previousEnd > boundaryWidth(run.size) && current !== '') {
       cells.push(current.trim())
       current = ''
       boundaries++
@@ -1111,7 +1165,7 @@ function cellAnchors(line: Line): number[] | null {
   for (const run of line.runs) {
     const piece = run.text.trim()
     if (piece === '') {
-      if (started && run.width > Math.max(6, run.size)) started = false
+      if (started && run.width > boundaryWidth(run.size)) started = false
       previousEnd = run.x + run.width
       continue
     }

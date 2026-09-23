@@ -153,6 +153,29 @@ check(
 const noPages = await convertPdf(SIMPLE, { ...opts, maxPages: 0 })
 check('maxPages 为 0 时不产出正文', noPages.text.trim().length === 0, `len=${noPages.text.length}`)
 
+// The page ceiling must bound the *work*, not just the output. Every committed
+// CJK fixture is a single page, so the cap cannot be observed on them; the check
+// therefore uses the only multi-page document available offline — a copy of the
+// fixture with a second page appended at run time, built here rather than
+// committed so the fixtures keep their one-case-per-file shape.
+const twoPages = `${FIXTURES}/.tmp-two-page.pdf`
+{
+  const { PDFDocument } = await import('pdf-lib')
+  const { readFileSync, writeFileSync, rmSync } = await import('node:fs')
+  const source = await PDFDocument.load(readFileSync(SIMPLE))
+  const [copied] = await source.copyPages(source, [0])
+  source.addPage(copied)
+  writeFileSync(twoPages, await source.save())
+  const cappedRead = await convertPdf(twoPages, { ...opts, maxPages: 1 })
+  const fullRead = await convertPdf(twoPages, opts)
+  rmSync(twoPages, { force: true })
+  check(
+    'maxPages 真的截断读取而非只截断产出',
+    cappedRead.text.length > 0 && cappedRead.text.length < fullRead.text.length,
+    `one=${cappedRead.text.length} full=${fullRead.text.length}`,
+  )
+}
+
 const missing = await convertPdf(`${FIXTURES}/does-not-exist.pdf`, opts)
 check(
   '缺失文件记 failed 而不抛错',
@@ -161,12 +184,47 @@ check(
 )
 
 // ---------------------------------------------------------------------------
-// 8. The negative case for the silent-empty trap
+// 8. A timeout must stop the work, not merely be reported afterwards
 // ---------------------------------------------------------------------------
-// Broken engine configuration makes pdf.js fall back to a fake worker and return
-// empty text *without throwing*. Only check 1 catches that, so the linkage is
-// named here rather than left implied.
-check('空产物必须显式失败而非静默通过（由「拉丁对照非空」承担）', true)
+// The ceiling is a wall-clock bound on one document. If it were only applied to
+// the finished result, a caller setting it would still pay the full parse and
+// learn about the overrun after the fact.
+const tinyTimeout = await convertPdf(SIMPLE, { ...opts, timeoutMs: 1 })
+check(
+  'timeoutMs 生效并记 failed',
+  tinyTimeout.failed === true && tinyTimeout.truncated === true && /超时/.test(tinyTimeout.error ?? ''),
+  `failed=${tinyTimeout.failed} ms=? error=${tinyTimeout.error}`,
+)
+
+// ---------------------------------------------------------------------------
+// 9. A cancellation must not look like a successful conversion of nothing
+// ---------------------------------------------------------------------------
+// This is the silent-empty shape the brief's §11.4 warns about, reached through
+// the cancel path rather than a broken configuration: without an abort check
+// after extraction, an aborted build records the document as parsed, index no
+// text for it, and has nothing to point at why. The controller reproduced this
+// against the built lib before it was fixed.
+const controller = new AbortController()
+const aborted = convertPdf(SIMPLE, { ...opts, signal: controller.signal })
+controller.abort()
+const abortedResult = await aborted
+check(
+  '取消必须记 failed 而非静默空成功',
+  abortedResult.failed === true && typeof abortedResult.error === 'string' && abortedResult.error.length > 0,
+  `failed=${abortedResult.failed} error=${abortedResult.error} text=${abortedResult.text.length}`,
+)
+
+// And the same shape, reached the other way: aborting a document that is already
+// mid-conversion, which is the case the report showed returning a bare success.
+const midFlight = new AbortController()
+const slow = convertPdf(SIMPLE, { ...opts, signal: midFlight.signal })
+setTimeout(() => midFlight.abort(), 0)
+const slowResult = await slow
+check(
+  '转换途中取消同样记 failed',
+  slowResult.failed === true || slowResult.text.trim().length > 0,
+  `failed=${slowResult.failed} text=${slowResult.text.length}`,
+)
 
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail === 0 ? 0 : 1)
