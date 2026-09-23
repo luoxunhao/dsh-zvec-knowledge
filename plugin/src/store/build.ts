@@ -614,13 +614,25 @@ async function parseDocuments(
   const kept: DocumentBuildRequest[] = []
   for (const document of request.documents) {
     if (signal.aborted) return kept
-    // Checked *before* the guards below, because a conversion already recorded
-    // `failed` must not be reprocessed: re-keeping it would silently turn the
-    // failure into a success on the next build.
-    if (isAlreadyFailed(request, document.docId)) {
-      onDocument()
-      continue
-    }
+    // **There is deliberately no "already failed, so skip it" check here.** An
+    // earlier revision had one, reading the document log for a `failed` status and
+    // `continue`-ing before the guards below. It was wrong in a way that is worth
+    // recording, because it looked like a sensible optimisation:
+    //
+    // A failure is often *transient* — a partial upload, a write that hit ENOSPC, a
+    // converter bug fixed in the next release — and the stored original is kept
+    // byte-for-byte precisely so the text can be re-derived when the cause is gone.
+    // A skip here means the original is never re-read, so the document is
+    // permanently poisoned across every future build with no way to recover except
+    // deleting it and re-uploading under a new id. Measured: with the check in
+    // place, an explicit `mode: 'full'` rebuild left a document `failed` while a
+    // perfectly good original sat on disk.
+    //
+    // Deciding which documents to *submit* is the caller's job, where the
+    // incremental/full distinction actually lives — see `buildIndex`, which skips
+    // known-failed documents on the incremental branch only. This function converts
+    // what it is given and judges each one honestly.
+    //
     // A document whose text is already present and which is not being reparsed
     // needs no conversion at all, and must not be charged for one.
     if (document.source === undefined || (!document.source.reparse && document.text.trim() !== '')) {
@@ -706,35 +718,6 @@ function envelope(request: BuildRequest): ParseOptions {
     timeoutMs: parse?.timeoutMs ?? 0,
     maxPages: parse?.maxPages ?? 0,
     maxTextBytes: parse?.maxTextBytes ?? 0,
-  }
-}
-
-/**
- * Whether this document is already marked as a parse failure.
- *
- * Read from the document log rather than carried in the request, because that is
- * where the previous build's verdict lives and the whole point of the verdict is
- * that it *persists*: a document whose scan was refused, whose PDF is encrypted
- * or whose converter is not implemented yet must not be silently upgraded to a
- * success on the next build by a record that still holds no text. It stays
- * failed, with its reason, until it is parsed successfully — which means the user
- * re-uploads it, or a later task implements its converter and the collection is
- * reparsed from the stored original.
- * @param request - the build request, for the log target.
- * @param docId - the document to look up.
- * @returns true when the recorded status is `failed`.
- */
-function isAlreadyFailed(request: BuildRequest, docId: string): boolean {
-  const where = request.documentsFile
-  if (where === undefined) return false
-  try {
-    return listDocuments(where.storeRoot, where.collectionId)
-      .some(record => record.id === docId && record.status === 'failed')
-  } catch {
-    // An unreadable log means no verdict can be recovered; converting the
-    // document again is the safe direction, and the parse stage's own guard is
-    // what keeps a failure contained either way.
-    return false
   }
 }
 

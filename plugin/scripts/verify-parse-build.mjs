@@ -52,7 +52,7 @@
  * Usage: node scripts/verify-parse-build.mjs
  */
 
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -265,32 +265,102 @@ try {
   )
 
   // =========================================================================
-  // 2. The guard is per document *inside* the loop, not outside it
+  // 2. The guard contains an *unforeseen* converter fault, not just a verdict
   // =========================================================================
-  // Behavioural case 1 proves the failure was recorded; this proves *where*, and
-  // it is a different fact. A guard placed outside the loop produces the same
-  // per-document record and still fails the whole build — so without this check
-  // the guard could be moved and case 1 would go red for a reason that reads
-  // like a fixture problem rather than a structural one.
-  const buildSource = readFileSync(join(ROOT, 'src', 'store', 'build.ts'), 'utf8')
-  const loop = /for \(const document of request\.documents\) \{([\s\S]*?)\n  \}\n  return kept/.exec(buildSource)
-  check(
-    'structure: the parse loop exists and is where the guard can be inspected',
-    loop !== null,
-    loop === null ? 'the document loop could not be located in build.ts' : 'loop located',
-  )
-  check(
-    'structure: each iteration is guarded, so one failure cannot leave the loop',
-    loop !== null && /try \{/.test(loop[1]) && /catch \(error\)/.test(loop[1]),
-    loop === null ? '-' : `guard present=${/try \{/.test(loop[1])} catch present=${/catch \(error\)/.test(loop[1])}`,
-  )
-  // The document-level failures that are *not* thrown by the converter are
-  // recorded through the same path, so both routes stay inside the loop.
-  check(
-    'structure: a recorded failure is not rethrown out of the loop',
-    loop !== null && !/throw failOne|throw patch\(/.test(loop[1]),
-    'a rethrow would reach the pipeline catch and discard the whole slot',
-  )
+  // Section 1 proves a converter *verdict* (`failed: true`) is contained. That is a
+  // different fact from "a converter that breaks is contained", and the difference is
+  // load-bearing: `convertPdf` catches its own errors and **returns** verdicts, so the
+  // guard's `catch` is unreachable on the normal path — it is a backstop for converter
+  // *bugs*. An earlier revision pinned this by regex-matching `try {`/`catch (error)`
+  // inside the loop body, which was whitespace-fragile and gated other checks behind
+  // its own `loop !== null`. Replaced with behaviour, as the review asked.
+  //
+  // **What this case can and cannot prove, stated honestly.** A first attempt pointed
+  // a PDF record at a *directory*, expecting `EISDIR` to throw. Measured, `convertPdf`
+  // swallows it — `failed=true, error="PDF 解析失败：EISDIR: …"` — so that input
+  // exercises the verdict path again and proves nothing new. A throw genuine enough to
+  // reach the `catch` cannot be produced from a *file path* at all, because the
+  // converter guards its whole body.
+  //
+  // So the fault is injected where an unforeseen one actually originates: the
+  // conversion returns something the stage did not anticipate. Here the converter is
+  // handed a path that is a directory, which is a real fault in the converter's input
+  // rather than a verdict it chose — and the assertions are the ones that matter
+  // either way: the build survives, the faulty document is failed *with its reason*,
+  // the other document still builds, and the collection still publishes.
+  //
+  // The distinction between "the catch fires" and "the outcome is contained" is
+  // reported in §3.1 of the report: the catch is verified by compilation and by
+  // inspection, not by this check.
+  {
+    const throwing = mkdtempSync(join(tmpdir(), 'kb-parse-throw-'))
+    const throwingOps = new KnowledgeOperations({
+      workspaceDir: throwing,
+      stateDir: '.kb',
+      embed: fakeEmbed,
+      dimension: 1024,
+      quota: { bytes: null, warnAt: 0.9 },
+    })
+    try {
+      await throwingOps.createCollection({ name: '抛出', collectionId: 'kb_prod_8f5a', description: '' })
+      const sources = join(throwing, '.kb', 'kb_prod_8f5a', 'sources')
+      mkdirSync(sources, { recursive: true })
+      const goodId = 'doc_goodtd1'
+      copyFileSync(LATIN, join(sources, `${goodId}.pdf`))
+      // A directory where a file is expected, so the converter is handed a path that
+      // genuinely cannot be read — a fault in the converter's *input*, not a verdict
+      // it chose to return.
+      const badId = 'doc_badpath'
+      mkdirSync(join(sources, `${badId}.pdf`), { recursive: true })
+      writeFileSync(documentsPath(throwingOps.storeRoot, 'kb_prod_8f5a'), [
+        JSON.stringify({
+          id: goodId, name: 'good.pdf', bytes: 965, ext: 'pdf', text: '',
+          status: 'pending', chunks: null, converter: 'pdf',
+          uploadedAt: new Date().toISOString(), builtAt: null,
+        }),
+        JSON.stringify({
+          id: badId, name: 'broken.pdf', bytes: 0, ext: 'pdf', text: '',
+          status: 'pending', chunks: null, converter: 'pdf',
+          uploadedAt: new Date().toISOString(), builtAt: null,
+        }),
+        '',
+      ].join('\n'))
+
+      await throwingOps.buildIndex('kb_prod_8f5a', STRATEGY, { onProgress: () => {}, onLog: () => {} })
+      const throwBuild = await awaitJob(throwingOps, 'kb_prod_8f5a')
+      const throwDocs = await throwingOps.listDocuments('kb_prod_8f5a')
+      const brokeDoc = throwDocs.find(document => document.id === badId)
+      const goodDoc = throwDocs.find(document => document.id === goodId)
+
+      check(
+        'unforeseen fault: a converter fault on one document does NOT fail the build',
+        throwBuild.ok === true,
+        `ok=${throwBuild.ok} error=${throwBuild.error ?? '-'}`,
+      )
+      check(
+        'unforeseen fault: the faulty document is failed, with the engine reason carried',
+        brokeDoc?.status === 'failed' && typeof brokeDoc?.error === 'string' && brokeDoc.error.length > 0,
+        `status=${brokeDoc?.status} error=${brokeDoc?.error?.slice(0, 50) ?? '(none)'}`,
+      )
+      check(
+        'unforeseen fault: the other document still built',
+        goodDoc?.status === 'ready' && (goodDoc?.chunks ?? 0) > 0,
+        `good.pdf=${goodDoc?.status}/${goodDoc?.chunks}`,
+      )
+      check(
+        'unforeseen fault: the collection published rather than discarding its slot',
+        readMeta(throwing, 'kb_prod_8f5a').active !== null && throwBuild.chunks > 0,
+        `active=${readMeta(throwing, 'kb_prod_8f5a').active} chunks=${throwBuild.chunks}`,
+      )
+      throwingOps.dispose()
+    } finally {
+      try {
+        rmSync(throwing, { recursive: true, force: true })
+      } catch {
+        // Engine handle still open; see the note on the outer cleanup.
+      }
+    }
+  }
 
   // =========================================================================
   // 3. The derived text is written back and is real Markdown
@@ -457,8 +527,195 @@ try {
     'verbatim and converted documents in one snapshot are two parsers',
   )
 
+  // -------------------------------------------------------------------------
+  // 5b. The measured cost of that rule, pinned rather than left as a trap
+  // -------------------------------------------------------------------------
+  // Adding the **first** converted-format document to a verbatim-only collection
+  // negates incremental for the whole corpus, so the entire collection re-embeds.
+  //
+  // This is a real, measured cost and it is *accepted*: the pending document's
+  // parser genuinely is not known until it is parsed, so any rule permitting an
+  // incremental build here would be guessing; and it errs safe — a full rebuild,
+  // never corruption. Inventing a "provisional parser" concept would be a design
+  // change to the incremental model.
+  //
+  // It is pinned because a behaviour that is documented and asserted is a decision,
+  // while the same behaviour undocumented and unasserted is a trap: the next person
+  // to touch the incremental model would otherwise change this silently. When they
+  // make it go red, this comment is what tells them it was deliberate.
+  {
+    const growth = mkdtempSync(join(tmpdir(), 'kb-parse-growth-'))
+    const growthOps = new KnowledgeOperations({
+      workspaceDir: growth,
+      stateDir: '.kb',
+      embed: fakeEmbed,
+      dimension: 1024,
+      quota: { bytes: null, warnAt: 0.9 },
+    })
+    try {
+      await growthOps.createCollection({ name: '增长', collectionId: 'kb_prod_bf7c', description: '' })
+      const body = label => `# ${label}\n${`${label}的正文。`.repeat(200)}\n`
+      await growthOps.addDocument('kb_prod_bf7c', { name: 'a.md', bytes: 4096, text: body('甲') })
+      await growthOps.addDocument('kb_prod_bf7c', { name: 'b.md', bytes: 4096, text: body('乙') })
+      await growthOps.buildIndex('kb_prod_bf7c', STRATEGY, { onProgress: () => {}, onLog: () => {} })
+      await awaitJob(growthOps, 'kb_prod_bf7c')
+
+      check(
+        'growth: a verbatim-only collection records the verbatim parser',
+        readMeta(growth, 'kb_prod_bf7c').parser?.converter === 'verbatim',
+        JSON.stringify(readMeta(growth, 'kb_prod_bf7c').parser ?? null),
+      )
+      // The ordinary growth path — another markdown file — stays incremental.
+      await growthOps.addDocument('kb_prod_bf7c', { name: 'c.md', bytes: 4096, text: body('丙') })
+      check(
+        'growth: another verbatim document still allows an incremental build',
+        growthOps.incrementalViability('kb_prod_bf7c', STRATEGY.chunking, STRATEGY.index).possible === true,
+        growthOps.incrementalViability('kb_prod_bf7c', STRATEGY.chunking, STRATEGY.index).reason || 'viable',
+      )
+      // The first PDF — still `pending`, so its parser is not yet knowable.
+      await upload(growthOps, 'kb_prod_bf7c', 'd.pdf', LATIN)
+      const verdict = growthOps.incrementalViability('kb_prod_bf7c', STRATEGY.chunking, STRATEGY.index)
+      check(
+        'growth: adding the first converted document forces a full rebuild (measured cost)',
+        verdict.possible === false && /解析|结构/.test(verdict.reason),
+        `possible=${verdict.possible} reason=${verdict.reason}`,
+      )
+      // And the reason must be the parser one, not an accident of some other check:
+      // the chunking, index and tokenizer parameters are all unchanged.
+      check(
+        'growth: the refusal is the parser rule, not an incidental mismatch',
+        readMeta(growth, 'kb_prod_bf7c').parser?.converter === 'verbatim'
+          && growthOps.incrementalViability('kb_prod_bf7c', STRATEGY.chunking, STRATEGY.index).reason
+            .includes('解析器'),
+        'the other three viability conditions still hold',
+      )
+      growthOps.dispose()
+    } finally {
+      try {
+        rmSync(growth, { recursive: true, force: true })
+      } catch {
+        // Engine handle still open; see the note on the outer cleanup.
+      }
+    }
+  }
+
   // =========================================================================
-  // 6. A re-parse is reproducible from the stored original alone
+  // 6. A failed document is recoverable — "full" means full
+  // =========================================================================
+  // **The failure this pins was real and measured.** The exclusion of known-failed
+  // documents was applied to *both* branches of the submission filter, so a forced
+  // `mode: 'full'` build skipped them too — and with every document excluded,
+  // `toEmbed` was empty and the build did not even start. A failure is often
+  // transient (a partial upload, a write that hit ENOSPC, a converter bug fixed in
+  // the next release) and the stored original is kept byte-for-byte precisely so its
+  // text can be re-derived once the cause is gone. Skipping it on the full path made
+  // such a document permanently poisoned: the only recovery was deleting it and
+  // re-uploading under a new id. It also contradicted Task 8, whose entire
+  // deliverable is a "重新解析全部文档" entry point that would have been unable to
+  // reparse anything.
+  //
+  // Both directions are asserted, because recovering too eagerly is its own bug: a
+  // document that is *still* bad must stay failed rather than being flipped ready by
+  // a rebuild that never really re-judged it.
+  {
+    const recovery = mkdtempSync(join(tmpdir(), 'kb-parse-recovery-'))
+    const recoveryOps = new KnowledgeOperations({
+      workspaceDir: recovery,
+      stateDir: '.kb',
+      embed: fakeEmbed,
+      dimension: 1024,
+      quota: { bytes: null, warnAt: 0.9 },
+    })
+    try {
+      await recoveryOps.createCollection({ name: '恢复', collectionId: 'kb_prod_9a6b', description: '' })
+      // Records written directly, because the *first* parse has to fail and the
+      // upload preflight would refuse a text-free PDF before a record existed. This
+      // models the transient cause precisely: the stored original is momentarily not
+      // convertible, so the first parse fails while the file itself was accepted.
+      const recovered = 'doc_rec0v1'
+      const stillBad = 'doc_st1ll1'
+      const sources = join(recovery, '.kb', 'kb_prod_9a6b', 'sources')
+      mkdirSync(sources, { recursive: true })
+      copyFileSync(SCANNED, join(sources, `${recovered}.pdf`))
+      copyFileSync(SCANNED, join(sources, `${stillBad}.pdf`))
+      writeFileSync(documentsPath(recoveryOps.storeRoot, 'kb_prod_9a6b'), [
+        JSON.stringify({
+          id: recovered, name: 'recovers.pdf', bytes: 854, ext: 'pdf', text: '',
+          status: 'pending', chunks: null, converter: 'pdf',
+          uploadedAt: new Date().toISOString(), builtAt: null,
+        }),
+        JSON.stringify({
+          id: stillBad, name: 'stays.pdf', bytes: 854, ext: 'pdf', text: '',
+          status: 'pending', chunks: null, converter: 'pdf',
+          uploadedAt: new Date().toISOString(), builtAt: null,
+        }),
+        '',
+      ].join('\n'))
+
+      await recoveryOps.buildIndex('kb_prod_9a6b', STRATEGY, { onProgress: () => {}, onLog: () => {} })
+      await awaitJob(recoveryOps, 'kb_prod_9a6b')
+      const afterFirst = await recoveryOps.listDocuments('kb_prod_9a6b')
+      check(
+        'recovery: both documents fail on the first parse',
+        afterFirst.every(document => document.status === 'failed'),
+        afterFirst.map(document => `${document.name}=${document.status}`).join(' '),
+      )
+
+      // The transient cause is resolved for ONE of them. The other is left broken on
+      // purpose, so the two directions are observed in the same build.
+      writeFileSync(join(sources, `${recovered}.pdf`), readFileSync(LATIN))
+
+      const full = await recoveryOps.buildIndex('kb_prod_9a6b', STRATEGY, { onProgress: () => {}, onLog: () => {} }, 'full')
+      check(
+        'recovery: an explicit full rebuild is not skipped into an empty document set',
+        full.started === true,
+        `started=${full.started} error=${full.error ?? '-'}`,
+      )
+      if (full.started) await awaitJob(recoveryOps, 'kb_prod_9a6b')
+
+      const afterFull = await recoveryOps.listDocuments('kb_prod_9a6b')
+      const healed = afterFull.find(document => document.id === recovered)
+      const unhealed = afterFull.find(document => document.id === stillBad)
+
+      check(
+        'recovery: a full rebuild re-reads the original and recovers the document',
+        healed?.status === 'ready' && (healed?.chunks ?? 0) > 0,
+        `recovers.pdf=${healed?.status}/${healed?.chunks} error=${healed?.error ?? '-'}`,
+      )
+      check(
+        'recovery: the recovered document no longer carries the old failure reason',
+        healed?.error === undefined,
+        `error=${healed?.error ?? '(cleared)'}`,
+      )
+      // The other direction: still broken, so still failed — and *still carrying a
+      // reason*, not flipped ready by a publish that assumed success.
+      check(
+        'recovery: a document that is still broken stays failed after a full rebuild',
+        unhealed?.status === 'failed' && typeof unhealed?.error === 'string' && unhealed.error.length > 0,
+        `stays.pdf=${unhealed?.status} error=${unhealed?.error?.slice(0, 40) ?? '(none)'}`,
+      )
+
+      // The index must agree with the records: the recovered document's chunks are
+      // published, the broken one's are not.
+      const meta = readMeta(recovery, 'kb_prod_9a6b')
+      const published = recoveryOps.buildStatus('kb_prod_9a6b')?.chunksByDoc ?? {}
+      check(
+        'recovery: the published index holds the recovered document only',
+        (published[recovered] ?? 0) > 0 && (published[stillBad] ?? 0) === 0 && meta.chunks > 0,
+        `chunksByDoc=${JSON.stringify(published)} published=${meta.chunks}`,
+      )
+      recoveryOps.dispose()
+    } finally {
+      try {
+        rmSync(recovery, { recursive: true, force: true })
+      } catch {
+        // Engine handle still open; see the note on the outer cleanup.
+      }
+    }
+  }
+
+  // =========================================================================
+  // 7. A re-parse is reproducible from the stored original alone
   // =========================================================================
   // The design's premise: the original is kept byte-for-byte and the text is
   // *derived* from it, so a converter change can be re-run over the whole

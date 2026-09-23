@@ -1038,13 +1038,38 @@ export class KnowledgeOperations {
     const viability = self.incrementalViability(collectionId, strategy.chunking, strategy.index)
     const useIncremental = mode === 'incremental' && viability.possible
     const pending = records.filter(record => record.status !== 'ready')
-    // A document whose parse failed has already been judged by the build that ran
-    // it and is excluded here rather than retried on every submission: the
-    // verdict is sticky (see `markPublished`), and re-converting it would spend a
-    // whole corpus's parse budget to reach the same answer. Re-uploading the file
-    // gives it a new id and therefore a clean slate, which is the user's remedy.
+    // **The exclusion below applies to the incremental branch only, and that is the
+    // whole point of where it sits.**
+    //
+    // A document whose parse failed has already been judged, and on an incremental
+    // build re-converting it would spend parse budget to reach the same answer — so
+    // it is skipped, and `incrementalViability`'s refusal to inherit mixed-parser
+    // chunks means the skip can never leave the index inconsistent. That is a cost
+    // saving, and it is safe because the document's current verdict is the best
+    // available evidence about it.
+    //
+    // A build the caller asked for **in full** must not skip it. "Full" means every
+    // document with a converter and a source is re-read and re-judged, which is the
+    // only thing that can recover a document whose failure had a *transient* cause:
+    // a partial upload, a write that hit ENOSPC, or a converter bug fixed in the
+    // next release all leave a document marked `failed` while its stored original is
+    // perfectly good — and the original is kept byte-for-byte precisely so it can be
+    // re-derived. Applying the filter to the full branch made such a document
+    // permanently unrecoverable: measured, an explicit `mode: 'full'` build skipped
+    // it, and with every document excluded `toEmbed` was empty and the build did not
+    // even start (`started: false`). Only deleting and re-uploading — a new document
+    // id — recovered it.
+    //
+    // Excluded on the full branch, the exclusion also contradicted Task 8, whose
+    // entire deliverable is a "重新解析全部文档" entry point: a document skipped by
+    // every build cannot be reparsed by anything.
+    //
+    // What the skip was protecting is preserved either way: a failed document is
+    // never silently re-kept or flipped to success. On the full branch it is
+    // re-converted and re-judged, and if it fails again it stays `failed` with a
+    // fresh reason.
     const toEmbed = (useIncremental ? pending : records)
-      .filter(record => !(record.status === 'failed' && record.converter !== undefined))
+      .filter(record => !useIncremental || !(record.status === 'failed' && record.converter !== undefined))
 
     // A full build is required, but the caller asked for incremental. Saying so is
     // the difference between "your upload was cheap" and "this silently re-cut
@@ -1711,19 +1736,37 @@ function markPublished(
   const updated = current.map(record => {
     const rebuilt = builtById.get(record.id)
     if (rebuilt === undefined) return record
-    // A failure the *build* recorded is not overwritten by the publish that follows
-    // it. The parse stage marks a document `failed` with its reason before the
-    // publish stage runs, and the publish sweeps every embedded document to `ready`
-    // — which erases exactly the verdict the user needs to see, and leaves the
-    // document looking built while holding no text and no chunks.
+    // **A failure recorded by *this* build survives the publish; one left over from
+    // an earlier build does not.**
+    //
+    // The distinction is carried by `chunksByDoc`: it is the chunking stage's own
+    // plan for the documents this build actually embedded, so a document present in
+    // it produced text and was indexed *now*. A document absent from it that the log
+    // still calls `failed` either was not converted this time (the incremental skip)
+    // or failed again this time — and in both cases the log's verdict is already the
+    // right one, so it is kept.
+    //
+    // Why the stale-failure case matters: a failure is often transient (a partial
+    // upload, an ENOSPC, a converter bug fixed in the next release), and a full
+    // rebuild re-converts and re-judges such a document. The parse stage rewrites its
+    // text and clears nothing else, so a publish that merely *kept* the old `failed`
+    // would leave a document holding perfectly good text while displaying the previous
+    // build's error — the reparse would appear to have failed when it in fact
+    // succeeded. Measured before this fix: after restoring a good original and
+    // rebuilding, the record held 63 characters of text and the build had indexed 2
+    // chunks for it, yet the status still read `failed` with the old reason.
+    //
+    // And the reason this guard exists at all: the publish sweeps every embedded
+    // document to `ready`, which would erase the verdict of a document that just
+    // failed, leaving it looking built while holding no text and no chunks.
     //
     // Read from `record` — the log as it stands *now*, after the build wrote its
-    // verdict — and **not** from `rebuilt`, which is the pre-build snapshot the
-    // caller handed in. Reading the stale copy is what made this guard look correct
-    // and do nothing: at launch time the document was `pending`, so the check never
-    // fired and the publish overwrote the failure anyway. The caller's list is a
-    // record of what was *submitted*; only the log knows what the build decided.
-    if (record.status === 'failed') {
+    // verdict — and **not** from `rebuilt`, the pre-build snapshot the caller handed
+    // in. Reading the stale copy is what made an earlier version of this guard look
+    // correct and do nothing: at launch time the document was `pending`, so the check
+    // never fired.
+    const indexed = chunksByDoc[record.id]
+    if (record.status === 'failed' && indexed === undefined) {
       return { ...record, chunks: null, error: record.error ?? rebuilt.error }
     }
     return {
@@ -1732,7 +1775,8 @@ function markPublished(
       // Falls back to the previously stored count when the build did not report one
       // for this document (a document whose text was empty, say). Falling back to
       // `null` instead would put the row back into 待构建 for no reason.
-      chunks: chunksByDoc[record.id] ?? rebuilt.chunks ?? record.chunks,
+      chunks: indexed ?? rebuilt.chunks ?? record.chunks,
+      ...(indexed === undefined ? {} : { error: undefined }),
       builtAt: at,
     }
   })
