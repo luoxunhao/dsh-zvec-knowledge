@@ -77,6 +77,7 @@
     "verify:layout": "node scripts/render-layout-check.mjs && node scripts/measure-layout.mjs && node scripts/measure-overflow.mjs",
     "verify:upload": "node scripts/verify-upload.mjs",
     "verify:parse-grade": "node scripts/verify-parse-grade.mjs",
+    "verify:parse-pdf": "node scripts/verify-parse-pdf.mjs",
     "smoke:zvec": "node scripts/zvec-smoke.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json --noEmit",
     "build": "node scripts/clean-build.mjs && node scripts/gen-tokens.mjs && tsc -p tsconfig.json && tsc -p tsconfig.client.json && tsdown",
@@ -87,7 +88,8 @@
     "verify:deployed": "node scripts/verify-deployed.mjs"
   },
   "dependencies": {
-    "@zvec/zvec": "^0.7.1"
+    "@zvec/zvec": "^0.7.1",
+    "unpdf": "^1.8.1"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.2",
@@ -120,7 +122,10 @@
     "@deepseek-ai/schemastery": "^3.18.2",
     "@types/node": "^24.13.3",
     "@types/react": "~18.3.1",
+    "fontkit": "^1.8.1",
     "lightningcss": "^1.33.0",
+    "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^6.3.289",
     "react": "^18.2.0",
     "react-dom": "^18.3.1",
     "tsdown": "0.22.2",
