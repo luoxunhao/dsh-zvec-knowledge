@@ -89,8 +89,18 @@ export interface DocumentRecord {
 /** File name of a collection's document log. */
 export const DOCUMENTS_FILE = 'documents.jsonl'
 
-/** Accepted upload formats, with the extension each maps to. */
-export const ACCEPTED_EXTENSIONS = ['md', 'markdown', 'txt', 'pdf', 'docx', 'html', 'htm', 'json', 'csv'] as const
+/**
+ * Accepted upload formats, with the extension each maps to.
+ *
+ * Kept in sync with `SUPPORT` in `store/extract.ts` and with
+ * `ACCEPTED_EXTENSIONS` in `client/pages/DocumentsPage.tsx`; the upload gate
+ * asserts all three agree. They are three copies by necessity — this one bounds
+ * `validateUpload`, the second decides how the bytes are handled, and the third
+ * fills the file picker's `accept` attribute in the browser — so a format added
+ * to one and missed in another is an upload refused for no stated reason, or
+ * accepted and then quietly unconvertible.
+ */
+export const ACCEPTED_EXTENSIONS = ['md', 'markdown', 'txt', 'pdf', 'docx', 'html', 'htm', 'xlsx', 'json', 'csv'] as const
 
 /** Maximum accepted upload size, in bytes. */
 export const MAX_UPLOAD_BYTES = 32 * 1024 * 1024

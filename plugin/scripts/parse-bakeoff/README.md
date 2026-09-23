@@ -1,9 +1,10 @@
 # PDF bake-off — real-corpus acceptance measurement
 
-These three scripts are the Step 8 acceptance measurement for the PDF converter.
-They are **not** part of `npm run verify` and are not a gate: they need input
-documents that cannot be committed, and a Python interpreter that is not a plugin
-dependency. They exist so the numbers in the task report can be reproduced.
+These scripts are the acceptance measurement for the PDF converter and the
+upload-time preflight. They are **not** part of `npm run verify` and are not a
+gate: they need input documents that cannot be committed, and (for the baseline
+side) a Python interpreter that is not a plugin dependency. They exist so the
+numbers in the task reports can be reproduced.
 
 ## Why the inputs are not in this repository
 
@@ -56,6 +57,47 @@ rm -rf "$TEMP/kb-bakeoff-venv"          # or: Remove-Item -Recurse -Force "$env:
 ```bash
 node scripts/parse-bakeoff/verdict.mjs
 ```
+
+## The two preflight measurement scripts (Task 2)
+
+`preflight-cost.mjs` and `survey-page1.mjs` answer the two questions the
+upload-time preflight's design rests on, and neither can be a gate because
+neither can be answered on a committed fixture.
+
+**How expensive is the probe?** `preflight-cost.mjs` measures wall clock *and the
+longest synchronous stall* — the stall is the number that matters, since a
+`setInterval` cannot fire while synchronous work holds the event loop, so the gap
+between ticks is the longest block an upload would impose on every other request.
+
+```bash
+cd plugin
+node scripts/parse-bakeoff/preflight-cost.mjs [largePdfPath]
+```
+
+It defaults to the committed `simple.pdf` and `encrypted.pdf`; pass a large real
+document for a meaningful comparison. Measured on `gotips.pdf` (18.1 MB, 253
+pages): preflight 246 ms cold / 183 ms warm, longest stall 54 ms, against 524 ms
+for a full conversion — and the full conversion is the *cheap* direction, since
+`convertPdf` is bounded to 20 pages there while the probe is bounded to two.
+
+**Does a document's text always start on page one?** `survey-page1.mjs` counts,
+per document, whether page one carries text and whether the document carries any
+text at all. This is what sets `PREFLIGHT_PAGES`:
+
+```bash
+cd plugin
+node scripts/parse-bakeoff/survey-page1.mjs "E:\project\ebooks-master" "E:\project\ai-agent-book"
+```
+
+**Result as measured (2026-09-23, Task 2):** of eighteen real PDFs, **two (11%)
+carry their first text on page 2** — `go-test.pdf` (76 pages, page 1 empty, 29 of
+its first 30 pages carrying text) and `gotips.pdf` (253 pages, page 1 empty,
+50,038 characters once converted). A page-one-only probe refuses both and tells
+the user to run OCR on a document with a perfectly good text layer. Hence the
+probe samples two pages, and the gate pins the behaviour with the committed
+`coverpage.pdf` fixture. The remaining error direction is deliberate: a document
+whose text begins after page 2 is still refused wrongly, because the alternative
+is unbounded work on the request path.
 
 All three accept `[inputList] [outputDir]` (the Python one adds `[pages]` as a
 third positional); run with `--help`-less positional arguments or read the source.

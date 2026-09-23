@@ -231,27 +231,41 @@ await ops.createCollection({ name: '上传测试', collectionId: collection, des
 }
 
 // ---------------------------------------------------------------------------
-// 5. Formats that need conversion are refused with a remedy
+// 5. Which formats the upload path takes, and what it says when it will not
 // ---------------------------------------------------------------------------
 {
-  const cases = [
-    ['报告.pdf', 'PDF'],
-    ['说明.docx', 'DOCX'],
-    ['数据.csv', 'CSV'],
+  // A converter handles these, so the bytes are stored and the text is produced
+  // later in the build's `parse` stage. The upload must not refuse them for
+  // lacking a *text* form, and must not try to decode them as text either.
+  const converted = [
+    ['报告.pdf', 'pdf'],
+    ['说明.docx', 'docx'],
+    ['数据.csv', 'csv'],
+    ['页面.html', 'html'],
+    ['明细.xlsx', 'xlsx'],
+    ['结构.json', 'json'],
   ]
-  for (const [name, label] of cases) {
-    let message = ''
-    try {
-      await upload(ops, collection, name, Buffer.from('placeholder bytes'))
-    } catch (error) {
-      message = error instanceof Error ? error.message : String(error)
-    }
+  for (const [name, converter] of converted) {
+    const support = extract.extractionSupport(name)
     check(
-      `formats: ${label} is refused with a named remedy`,
-      message.includes('请先') && message.includes(label),
-      message === '' ? 'accepted a format it cannot convert' : message,
+      `formats: ${name} routes to the ${converter} converter`,
+      support.kind === 'converted' && support.converter === converter,
+      `kind=${support.kind} converter=${support.converter}`,
     )
   }
+
+  // Still refused, and still with a remedy: every accepted extension is either
+  // verbatim or converted today, so this checks the *table's* guarantee rather
+  // than a particular format — a future `needs-conversion` entry must name what
+  // the user should do instead of leaving them with a bare rejection.
+  const stuck = documents.ACCEPTED_EXTENSIONS
+    .map(ext => [ext, extract.extractionSupport(`a.${ext}`)])
+    .filter(([, support]) => support.kind === 'needs-conversion')
+  check(
+    'formats: every needs-conversion entry names a remedy',
+    stuck.every(([, support]) => (support.remedy ?? '') !== ''),
+    stuck.map(([ext]) => ext).join(', ') || '(none today)',
+  )
 
   const support = extract.extractionSupport('notes.md')
   check('formats: Markdown is accepted verbatim', support.kind === 'verbatim', `kind=${support.kind}`)

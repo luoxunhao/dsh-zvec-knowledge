@@ -194,4 +194,68 @@ const BODY = 11
   console.log('wrote opaque.pdf')
 }
 
+// ---------------------------------------------------------------------------
+// 6. scanned.pdf — the upload-time refusal's input.
+//
+// It is a *separate* file from `opaque.pdf`, and not a re-use of it, for two
+// reasons that are about what each fixture is evidence for rather than about
+// their bytes:
+//
+// - **Different contract.** `opaque.pdf` belongs to the converter gate, where
+//   the claim is "a document with no text produces an honest empty result". It
+//   is asserted through `convertPdf`, whose envelope, ceilings and failure
+//   reporting are part of that claim. The preflight gate asserts the *upload*
+//   refusal, which never calls the converter — so a later change to `opaque.pdf`
+//   made for the converter's sake would silently change what the upload gate
+//   proves.
+// - **Different shape.** `opaque.pdf` is one page with a rectangle. A scan is an
+//   *image* on a page, and the image is the whole point: a producer that emits
+//   images emits image XObjects, which is what makes the file realistic as a
+//   scanned input rather than merely text-free.
+//
+// The image is drawn, not embedded: pdf-lib has no raster support without a
+// separate PNG/JPEG codec, and every byte of a placeholder bitmap would be
+// committed weight for a fixture whose only required property is the absence of
+// a text layer. The page is A4-ish because that is what a scanner produces.
+// ---------------------------------------------------------------------------
+{
+  const doc = await make((doc, _cjk) => {
+    const page = doc.addPage([595, 842])
+    // "Scanned" image area, standing in for the raster a scanner would place.
+    page.drawRectangle({ x: 40, y: 60, width: 515, height: 720, color: rgb(0.94, 0.94, 0.94) })
+    // A scan's marginal marks: real scans carry these, and they are ink, not text.
+    page.drawRectangle({ x: 52, y: 80, width: 90, height: 6, color: rgb(0.3, 0.3, 0.3) })
+    page.drawRectangle({ x: 52, y: 96, width: 480, height: 6, color: rgb(0.3, 0.3, 0.3) })
+    page.drawRectangle({ x: 52, y: 112, width: 300, height: 6, color: rgb(0.3, 0.3, 0.3) })
+  }, false)
+  writeFileSync(join(OUT, 'scanned.pdf'), await doc.save())
+  console.log('wrote scanned.pdf')
+}
+
+// ---------------------------------------------------------------------------
+// 7. coverpage.pdf — two pages: a text-free cover, then a page of text.
+//
+// This is the case that decides how many pages the preflight may sample before
+// calling a document a scan, and it is not hypothetical: of eighteen real PDFs
+// on this machine, two carry their first text on page 2 (`go-test.pdf` 76 pages,
+// `gotips.pdf` 253 pages and 50,038 characters of converted text). A probe that
+// trusts page one alone refuses both and tells the user to run OCR on a document
+// with a perfect text layer.
+//
+// Latin only, on purpose: it is a control for *page sampling*, not for the CJK
+// path, and embedding the font would cost another 11.4 MB for a fixture whose
+// subject is which page gets read.
+// ---------------------------------------------------------------------------
+{
+  const doc = await make((doc, _cjk, latin) => {
+    const cover = doc.addPage([420, 300])
+    cover.drawRectangle({ x: 40, y: 40, width: 340, height: 220, color: rgb(0.9, 0.9, 0.9) })
+    const body = doc.addPage([420, 300])
+    body.drawText('Page Two Heading', { x: 40, y: 250, size: H1, font: latin })
+    body.drawText('The text of this document begins on its second page.', { x: 40, y: 210, size: BODY, font: latin })
+  }, false)
+  writeFileSync(join(OUT, 'coverpage.pdf'), await doc.save())
+  console.log('wrote coverpage.pdf')
+}
+
 console.log(`\nfixtures written to ${OUT}`)

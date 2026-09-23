@@ -589,7 +589,7 @@ export class KnowledgeOperations {
     const reason = validateUpload(name, declaredBytes)
     if (reason !== null) throw new Error(reason)
     const support = extractionSupport(name)
-    if (support.kind !== 'verbatim') {
+    if (support.kind === 'needs-conversion' || support.kind === 'unsupported') {
       // Named precisely, with the remedy: this is the difference between a user
       // converting the file and a user concluding the plugin is broken.
       throw new Error(support.remedy ?? `无法处理 .${extensionOf(name)} 格式的文件`)
@@ -619,22 +619,41 @@ export class KnowledgeOperations {
       throw new Error(`文件为空，没有可索引的内容（可接受 1 B 至 ${MAX_UPLOAD_LABEL}）`)
     }
 
-    let text: string
-    try {
-      text = extractVerbatim(target)
-    } catch (error) {
-      // The original is unreadable or not text; nothing was published, so removing
-      // it keeps the collection free of a document that can never be built.
-      rmSync(target, { force: true })
-      throw new Error(`无法读取文件内容：${error instanceof Error ? error.message : String(error)}`)
+    // The text exists at upload only for a verbatim format. A converted one has
+    // no text until the build's `parse` stage runs, so asking for it here would
+    // refuse every PDF and DOCX — and *not* asking is what `text: ''` on the
+    // record means, which is why that is distinct from a document that parsed to
+    // nothing (that one is `failed` with an error).
+    let text = ''
+    if (support.kind === 'verbatim') {
+      try {
+        text = extractVerbatim(target)
+      } catch (error) {
+        // The original is unreadable or not text; nothing was published, so removing
+        // it keeps the collection free of a document that can never be built.
+        rmSync(target, { force: true })
+        throw new Error(`无法读取文件内容：${error instanceof Error ? error.message : String(error)}`)
+      }
+      if (text.trim() === '') {
+        rmSync(target, { force: true })
+        throw new Error('文档没有可索引的文本内容（空白文件或仅有 BOM）')
+      }
     }
-    if (text.trim() === '') {
-      rmSync(target, { force: true })
-      throw new Error('文档没有可索引的文本内容（空白文件或仅有 BOM）')
+
+    // Cheap, and deliberately *after* the write: a probe that needs the bytes has
+    // to see them, and the refusal still costs no record. What it must not be is
+    // a parse — see `pdfPreflight`, which reads at most two pages.
+    if (support.preflight) {
+      const probe = await support.preflight(target)
+      if (!probe.ok) {
+        rmSync(target, { force: true })
+        throw new Error(probe.remedy)
+      }
     }
 
     // Admission is measured against what will actually occupy the store — the
-    // retained original plus its decoded text — because both are written.
+    // retained original plus its decoded text — because both are written. A
+    // converted document's text is admitted when the build produces it.
     const footprint = written.bytes + Buffer.byteLength(text, 'utf8')
     const admission = admit(root, self.quota, footprint, '上传该文档')
     if (!admission.allowed) {
@@ -653,6 +672,11 @@ export class KnowledgeOperations {
       uploadedAt: new Date().toISOString(),
       builtAt: null,
     }
+    // Recorded at upload rather than at build: the converter is a property of the
+    // *format*, known the moment the extension is, and the build needs it to know
+    // which converter to run. Recording it later would leave the parse stage
+    // guessing, and would make the record unable to say how its text was made.
+    if (support.converter !== undefined) record.converter = support.converter
     appendDocument(root, collectionId, record)
     return {
       id: record.id, name: record.name, bytes: record.bytes, ext: record.ext,
