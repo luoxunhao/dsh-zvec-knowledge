@@ -33,6 +33,8 @@ import { gradeMarkdown, type StructureLevel } from './parse/grade.ts'
 import { convertPdf, type ParseOptions, type ParseResult } from './parse/pdf.ts'
 import { convertHtml } from './parse/html.ts'
 import { convertDocx } from './parse/docx.ts'
+import { convertXlsx, convertCsv } from './parse/tabular.ts'
+import { convertJson } from './parse/json.ts'
 import { admit, type Quota } from './quota.ts'
 import type { ConverterId } from './extract.ts'
 
@@ -707,11 +709,17 @@ async function convertOne(
       return convertHtml(source.file, options)
     case 'docx':
       return convertDocx(source.file, options)
+    case 'xlsx':
+      return convertXlsx(source.file, options)
+    case 'csv':
+      return convertCsv(source.file, options)
+    case 'json':
+      return convertJson(source.file, options)
     default:
-      // xlsx / csv / json are declared by `extract.ts` and have no
-      // implementation yet. Returning an empty success here would be the worst
-      // available outcome: the build reports the document as parsed, indexes no
-      // text for it, and nothing says why.
+      // Every id in `ConverterId` now has a case, so this arm is unreachable
+      // today. It stays because `ConverterId` is an open gate: a format added
+      // to `extract.ts` without a converter must fail by name rather than
+      // produce an empty success.
       return {
         text: '',
         structure: 'flat-text',

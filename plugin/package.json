@@ -81,6 +81,7 @@
     "verify:parse-preflight": "node scripts/verify-parse-preflight.mjs",
     "verify:parse-build": "node scripts/verify-parse-build.mjs",
     "verify:parse-docx": "node scripts/verify-parse-docx.mjs",
+    "verify:parse-tabular": "node scripts/verify-parse-tabular.mjs",
     "verify:parse-html": "node scripts/verify-parse-html.mjs",
     "smoke:zvec": "node scripts/zvec-smoke.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json --noEmit",
@@ -98,6 +99,8 @@
     "mammoth": "1.12.3",
     "mdast-util-gfm-table": "2.0.0",
     "mdast-util-to-markdown": "2.1.2",
+    "papaparse": "^5.7.0",
+    "read-excel-file": "^9.3.10",
     "unpdf": "^1.8.1"
   },
   "peerDependencies": {
@@ -130,6 +133,7 @@
     "@deepseek-ai/dsh-tools": "0.1.5-rc.1",
     "@deepseek-ai/schemastery": "^3.18.2",
     "@types/node": "^24.13.3",
+    "@types/papaparse": "^5.5.2",
     "@types/react": "~18.3.1",
     "fontkit": "^1.8.1",
     "lightningcss": "^1.33.0",
