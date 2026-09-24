@@ -1000,6 +1000,35 @@ export class KnowledgeOperations {
    *   matches what the stored chunks were cut with, and reports that in the log.
    * @returns the launch outcome; `ok` means "started", not "finished".
    */
+  /**
+   * Re-parse every document from its stored original and rebuild the index.
+   *
+   * This is the C9 promise made good: originals are kept byte-for-byte precisely
+   * so the corpus can be re-derived when a converter improves, and this method is
+   * where that happens. It is a deliberate full build — every converted document
+   * is re-read and re-judged, including ones that previously succeeded — wrapped
+   * in one named operation so callers (the panel's reparse action, a bridge
+   * method) cannot accidentally mean "incremental" here.
+   *
+   * Cost note: this re-embeds the whole corpus. That is the price of the
+   * guarantee, and the reason it exists as an explicit action rather than
+   * something a routine build silently does.
+   * @param collectionId - collection identifier.
+   * @param strategy - the chunking and index configuration to rebuild with.
+   * @param handlers - progress and log handlers, as for a normal build.
+   * @returns the underlying full build's result.
+   */
+  async reparseAll(
+    collectionId: string,
+    strategy: { chunking: ChunkingConfig, index: IndexConfig },
+    handlers: {
+      onProgress: (progress: BuildProgress) => void
+      onLog: (line: BuildLogLine) => void
+    },
+  ): Promise<{ ok: boolean, started: boolean, chunks: number, error?: string }> {
+    return this.buildIndex(collectionId, strategy, handlers, 'full')
+  }
+
   async buildIndex(
     collectionId: string,
     strategy: { chunking: ChunkingConfig, index: IndexConfig },

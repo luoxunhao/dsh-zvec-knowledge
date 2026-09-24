@@ -52,6 +52,47 @@ DSH 的 skill 服务来自一个 opt-in 插件，没有它的 profile 必须照�
 | `dsh_kb_search` 工具与 RAG 问答 | 已落地（KB-08、KB-09） |
 | 引用可点击 → 右侧栏原文阅读（`sidebar.right.pane.tab`） | 已落地（KB-13，27 项验收 + 43 项客户端链路全绿） |
 | 随包分发并向宿主注册两份 RAG Skill（懒绑 `skills`，附只读快照的诊断脚本） | 已落地（`verify:skill`） |
+| **文档解析**：PDF / DOCX / HTML / XLSX / CSV / JSON 从「上传即拒」变为可索引 | 已落地（`verify:parse-*` 九个门禁，225+ 项断言；见「文档解析」一节） |
+| 上传期廉价预检：扫描件与加密 PDF 上传即拒并给可执行 remedy | 已落地（`verify:parse-preflight`，40 项） |
+| 全库重算入口（`reparseAll`）：原件字节级保留的兑现 | 已落地（`verify:parse-reparse`） |
+
+## 文档解析
+
+**把文档变成可检索的知识**这一承诺，在解析落地后才对真实语料成立：真实领域文档绝大多数是
+PDF 与 DOCX，此前只有 Markdown/TXT 能入库。现在六种格式在上传后被接受、在构建的
+`parse` 阶段转换为带 ATX 标题与管道表的 Markdown，切分器据此建立章节路径。
+
+- **产物必须过五条判据**：ATX 标题（`#`–`######`）、管道表（表头 + 分隔行）、围栏代码块、
+  无 `\r`、无结构时如实记 `flat-text`。判据由 `gradeMarkdown` 可执行地测量，不是文档描述。
+- **结构保真度三态**：`structured`（结构来自文档自身的标签树）/ `inferred`（转换器推断恢复，
+  如 PDF 字号聚类）/ `flat-text`（无标题存活，标题式切分退化为单节）。推断产物**永不**报
+  `structured`——文档列表如实显示这一判定，检索质量差时用户看得到原因。
+- **PDF**：`unpdf`（2.04 MB，零依赖）做文本抽取；行重建（页面 → y → x 排序，页号必须在
+  run 上携带——否则多页文档的行会按 y 交错成词沙拉）；tagged PDF 的结构树优先；
+  无标签时字号分布推断标题。真机 bake-off：316 页中文书标题恢复 105.6%、汉字覆盖 100%；
+  **已知限制**：密集多块速查表（如 hermes cheat sheet）需要块分割，当前判 `inferred` 诚实降级。
+- **DOCX**：mammoth 产出 HTML 走共享主干。styleMap 从 `word/styles.xml` **推导**
+  （`w:outlineLvl` 优先——mammoth 完全无视它；名字模式兜底）并关闭默认映射
+  （实测优先级不一致；推导映射在真机 Word 文件上覆盖同样标题）。风险在 styleId 而非显示语言：
+  非 Word 生成器的 `styleId="1"` 是默认映射会静默丢标题的情形，推导映射专为此设计。
+- **HTML**：unified 直用（`hast-util-from-html` → `to-mdast` → `to-markdown` + GFM 表扩展），
+  因为它的默认值**就是**切分器要读的格式（ATX + 强制围栏），忘配某项不会静默降级；
+  `turndown` 的三个默认值全反。HTML 注释、`javascript:`/`data:` 目标被剥除——
+  产物会被引用，构建工具的 `<!-- TODO -->` 不应成为可检索内容。
+- **上传期预检（仅 PDF）**：打开文档、读至多 2 页、数文本运行。扫描件（无文本层）与加密
+  PDF 在上传即拒，remedy 明说本插件不含 OCR/需导出无口令副本；打开失败与扫描件是两个
+  不同分支、两套文案。预检不解析全文（32 MiB 全文抽取不能压在请求路径上）。
+- **单篇失败不拖垮整场构建**：每篇转换包在自己的守卫里，失败记在该文档上并显示原因；
+  只有系统性错误（存储不可写、配额）才让构建整体失败。
+- **converter/structure 变更强制全量重建**：新旧解析产物混排会让 KB-13 的行号引用漂移。
+  `SnapshotMeta.parser` 在发布时记录，`incrementalViability` 与之比对。
+- **全库重算**：`reparseAll`（bridge `reparseAll` 方法）以显式 full 构建重读并重判每篇
+  已转换文档——这是「原件字节级保留、派生文本可重算」的兑现；换解析器后无需重新上传。
+- **已知限制**：扫描件 OCR 不做（无可用纯 JS 路线，`tesseract.js` 违反免安装摩擦约束），
+  上传即拒并给离线 OCR 建议；密集多块版面 PDF 以 `inferred` 降级；cmaps/标准字体经
+  devDependency `pdfjs-dist` 解析，生产安装缺失时失败**可归因**（`checkAssets`）但长尾文档
+  可能抽不出文本——拉丁对照 fixture 结构上无法发现该类问题，已如实记录。
+
 
 ## 引用可点击：右侧栏原文阅读（KB-13）
 
@@ -105,10 +146,20 @@ allowBuilds:
 npm install
 npm run build        # 生成令牌 → 双 program tsc → tsdown 客户端打包
 npm run typecheck    # host / client 两个 program，均需干净
-npm run verify       # 全链：31 条命令串行 `&&`（令牌同步 / manifest / 组件 / 对比度 / KB-10 /
+npm run verify       # 全链：40 条命令串行 `&&`（令牌同步 / manifest / 组件 / 对比度 / KB-10 /
                      # KB-04…KB-08 / 嵌入 / 配额 / 槽位 / 引用 / 规格 / 加载安全 / 桥接 /
-                     # 构建作业 / 增量 / 策略证据 / 检索设置 / 发现 / 检索页 / 切分 / 客户端接线 /
-                     # 回归 / 布局度量 / 上传 / 走查）；需先 `npm run build`，全链不需外网与 API key
+                     # 构建作业 / 增量 / 策略证据 / 检索设置 / 发现 / 检索页 / 切分 /
+                     # **解析九门禁** / 客户端接线 / 回归 / 布局度量 / 上传 / 走查）；
+                     # 需先 `npm run build`，全链不需外网与 API key
+npm run verify:parse-grade     # 结构判据：structured/inferred/flat-text 的可执行测量（12 项）
+npm run verify:parse-pdf       # PDF 转换：行重建 / 结构推断 / 取消与超时 / 资源上限（17 项）
+npm run verify:parse-html      # HTML 主干：gfm 表 / ATX / 围栏 / 方案过滤 / 注释剥除（53 项）
+npm run verify:parse-docx      # DOCX：推导式 styleMap / outlineLvl / 警告计入判定（14 项）
+npm run verify:parse-tabular   # XLSX/CSV/JSON：管道表 / 围栏与键路径 / 诚实降级（22 项）
+npm run verify:parse-build     # parse 阶段：单篇失败不拖垮 / 全量可恢复 / 配额两段式（67 项）
+npm run verify:parse-preflight # 上传预检：扫描件与加密 PDF 上传即拒（40 项）
+npm run verify:parse-ui        # 文档列表：结构徽标 / 失败原因 / 三清单一致（13 项）
+npm run verify:parse-reparse   # 全库重算：恢复 / 身份保持 / 原件不消费（5 项）
 npm run verify:kb10  # 仅跑 KB-10 持久化 / 隔离 / no-clobber / 崩溃恢复 / 句柄释放（53 项）
 npm run verify:citation  # 引用链路：渲染形态 → 解析 → 地址 → 开页签，逐环断言（27 项）
 node scripts/probe-citation-live.mjs  # 用真实知识库数据跑一遍 readCitation 窗口与边界
@@ -199,6 +250,15 @@ npm run smoke:zvec   # 探测本机 zvec 绑定能力与分数语义
 
 ## 已知的规范与实现缺口
 
+- **`verify:kb04kb05` 有一条既有失败，与本分支无关**：`markup: shell renders six nav buttons`
+  断言要求渲染外壳含 `RAG 问答` 导航项，但 `AppShell.tsx` 依 KB-09 的范围修订**有意**移除了它
+  （RAG 问答在 dsh 会话里，第二个问答入口没有内容）。该门禁编码了被范围修订取代的期望，
+  按现状永远无法通过；处置（删断言 vs 恢复导航项）待单独裁决，本分支不越权修改。
+  因此 `npm run verify` 全链以这一条 FAIL 收尾，其余全部通过。
+- **`addDocumentStream` 的配额重复计数（既有缺陷，点名跟进）**：`admit` 在
+  `writeFileStreamed` 把原件写入**之后**测量，导致正在上传的原件被计两次
+  （实测：965 B 的上传按 2462 B 计 admission）。方向是**偏严**而非偏松，不会放行超额状态；
+  修复需改每次上传的配额算法，须自带门禁与评审，不在解析分支内顺手改。
 - 设计画板中的深色空态 / 加载 / 错误态尚未交付，KB-11 的对比度验收缺一轮深色样本。
 - 浅色五态描边为派生值，见上。
 - 集合配额：**默认无上限**（`quota.bytes: null`），因为规范未给数值、该数值属业务侧决定。
