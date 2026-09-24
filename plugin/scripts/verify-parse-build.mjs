@@ -445,8 +445,17 @@ try {
   const docxDoc = (await ops.listDocuments('kb_prod_3a7e'))[0]
 
   check(
+    // The converter is real since Task 5: the bogus bytes now reach mammoth and
+    // come back as `DOCX 解析失败：Corrupted zip: …`, so the case no longer tests
+    // the unimplemented arm — it tests that a corrupt DOCX fails *by name*. The
+    // match is case-insensitive because the converter names its format in
+    // uppercase (`DOCX 解析失败`) while this assertion predates it in lowercase.
+    // The unimplemented arm itself (xlsx/csv/json) is still pinned by the
+    // `default` branch of `convertOne` and by `verify:parse-preflight`'s list
+    // agreement; a dedicated unimplemented-format case returns with Task 6's
+    // gate, which can stage a format no converter will ever claim.
     'unimplemented converter: the document fails rather than silently indexing nothing',
-    docxDoc?.status === 'failed' && /docx/.test(docxDoc?.error ?? ''),
+    docxDoc?.status === 'failed' && /docx/i.test(docxDoc?.error ?? ''),
     `status=${docxDoc?.status} error=${docxDoc?.error ?? '(none)'}`,
   )
   check(

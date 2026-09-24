@@ -290,11 +290,49 @@ export async function convertHtml(file: string, opts: ParseOptions): Promise<Par
 
     const html = readFileSync(file, 'utf8')
 
-    // Checked between the read and the conversion, because both can be the long
-    // pole: a large file on disk, and a pathological nesting depth in the parser
-    // (the design work's HTML DOM bound, §5.4). A cancellation noticed only at
-    // the end would report a successful conversion of a document the caller
-    // asked to stop converting.
+    return await convertHtmlText(html, opts, 'HTML', started, deadline)
+  } catch (error) {
+    if (opts.signal?.aborted || (error instanceof Error && error.name === 'AbortError')) {
+      return empty('已取消')
+    }
+    const message = error instanceof Error ? error.message : String(error)
+    return {
+      text: '',
+      structure: 'flat-text',
+      truncated: false,
+      failed: true,
+      error: `HTML 解析失败：${message}`,
+    }
+  }
+}
+
+/**
+ * Convert an in-memory HTML string — the shared trunk's string entry.
+ *
+ * Everything after "bytes to HTML" lives here so that there is exactly one copy
+ * of the failure-verdict logic: the empty-product failure, the timeout result,
+ * the abort checks and the catch-all. `convertHtml` (file) and `convertDocx`
+ * (mammoth's HTML) are both thin callers; a second implementation of any of
+ * those verdicts would let the two paths drift, which is how a converter ends
+ * up reporting a success the other one would have refused.
+ *
+ * @param html - the HTML text to convert.
+ * @param opts - the resource envelope, supplied by config.
+ * @param sourceLabel - format name for error prefixes, e.g. `'HTML'` / `'DOCX'`.
+ * @param started - when the caller's work began, so the deadline covers the
+ *   caller's own I/O and not just this function's parsing.
+ * @param deadline - the absolute wall-clock instant after which the product
+ *   cannot be claimed complete.
+ * @returns the converted Markdown and its verdict.
+ */
+export async function convertHtmlText(
+  html: string,
+  opts: ParseOptions,
+  sourceLabel: string,
+  started: number,
+  deadline: number,
+): Promise<ParseResult> {
+  try {
     if (opts.signal?.aborted) return empty('已取消')
 
     const raw = htmlToMarkdown(html)
@@ -306,7 +344,7 @@ export async function convertHtml(file: string, opts: ParseOptions): Promise<Par
         structure: 'flat-text',
         truncated: false,
         failed: true,
-        error: 'HTML 文件中没有可索引的文本内容（没有正文元素，或正文为空）。'
+        error: `${sourceLabel} 文件中没有可索引的文本内容（没有正文元素，或正文为空）。`
           + '请确认文件不是只含脚本/样式的页面，或改为上传 Markdown。',
       }
     }
@@ -330,7 +368,7 @@ export async function convertHtml(file: string, opts: ParseOptions): Promise<Par
       structure: 'flat-text',
       truncated: false,
       failed: true,
-      error: `HTML 解析失败：${message}`,
+      error: `${sourceLabel} 解析失败：${message}`,
     }
   }
 }

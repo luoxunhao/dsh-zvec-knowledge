@@ -109,7 +109,14 @@ async function writeFixture(name, stylesXml, bodyXml, image = null) {
     + '</Relationships>')
   zip.file('word/document.xml',
     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-    + '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+    // `xmlns:r` is load-bearing on the image fixture: `w:drawing`'s
+    // `<a:blip r:embed="…">` references a relationship through this namespace,
+    // and a document that does not declare it leaves mammoth unable to resolve
+    // the blip at all ("Could not find image file for a:blip element") — the
+    // image then vanishes for the wrong reason, and a no-base64 assertion would
+    // test a broken relationship instead of the converter's image handling.
+    + '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
+    + ' xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
     + `<w:body>${bodyXml}${SECTION_PROPS}</w:body></w:document>`)
   zip.file('word/styles.xml', stylesXml)
   if (image) {
