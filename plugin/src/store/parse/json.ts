@@ -19,6 +19,7 @@
  */
 
 import { readFileSync } from 'node:fs'
+import { capBytes } from './cap.ts'
 import { gradeMarkdown } from './grade.ts'
 import type { ParseOptions, ParseResult } from './pdf.ts'
 
@@ -181,8 +182,10 @@ function finish(text: string, opts: ParseOptions, started: number, note?: string
       error: note ?? 'JSON 文件中没有可索引的内容。',
     }
   }
-  const truncated = byteLength(text) > opts.maxTextBytes
-  const capped = truncated ? text.slice(0, opts.maxTextBytes) : text
+  // The byte-exact cap shared with pdf/html: an earlier local version tested
+  // bytes but sliced by code units, which measured 2.7× the declared ceiling on
+  // CJK products (the quota is charged in UTF-8 bytes downstream).
+  const { text: capped, truncated } = capBytes(text, opts.maxTextBytes)
   if (Date.now() > started + opts.timeoutMs) {
     return {
       text: capped,

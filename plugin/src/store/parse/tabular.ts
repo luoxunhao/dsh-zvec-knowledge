@@ -17,6 +17,7 @@
 
 import { readFileSync } from 'node:fs'
 import Papa from 'papaparse'
+import { capBytes } from './cap.ts'
 import { gradeMarkdown } from './grade.ts'
 import type { ParseOptions, ParseResult } from './pdf.ts'
 
@@ -76,7 +77,11 @@ function finish(text: string, opts: ParseOptions, started: number): ParseResult 
       error: '表格中没有可索引的内容（没有数据行，或所有单元格为空）。',
     }
   }
-  const { capText, truncated } = capChars(text, opts.maxTextBytes)
+  // The byte-exact cap shared with pdf/html: an earlier local version tested
+  // bytes but sliced by code units, which measured 2.3–2.7× the declared
+  // ceiling on CJK products (the quota is charged in UTF-8 bytes, so an
+  // oversized product here would overdraw the quota charged downstream).
+  const { text: capText, truncated } = capBytes(text, opts.maxTextBytes)
   if (Date.now() > started + opts.timeoutMs) {
     return {
       text: capText,
@@ -87,14 +92,6 @@ function finish(text: string, opts: ParseOptions, started: number): ParseResult 
     }
   }
   return { text: capText, structure: gradeMarkdown(capText), truncated }
-}
-
-/** Cap by characters rather than bytes; the tabular formats are text-first. */
-function capChars(text: string, maxTextBytes: number): { capText: string, truncated: boolean } {
-  if (maxTextBytes <= 0 || Buffer.byteLength(text, 'utf8') <= maxTextBytes) {
-    return { capText: text, truncated: false }
-  }
-  return { capText: text.slice(0, maxTextBytes), truncated: true }
 }
 
 /** The XLSX reader's own row shape: cells arrive as values, not strings. */

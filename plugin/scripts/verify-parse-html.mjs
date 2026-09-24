@@ -439,13 +439,23 @@ try {
   // **The timeout arm.** Every other check in this section passes a comfortable
   // `timeoutMs`, so the `failed` branch for an overrun was asserted by nothing —
   // mutation testing on the sibling defects in this round made the same gap
-  // visible here. A zero ceiling makes the overrun deterministic rather than
-  // timing-dependent: the conversion cannot finish within 0 ms, so the branch has
-  // to be reached. This is the same shape as the PDF gate's timeout assertion.
+  // visible here.
+  //
+  // A zero ceiling does NOT make the overrun deterministic, despite what an
+  // earlier comment here claimed: the whole conversion can finish within the
+  // same millisecond `started` was taken, `Date.now() > deadline` is then false,
+  // and the arm never fires — measured at ~4% of stress runs (the final review's
+  // stress test confirmed the Task-4 reviewer's unreported flake). The arm is
+  // driven deterministically instead, with a genuinely slow conversion: a large
+  // document (many parser nodes) under a 1 ms ceiling cannot possibly finish
+  // before the deadline, so the branch always fires and the check is stable.
   //
   // It must be `failed` with a reason and must NOT be a silent empty success: the
   // build would otherwise record the document as parsed while indexing nothing.
-  const timedOut = await convertHtml(file, { ...opts, timeoutMs: 0 })
+  const slowFile = join(scratch, 'slow.html')
+  const slowBody = Array.from({ length: 2000 }, (_, i) => `<p>段落 ${i}，用于撑大解析树。</p>`).join('')
+  writeFileSync(slowFile, `<h1>超时样本</h1>${slowBody}`)
+  const timedOut = await convertHtml(slowFile, { ...opts, timeoutMs: 1 })
   check(
     'envelope: an overrun is failed with a reason, not a silent empty success',
     timedOut.failed === true && typeof timedOut.error === 'string' && timedOut.error.length > 0,
