@@ -194,15 +194,28 @@ export function triggerControllerOf(
 /**
  * The serialization wrapped around one picked knowledge base.
  *
- * Stated as an instruction with the exact parameter value, not as a bare id: a
- * model reading `kb_agentbook_5eed` still has to infer what it is for, and the
- * parameter name is the part that makes the next tool call correct.
+ * ## Why the shape is `name="value"` rather than a sentence
+ *
+ * This previously read as prose: 「用户指定本次回答使用知识库「X」：调用
+ * dsh_kb_search 时 collection 参数传 "kb_..."」. The id was present, but framed
+ * as background explanation — and a model reading it treated it as context
+ * rather than as the parameter's value, going on to pass the *display name* so
+ * the call failed. Leading with a parameter fragment puts the value where a
+ * parameter value belongs.
+ *
+ * ## Evidence strength — read before relying on this
+ *
+ * This is a **heuristic**. Nothing here can be tested to prove a model will
+ * honour it; model behaviour is outside this repository's verification reach.
+ * It is therefore *not* the fix — the tool's own resolution is, because that
+ * works regardless of what the model does with this text. This function only
+ * lowers the chance of a misread.
  * @param collection - the picked collection's id.
  * @param name - the picked collection's display name.
  * @returns the text the model receives in place of the chip.
  */
 export function serializeKbReference(collection: string, name: string): string {
-  return `（用户指定本次回答使用知识库「${name}」：调用 dsh_kb_search 时 collection 参数传 "${collection}"）`
+  return `collection="${collection}"（知识库「${name}」，用户已通过 @ 指定）`
 }
 
 /**

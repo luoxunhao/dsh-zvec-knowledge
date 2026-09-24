@@ -26,6 +26,7 @@
 
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { KnowledgeOperations } from './operations.ts'
+import { resolveCollection } from './resolve-collection.ts'
 import { KB_SEARCH_TOOL } from '../shared/contract.ts'
 
 /**
@@ -170,7 +171,7 @@ export interface ToolOutput {
   /** Whether the search itself succeeded. A false value still carries a usable message. */
   ok: boolean
   /** Machine-readable failure kind, absent on success. */
-  reason?: 'empty_result' | 'collection_not_found' | 'invalid_argument' | 'timeout' | 'cancelled' | 'internal_error' | 'discovery_needed'
+  reason?: 'empty_result' | 'collection_not_found' | 'collection_ambiguous' | 'invalid_argument' | 'timeout' | 'cancelled' | 'internal_error' | 'discovery_needed'
   /** One-line summary a model can act on. */
   summary: string
   /** The collection searched, when one was. */
@@ -332,6 +333,73 @@ export function defineKbSearchTool(
       return fail('internal_error', '宿主未提供嵌入模型，无法执行向量检索。')
     }
 
+    // Resolution, after the discovery branch and before any spend.
+    //
+    // A caller reaches here with something it calls a collection, and that
+    // something is frequently the *display name*: the `@` menu inserts a chip
+    // whose serialized sentence names the id, but a model can still pass the
+    // name it read from the surrounding context, and a user who types `@名称`
+    // by hand has nothing else to offer. The id is `<domain>_<hex>` — a string
+    // no one sees — so mapping name to id is the tool's job, not a guess to
+    // delegate.
+    //
+    // Placed here deliberately. It runs **before** `embedQuery`, so a
+    // resolution failure costs no embedding call and no retrieval budget: the
+    // previous behaviour spent a full round trip discovering that the id was
+    // malformed. It also runs after `collection === null` is handled, so the
+    // discovery path above is untouched.
+    let resolved = collection
+    if (operations.discoverCollections !== undefined) {
+      const listed = await operations.discoverCollections()
+      const outcome = resolveCollection(collection, listed)
+      if (outcome.ok) {
+        resolved = outcome.id
+      } else if (outcome.reason === 'ambiguous') {
+        // Refused rather than guessed: a wrong pick returns off-topic citations
+        // without raising anything, which is far more expensive to notice than
+        // one more round trip. Every candidate is listed so the next call can
+        // name one exactly.
+        return {
+          ok: false,
+          reason: 'collection_ambiguous',
+          summary: `「${collection}」匹配到 ${outcome.candidates.length} 个知识库，请从中指定一个：`
+            + outcome.candidates.map(item => `${item.id}（${item.name}）`).join(' / ')
+            + '。检索未执行。',
+          query,
+          mode: 'dense',
+          hits: [],
+          below_floor: 0,
+          fts_only_hits: 0,
+          collections: outcome.candidates.map(item => ({
+            id: item.id, name: item.name, built: item.builtAt !== null && item.builtAt !== undefined,
+          })),
+        }
+      } else if (outcome.reason === 'not_found') {
+        // The correction the old `collection_not_found` dead end lacked: what
+        // exists, so the next call can pick one instead of guessing again.
+        const available = outcome.available.length === 0
+          ? '当前没有任何知识库。'
+          : `当前可用的知识库：${outcome.available.map(item => `${item.id}（${item.name}）`).join(' / ')}。`
+        return {
+          ok: false,
+          reason: 'collection_not_found',
+          summary: `找不到与「${collection}」匹配的知识库。${available}`,
+          query,
+          mode: 'dense',
+          hits: [],
+          below_floor: 0,
+          fts_only_hits: 0,
+          collections: outcome.available.map(item => ({
+            id: item.id, name: item.name, built: item.builtAt !== null && item.builtAt !== undefined,
+          })),
+        }
+      }
+      // `empty` falls through: an empty string reached here only because the
+      // caller passed one explicitly, and the store's own rejection names it
+      // more precisely than a generic message would.
+    }
+    const collectionId = resolved
+
     // Cooperative cancellation plus a hard budget. Observing `exec.signal` is
     // only half the job: an embedding provider that ignores the signal (they
     // mostly take no signal at all) would leave the await pending forever and
@@ -382,13 +450,13 @@ export function defineKbSearchTool(
       // Optional on the operations contract so an older host object — a test
       // double, a tool built before this channel existed — still works with the
       // captured default rather than failing every call.
-      const effective = operations.retrievalSettings?.(collection)
+      const effective = operations.retrievalSettings?.(collectionId)
       const floor = effective?.minScore ?? minScore
       // An explicit `topk` from the caller wins — it is asking for a specific
       // size. Otherwise the collection's configured default applies, falling back
       // to the constant for a host object without the settings channel.
       const topk = Math.min(Math.max(requestedTopk ?? effective?.topk ?? DEFAULT_TOPK, 1), MAX_TOPK)
-      const result = await within(operations.search(collection, query, vector, topk, floor))
+      const result = await within(operations.search(collectionId, query, vector, topk, floor))
       failureMode = result.mode
       const hits: ToolHit[] = result.hits.map(hit => ({
         file: hit.docName,
@@ -402,14 +470,17 @@ export function defineKbSearchTool(
         match_score: Number(hit.matchScore.toFixed(4)),
         band: hit.band,
       }))
-      const summary = renderHits(result.hits, query, collection, result.mode, result.belowFloor)
+      const summary = renderHits(result.hits, query, collectionId, result.mode, result.belowFloor)
       return {
         // An empty result is a successful call that found nothing: `ok` is false
         // so a caller can branch on it, while the summary stays actionable.
         ok: hits.length > 0,
         ...(hits.length > 0 ? {} : { reason: 'empty_result' as const }),
         summary,
-        collection,
+        // The **resolved** id, not what the caller passed: a caller that named
+        // the collection by its display name must be able to see which id that
+        // became, or the correction it just made is invisible to it.
+        collection: collectionId,
         query,
         mode: result.mode,
         hits,
@@ -452,21 +523,24 @@ export function defineKbSearchTool(
       '何时调用：当用户的问题可能由已上传到知识库的文档回答时；或需要在回答前核实事实、给出引用来源时。',
       '必要前置条件：目标知识库必须已上传文档并至少成功构建过一次索引；未构建的知识库没有可检索的快照。',
       'collection 参数：可省略。省略时只有一个已构建的知识库会直接检索它；有多个会返回知识库清单（含 id、名称、构建状态），你从中选一个再次调用。',
-      '入参：query（自然语言查询）、collection（可选，集合标识，形如 kb_prod_2f8a）、topk（可选，返回条数上限；省略时按该知识库配置的检索策略返回）。',
+      'collection 取值：可传**集合标识或知识库名称**，宿主会自动解析（精确标识优先，其次精确名称，再次唯一前缀）。'
+        + '用户以 @ 引用知识库时，直接使用引用中给出的 collection 取值，不要改写、不要翻译成别的写法。',
+      '入参：query（自然语言查询）、collection（可选，集合标识或知识库名称，如 kb_prod_2f8a 或 产品文档）、topk（可选，返回条数上限；省略时按该知识库配置的检索策略返回）。',
       '出参：hits 数组，每项含 file / source_path / line / doc_id / ordinal / char_start / char_end / text / match_score / band；'
         + 'match_score 为 0 到 1 的归一化分数，越大越相关；band 为 strong / relevant / fair / low 四档。'
         + 'source_path 与 line 是可回溯的引用定位（工作区相对路径 + 行号），回答时必须用它们引用来源；'
         + '缺失时退回 file/ordinal/char_start-char_end，并说明该标识无法解析。注意 char_start 是字符偏移，不是行号。'
         + '分数分布整体偏低，fair 档常常就是正确答案，不要因为分数不高就否定命中；但全部命中为 fair 或更低时应说明证据强度有限。'
         + 'fts_only_hits 是仅有全文精确匹配、无向量证据的命中数——这类命中分数固定很低，若查询是专有名词且结果为空，可建议用户降低阈值。',
-      '失败语义：不抛异常。空结果、知识库不存在、参数非法、超时、已取消都会返回 ok=false 与可读的 summary，'
+      '失败语义：不抛异常。空结果、知识库不存在（含无匹配的名称）、名称歧义、参数非法、超时、已取消都会返回 ok=false 与可读的 summary，'
         + '其中空结果同时给出 below_floor（低于阈值被过滤的条数），便于判断是"确实没有"还是"阈值过高"；'
+        + 'collection_not_found 与 collection_ambiguous 都会在 summary 与 collections 字段中列出候选，请直接从候选里指定，不要凭猜测改写；'
         + 'reason 区分 timeout（预算耗尽）与 cancelled（调用方撤回）；discovery_needed 表示需要先指定 collection。',
       '副作用：无。只读取知识库，不写入、不修改任何数据。',
     ].join('\n'),
     parameters: {
       query: { type: 'string', required: true, description: '自然语言查询语句' },
-      collection: { type: 'string', description: '知识库集合标识，形如 kb_prod_2f8a。省略时：只有一个已构建的知识库则直接检索它；有多个则返回清单供你选择' },
+      collection: { type: 'string', description: '知识库集合标识（形如 kb_prod_2f8a）或知识库名称，由宿主解析。用户以 @ 引用知识库时直接使用引用中的取值。省略时：只有一个已构建的知识库则直接检索它；有多个则返回清单供你选择' },
       topk: { type: 'integer', description: `返回条数上限，最大 ${MAX_TOPK}。省略时按该知识库配置的检索策略返回` },
     },
     output: {
