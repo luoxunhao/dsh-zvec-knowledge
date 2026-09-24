@@ -508,11 +508,13 @@ export class KnowledgeOperations {
   /**
    * List a collection's documents.
    * @param collectionId - collection identifier.
-   * @returns documents, newest first.
+   * @returns documents, newest first. `structure` is present once a build's
+   *   parse stage has run on the document.
    */
   async listDocuments(collectionId: string): Promise<{
     id: string, name: string, bytes: number, ext: string,
-    status: 'pending' | 'building' | 'ready' | 'failed', chunks: number | null, error?: string
+    status: 'pending' | 'building' | 'ready' | 'failed', chunks: number | null, error?: string,
+    structure?: 'structured' | 'inferred' | 'flat-text'
   }[]> {
     const root = this.storeRoot
     return listDocuments(root, collectionId)
@@ -525,6 +527,7 @@ export class KnowledgeOperations {
         // `null` passes through unchanged: it is the 待构建 value, not a zero.
         chunks: record.chunks,
         ...(record.error === undefined ? {} : { error: record.error }),
+        ...(record.structure === undefined ? {} : { structure: record.structure }),
       }))
       .sort((left, right) => (right.id > left.id ? 1 : -1))
   }

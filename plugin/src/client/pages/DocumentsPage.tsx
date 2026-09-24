@@ -60,6 +60,8 @@ export interface PageDocument {
   chunks: number | null
   /** Failure reason from the last attempt, when there was one. */
   error?: string
+  /** How much structure the parsed text kept; present once a build parsed it. */
+  structure?: 'structured' | 'inferred' | 'flat-text'
 }
 
 /** Upload transport supplied by the caller. */
@@ -299,6 +301,7 @@ export function DocumentsPage({
       transfer: 'done',
       progress: 1,
       error: document.error,
+      structure: document.structure,
     }))
     // Transfers that already produced a document are dropped: the stored row is
     // the truth, and showing both would double-count a file.

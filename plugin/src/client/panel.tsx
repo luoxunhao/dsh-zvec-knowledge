@@ -202,6 +202,7 @@ function toPageDocument(document: HostDocument): PageDocument {
     status: document.status,
     chunks: document.chunks,
     error: document.error,
+    structure: document.structure,
   }
 }
 

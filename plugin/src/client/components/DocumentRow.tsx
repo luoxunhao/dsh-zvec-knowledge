@@ -50,6 +50,14 @@ export interface DocumentRowData {
   progress: number
   /** Failure reason, shown in the row when `transfer` or `status` is failed. */
   error?: string
+  /**
+   * How much structure the parsed text kept — `structured` (the source's own
+   * tag tree or an unambiguous conversion), `inferred` (recovered by the
+   * converter) or `flat-text` (no heading survived; heading-based chunking
+   * degrades to one section). Present only once the build's parse stage has
+   * run on this document.
+   */
+  structure?: 'structured' | 'inferred' | 'flat-text'
 }
 
 /** Options accepted by {@link DocumentRow}. */
@@ -86,6 +94,13 @@ export function formatSize(bytes: number): string {
  */
 export function formatChunks(chunks: number | null): string {
   return chunks === null ? '待构建' : String(chunks)
+}
+
+/** How the structure verdict reads in the row. */
+const STRUCTURE_LABELS: Record<NonNullable<DocumentRowData['structure']>, string> = {
+  structured: '结构完整',
+  inferred: '结构推断',
+  'flat-text': '无结构',
 }
 
 /**
@@ -134,6 +149,15 @@ export function DocumentRow({ row, onCancel, onRetry, onRemove }: DocumentRowPro
 
       <span className={styles.status}>
         <StatusPill status={row.status} label={row.statusLabel} dense />
+        {/* The structure verdict is why a document may retrieve poorly even when
+            its build "succeeded": a flat-text document has no section path, so
+            heading-based retrieval degrades. Stated here rather than left for
+            the user to infer from weak search results. */}
+        {row.structure !== undefined && !uploading && (
+          <span className={`kb-mono ${styles.structure}`} title="解析后的结构保真度">
+            {STRUCTURE_LABELS[row.structure]}
+          </span>
+        )}
       </span>
 
       <span className={styles.actions}>

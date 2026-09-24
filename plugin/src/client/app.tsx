@@ -70,6 +70,8 @@ export interface HostDocument {
   chunks: number | null
   /** Failure reason, when the last attempt failed. */
   error?: string
+  /** How much structure the parsed text kept; present once a build parsed it. */
+  structure?: 'structured' | 'inferred' | 'flat-text'
 }
 
 /** Data the app needs from the host. */
