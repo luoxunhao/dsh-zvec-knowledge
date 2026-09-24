@@ -1,0 +1,167 @@
+# PDF bake-off — real-corpus acceptance measurement
+
+These scripts are the acceptance measurement for the PDF converter and the
+upload-time preflight. They are **not** part of `npm run verify` and are not a
+gate: they need input documents that cannot be committed, and (for the baseline
+side) a Python interpreter that is not a plugin dependency. They exist so the
+numbers in the task reports can be reproduced.
+
+## Why the inputs are not in this repository
+
+The four source PDFs are third-party Chinese documents whose redistribution
+license has not been verified. Committing them would be a licensing decision
+nobody here is entitled to make, so they stay on the machine that has them and
+are referenced by path. This is the same reasoning that made the committed
+fixtures use a fully-licensed embedded font rather than a borrowed PDF.
+
+Supply an input list as `<name><TAB><absolute path>` per line:
+
+```
+bits_cn.pdf	E:\project\ebooks-master\bits_cn.pdf
+bpftrace_cn.pdf	E:\project\ebooks-master\bpftrace_cn.pdf
+hermes_cli_cheat_sheet_cn.pdf	E:\project\ebooks-master\hermes_cli_cheat_sheet_cn.pdf
+AI-Agents-in-Depth-zh-CN.pdf	E:\project\ai-agent-book\AI-Agents-in-Depth-zh-CN.pdf
+```
+
+The default location is `.workbuddy/tmp/bakeoff-inputs.txt` (gitignored). Output
+goes to `.workbuddy/tmp/` by default — also gitignored, because it is derived
+from documents that are not committed.
+
+## Running it
+
+Build the plugin first; `ours.mjs` imports the compiled output.
+
+```bash
+cd plugin && npm run build
+```
+
+**Our side** — no venv, no network:
+
+```bash
+cd plugin
+BAKEOFF_PAGES=20 node scripts/parse-bakeoff/ours.mjs
+```
+
+**Baseline side** — `pymupdf4llm` in a throwaway venv. Nothing here enters the
+plugin's dependency set, and the venv is deleted afterwards:
+
+```bash
+uv venv "$TEMP/kb-bakeoff-venv"
+uv pip install --python "$TEMP/kb-bakeoff-venv/Scripts/python.exe" pymupdf4llm
+"$TEMP/kb-bakeoff-venv/Scripts/python.exe" scripts/parse-bakeoff/baseline.py
+rm -rf "$TEMP/kb-bakeoff-venv"          # or: Remove-Item -Recurse -Force "$env:TEMP\kb-bakeoff-venv"
+```
+
+**Verdict** — computes the three criteria from the two sides:
+
+```bash
+node scripts/parse-bakeoff/verdict.mjs
+```
+
+## The two preflight measurement scripts (Task 2)
+
+`preflight-cost.mjs` and `survey-page1.mjs` answer the two questions the
+upload-time preflight's design rests on, and neither can be a gate because
+neither can be answered on a committed fixture.
+
+**How expensive is the probe?** `preflight-cost.mjs` measures wall clock *and the
+longest synchronous stall* — the stall is the number that matters, since a
+`setInterval` cannot fire while synchronous work holds the event loop, so the gap
+between ticks is the longest block an upload would impose on every other request.
+
+```bash
+cd plugin
+node scripts/parse-bakeoff/preflight-cost.mjs [largePdfPath]
+```
+
+It defaults to the committed `simple.pdf` and `encrypted.pdf`; pass a large real
+document for a meaningful comparison. Measured on `gotips.pdf` (18.1 MB, 253
+pages): preflight 246 ms cold / 183 ms warm, longest stall 54 ms, against 524 ms
+for a full conversion — and the full conversion is the *cheap* direction, since
+`convertPdf` is bounded to 20 pages there while the probe is bounded to two.
+
+**Does a document's text always start on page one?** `survey-page1.mjs` counts,
+per document, whether page one carries text and whether the document carries any
+text at all. This is what sets `PREFLIGHT_PAGES`:
+
+```bash
+cd plugin
+node scripts/parse-bakeoff/survey-page1.mjs "E:\project\ebooks-master" "E:\project\ai-agent-book"
+```
+
+**Result as measured (2026-09-23, Task 2):** of eighteen real PDFs, **two (11%)
+carry their first text on page 2** — `go-test.pdf` (76 pages, page 1 empty, 29 of
+its first 30 pages carrying text) and `gotips.pdf` (253 pages, page 1 empty,
+50,038 characters once converted). A page-one-only probe refuses both and tells
+the user to run OCR on a document with a perfectly good text layer. Hence the
+probe samples two pages, and the gate pins the behaviour with the committed
+`coverpage.pdf` fixture. The remaining error direction is deliberate: a document
+whose text begins after page 2 is still refused wrongly, because the alternative
+is unbounded work on the request path.
+
+All three accept `[inputList] [outputDir]` (the Python one adds `[pages]` as a
+third positional); run with `--help`-less positional arguments or read the source.
+`BAKEOFF_PAGES` / the third argument set the page range, which **must match on
+both sides** to keep the comparison fair.
+
+## Expected output shape
+
+Each side prints one JSON object per document and writes a JSON array plus the
+full Markdown to the output directory:
+
+```
+{"name":"bits_cn.pdf","pages":3,"ms":42,"chars":2763,"hanzi":164,"headings":6,"structure":"inferred","tagged":false,"truncated":false,"failed":false,"error":null}
+```
+
+`verdict.mjs` prints a Markdown table and three verdict lines:
+
+```
+| 文档 | 汉字(我方/基线) | 覆盖率 ours/base | 覆盖率 shared | 标题(我方/基线) | 恢复率 | structure | tagged | 判定 |
+...
+criterion 1 (coverage >= 95%, ours/base):  PASS
+criterion 2 (headings >= 80%):           FAIL
+criterion 3 (zero false structured):     PASS
+OVERALL: FAIL
+```
+
+Files produced, all under the output directory: `bakeoff-ours-<stem>.md`,
+`bakeoff-ours.json`, `bakeoff-base-<stem>.md`, `bakeoff-base.json`,
+`bakeoff-verdict.json`.
+
+## Reading the result
+
+**Both sides count headings identically**: inline `**` emphasis is stripped
+first, because `pymupdf4llm` wraps heading text in bold and counting that
+differently would score formatting rather than structure.
+
+**Two coverage ratios are printed, and only one is the criterion.** The briefed
+criterion is `ours / baseline`; that is the column the verdict uses. The `shared`
+column divides by the larger of the two counts, so it cannot exceed 100% and
+therefore exposes a text loss the briefed ratio would hide. They differ on
+`bits_cn.pdf`, where the baseline decodes the file badly enough to find only 35
+Han characters against our 164 — a case worth seeing rather than averaging away.
+
+**Page range.** The book costs roughly 5 s per 20 pages in the baseline, so both
+sides are bounded to 20 pages. The three short documents are clamped to their own
+length, because `pymupdf4llm` rejects a page list that runs past the end.
+
+## Result as measured (2026-09-23, Task 1)
+
+20 pages on both sides; `pymupdf` 1.28.2.
+
+| document | hanzi ours/base | coverage (ours/base) | headings ours/base | recovery | structure | verdict |
+|---|---|---|---|---|---|---|
+| AI-Agents-in-Depth-zh-CN.pdf | 14669 / 14669 | 100.0% | 19 / 18 | 105.6% | inferred | PASS |
+| bits_cn.pdf | 164 / 35 | **468.6%** | 6 / 5 | 120.0% | inferred | PASS |
+| bpftrace_cn.pdf | 545 / 545 | 100.0% | 15 / 12 | 125.0% | inferred | PASS |
+| hermes_cli_cheat_sheet_cn.pdf | 1863 / 1767 | **105.4%** | 12 / 32 | **37.5%** | inferred | FAIL |
+
+Coverage is the briefed ratio `ours/base`. It exceeds 100% where the baseline
+misses text we recover — `bits_cn` is the extreme case, because the baseline
+mis-decodes that file badly (35 hanzi against our 164). `verdict.mjs` also
+prints a `shared` column (`ours/max(ours,base)`), which is a reference figure
+only and floors at 100% by construction; do not read it as the criterion.
+
+Criterion 1 and criterion 3 pass; criterion 2 fails on the dense multi-block
+cheat sheet, which needs a real block-segmentation stage rather than a threshold.
+See `task-1-report.md` for the diagnosis and the named adapter follow-up.

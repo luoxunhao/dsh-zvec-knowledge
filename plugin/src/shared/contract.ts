@@ -96,6 +96,7 @@ export const KB_API_METHODS = [
   'buildStatus',
   'buildPlan',
   'cancelBuild',
+  'reparseAll',
   'embedQuery',
   'retrieve',
   'readCitation',

@@ -28,8 +28,15 @@ import { UploadDropzone } from '../components/UploadDropzone.tsx'
 import type { StatusKind } from '../components/StatusPill.tsx'
 import styles from './DocumentsPage.module.css'
 
-/** Accepted formats, mirroring the host store's list. */
-export const ACCEPTED_EXTENSIONS = ['md', 'markdown', 'txt', 'pdf', 'docx', 'html', 'htm', 'json', 'csv'] as const
+/**
+ * Accepted formats, mirroring the host store's list.
+ *
+ * One of three copies — the others are `ACCEPTED_EXTENSIONS` in
+ * `store/documents.ts` and `SUPPORT` in `store/extract.ts` — and the upload gate
+ * asserts they agree. This one is what the file picker and the drop zone offer,
+ * so a format missing here is one the UI tells the user it cannot take.
+ */
+export const ACCEPTED_EXTENSIONS = ['md', 'markdown', 'txt', 'pdf', 'docx', 'html', 'htm', 'xlsx', 'json', 'csv'] as const
 
 /** Size ceiling in bytes, mirroring the host store. */
 export const MAX_UPLOAD_BYTES = 32 * 1024 * 1024
@@ -53,6 +60,8 @@ export interface PageDocument {
   chunks: number | null
   /** Failure reason from the last attempt, when there was one. */
   error?: string
+  /** How much structure the parsed text kept; present once a build parsed it. */
+  structure?: 'structured' | 'inferred' | 'flat-text'
 }
 
 /** Upload transport supplied by the caller. */
@@ -292,6 +301,7 @@ export function DocumentsPage({
       transfer: 'done',
       progress: 1,
       error: document.error,
+      structure: document.structure,
     }))
     // Transfers that already produced a document are dropped: the stored row is
     // the truth, and showing both would double-count a file.

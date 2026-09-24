@@ -410,6 +410,23 @@ export async function dispatch(
       return launched
     }
 
+    case 'reparseAll': {
+      // A named, deliberate full rebuild: every converted document is re-read
+      // from its stored original and re-judged. It exists so the panel (and any
+      // future caller) cannot confuse "build again" with "re-derive everything
+      // from the originals" — the second re-embeds the whole corpus, which is
+      // the price of the guarantee that originals can always be re-derived.
+      const launched = await operations.reparseAll(
+        requireString(args.collectionId, 'collectionId'),
+        args.strategy as never,
+        {
+          onProgress: handlers.onProgress ?? (() => {}),
+          onLog: handlers.onLog ?? (() => {}),
+        },
+      )
+      return launched
+    }
+
     case 'buildPlan': {
       // Whether an incremental build is possible, so the page can label the option
       // honestly instead of offering a choice the host will override.

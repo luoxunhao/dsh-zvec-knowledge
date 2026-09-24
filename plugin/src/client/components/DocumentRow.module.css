@@ -102,6 +102,17 @@
 
 .status {
   display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--kb-space-1);
+}
+
+/* The structure verdict sits under the status pill: secondary information about
+   retrieval quality, not a second lifecycle state, so it is quieter than the
+   pill — mono, small, and the muted text colour rather than a status colour. */
+.structure {
+  font-size: var(--kb-font-size-xs);
+  color: var(--kb-text-muted);
 }
 
 .actions {

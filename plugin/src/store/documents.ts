@@ -26,6 +26,7 @@ import { existsSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { collectionDir } from './paths.ts'
 import { appendJsonl, readJsonl, writeFileAtomic } from './atomic.ts'
+import type { StructureLevel } from './parse/grade.ts'
 
 /** Lifecycle status of a document, mirroring the spec's state vocabulary. */
 export type DocumentStatus = 'pending' | 'building' | 'ready' | 'failed'
@@ -59,6 +60,24 @@ export interface DocumentRecord {
    * known. See the module note.
    */
   chunks: number | null
+  /**
+   * How much structure the converted text kept; absent until parsed.
+   *
+   * Absent rather than defaulted: a record written before parsing existed has no
+   * answer, and writing `flat-text` for it would claim something about a document
+   * nobody has graded yet.
+   */
+  structure?: StructureLevel
+  /** When the derived text was last produced from the original. */
+  parsedAt?: string
+  /**
+   * Which converter produced `text`; a change forces a full rebuild.
+   *
+   * Recorded because the derived text is recomputable from the stored original:
+   * when a converter is improved, every document naming the old one can be
+   * reprocessed instead of re-uploaded.
+   */
+  converter?: string
   /** Upload time, ISO-8601. */
   uploadedAt: string
   /** Last build time, ISO-8601, or `null`. */
@@ -70,8 +89,18 @@ export interface DocumentRecord {
 /** File name of a collection's document log. */
 export const DOCUMENTS_FILE = 'documents.jsonl'
 
-/** Accepted upload formats, with the extension each maps to. */
-export const ACCEPTED_EXTENSIONS = ['md', 'markdown', 'txt', 'pdf', 'docx', 'html', 'htm', 'json', 'csv'] as const
+/**
+ * Accepted upload formats, with the extension each maps to.
+ *
+ * Kept in sync with `SUPPORT` in `store/extract.ts` and with
+ * `ACCEPTED_EXTENSIONS` in `client/pages/DocumentsPage.tsx`; the upload gate
+ * asserts all three agree. They are three copies by necessity — this one bounds
+ * `validateUpload`, the second decides how the bytes are handled, and the third
+ * fills the file picker's `accept` attribute in the browser — so a format added
+ * to one and missed in another is an upload refused for no stated reason, or
+ * accepted and then quietly unconvertible.
+ */
+export const ACCEPTED_EXTENSIONS = ['md', 'markdown', 'txt', 'pdf', 'docx', 'html', 'htm', 'xlsx', 'json', 'csv'] as const
 
 /** Maximum accepted upload size, in bytes. */
 export const MAX_UPLOAD_BYTES = 32 * 1024 * 1024
